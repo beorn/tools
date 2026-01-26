@@ -1,12 +1,14 @@
 ---
 description: Batch search, select, and transform code. Use for mass refactoring with interactive selection.
-argument-hint: [rename|search|apply] <pattern> [replacement] [--glob <glob>]
+argument-hint: [rename|search|apply] <pattern> [replacement] [--glob <glob>] [--mode text|ast]
 allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion
 ---
 
 # /batch - Batch Code Transformation
 
 Intelligent batch refactoring with confidence-based auto-apply. Claude reviews all matches, auto-applies high-confidence changes, and asks about uncertain ones.
+
+**Keywords**: batch rename, mass refactor, find and replace, bulk edit, rename across files, search and replace, codemod, ast-grep
 
 ## Main Command: `/batch rename`
 
@@ -16,7 +18,7 @@ Intelligent batch refactoring with confidence-based auto-apply. Claude reviews a
 
 ### Workflow
 
-1. **SEARCH**: Find all matches using ast-grep
+1. **SEARCH**: Find all matches using ast-grep (code) or Grep (text)
 2. **ANALYZE**: Claude reviews each match and scores confidence
 3. **AUTO-CATEGORIZE**:
    - HIGH confidence → auto-apply
@@ -24,7 +26,7 @@ Intelligent batch refactoring with confidence-based auto-apply. Claude reviews a
    - LOW confidence → skip with explanation
 4. **REVIEW**: Present uncertain matches to user via AskUserQuestion
 5. **APPLY**: Execute approved changes
-6. **VERIFY**: Run `bun fix && bun run test:fast`
+6. **VERIFY**: Run project's lint/test commands (e.g., `npm test`, `bun fix`)
 
 ### Confidence Scoring
 
@@ -44,11 +46,19 @@ Intelligent batch refactoring with confidence-based auto-apply. Claude reviews a
 When user invokes `/batch rename "old" "new" --glob "path"`:
 
 ### Step 1: Search
+
+**For code files (.ts, .tsx, .js, .py, etc.)** - use ast-grep:
 ```bash
 ast-grep run -p "old" -l typescript --json=stream path/ 2>/dev/null
 ```
 
-Parse JSON output. Each match has: `file`, `range.start.line`, `range.start.column`, `text`, surrounding context.
+**For text files (.md, .txt, etc.) or with `--mode text`** - use Grep:
+```bash
+# Use the Grep tool instead of bash grep
+Grep({ pattern: "old", path: "path/", output_mode: "content", "-C": 3 })
+```
+
+Parse output. Each match needs: `file`, `line`, `column`, `text`, surrounding context.
 
 ### Step 2: Analyze Each Match
 
@@ -65,6 +75,11 @@ interface Match {
   reason: string
 }
 ```
+
+**Classification rules:**
+- **HIGH**: Function/method call, import statement, type reference, variable declaration
+- **MEDIUM**: String literal, comment, documentation, test description
+- **LOW**: Partial match (substring), different semantic meaning, in archive/vendor
 
 ### Step 3: Report Summary
 
@@ -88,11 +103,13 @@ AskUserQuestion({
   options: [
     { label: "src/foo.ts:45", description: "In string: \"oldName not found\"" },
     { label: "src/bar.ts:120", description: "In comment: // oldName handler" },
-    // ...
+    // ... (max 4 options per question, batch if more)
   ],
   multiSelect: true
 })
 ```
+
+If more than 4 MEDIUM matches, batch into multiple questions or group by file.
 
 ### Step 5: Apply Changes
 
@@ -108,15 +125,16 @@ Edit({
 
 ### Step 6: Verify
 
-```bash
-bun fix && bun run test:fast
-```
+Ask user what verification command to run, or detect from project:
+- **Node.js**: `npm test` or `npm run lint`
+- **Bun**: `bun test` or `bun run lint`
+- **Python**: `pytest` or `ruff check`
 
 Report final summary:
 ```
 Applied 43 changes (38 auto + 5 user-approved)
 Skipped 4 (2 low-confidence + 2 user-rejected)
-Verification: PASSED
+Verification: [PASSED/FAILED]
 ```
 
 ## Other Commands
@@ -126,7 +144,11 @@ Verification: PASSED
 Just search and show matches without making changes:
 
 ```bash
+# AST-aware search
 ast-grep run -p "pattern" -l typescript -C 3 packages/
+
+# Text search (use Grep tool)
+Grep({ pattern: "pattern", path: "packages/", output_mode: "content", "-C": 3 })
 ```
 
 ### `/batch apply --all` - Force Apply All
@@ -137,15 +159,23 @@ Skip confidence analysis and apply all matches (use with caution):
 ast-grep run -p "old" -r "new" -l typescript -U packages/
 ```
 
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--glob <pattern>` | Limit search to files matching glob |
+| `--mode text` | Force text-based search (Grep) even for code files |
+| `--mode ast` | Force AST-based search (ast-grep) |
+
 ## Tools Available
 
 | Tool | Best for | When to use |
 |------|----------|-------------|
-| **ast-grep** | Structural patterns | Most refactoring |
-| **Grep** | Simple text search | Quick exploration |
-| **mcp-refactor-typescript** | Type-safe renames | Complex scoping |
+| **ast-grep** | Structural patterns | Code refactoring (default for .ts/.js/.py) |
+| **Grep** | Text patterns | Markdown, comments, or `--mode text` |
+| **mcp-refactor-typescript** | Type-safe renames | When semantic correctness is critical |
 
-## AST Pattern Syntax
+## AST Pattern Syntax (ast-grep)
 
 | Pattern | Matches |
 |---------|---------|
@@ -153,6 +183,7 @@ ast-grep run -p "old" -r "new" -l typescript -U packages/
 | `$$$ARGS` | Multiple nodes (spread) |
 | `console.log($MSG)` | Function call with one arg |
 | `function $NAME($ARGS) { $BODY }` | Function declaration |
+| `import { $IMPORTS } from "$MOD"` | Import statement |
 
 ## MCP Integration
 
@@ -160,7 +191,7 @@ For semantically-correct renames using TypeScript's language server:
 
 ```
 Use mcp__refactor-typescript__rename_symbol to rename
-"oldFunction" to "newFunction" in packages/km-core/src/index.ts
+"oldFunction" to "newFunction" in src/index.ts
 ```
 
 **Setup** (if MCP not connected):
@@ -172,6 +203,7 @@ claude mcp add --transport stdio --scope project refactor-typescript -- bunx mcp
 ## Important Notes
 
 1. **ast-grep's -i flag doesn't work** in Claude Code (requires TTY)
-2. **Always verify** with `bun fix && bun run test:fast`
+2. **Always verify** with your project's test/lint commands
 3. **Commit atomically** - related changes together
 4. **Check partial matches** - `oldName` might match `myOldNameHelper`
+5. **Tests are truth** - "No refactoring tool guarantees behavior preservation. Your test suite does."
