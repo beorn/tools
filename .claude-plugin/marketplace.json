@@ -8,7 +8,11 @@
       "name": "batch",
       "description": "Batch search, select, and transform code with confidence-based auto-apply",
       "version": "0.1.0",
-      "source": "./plugins/batch"
+      "source": {
+        "source": "github",
+        "repo": "beorn/beorn-claude-tools",
+        "path": "plugins/batch"
+      }
     }
   ]
 }
