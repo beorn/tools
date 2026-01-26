@@ -42,7 +42,7 @@ Claude automatically uses the skill — no slash command needed.
 claude plugin marketplace add github:beorn/claude-tools
 
 # Install plugins
-claude plugin install batch@@beorn/claude-tools
+claude plugin install batch@beorn/claude-tools
 ```
 
 ## License
