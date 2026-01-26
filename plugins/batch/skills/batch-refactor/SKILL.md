@@ -110,9 +110,44 @@ Confidence is based on **our concept vs external reference**, not code vs string
 
 If project has ALLOWED_PATTERNS (e.g., check-migration.ts), trust those exclusions.
 
+## Choosing the Right Tool
+
+**CRITICAL for TypeScript**: Choose the right tool based on what you're renaming.
+
+| What you're renaming | Tool | Why |
+|---------------------|------|-----|
+| **TypeScript identifier** (variable, function, type, interface property) | ts-morph | Type-aware, renames ALL references including destructuring |
+| **String literal** in code | ast-grep | Pattern matching, not a symbol |
+| **Comment/doc text** | ast-grep or Edit | Not a symbol |
+| **Import path** | ast-grep | String matching |
+| **Markdown/text** | Edit replace_all | Plain text |
+
+### Why ast-grep Fails for TypeScript Identifiers
+
+ast-grep does AST pattern matching but **doesn't understand TypeScript's type system**:
+
+```typescript
+// ast-grep renames this ✓
+const vaultDir = "/path"
+
+// But MISSES these ✗
+interface TestEnv { vaultDir: string }  // property definition
+({ vaultDir }) => { ... }               // destructuring pattern
+```
+
+**Result**: Broken code with mismatched names and 380+ type errors.
+
+**Rule of thumb**: If it shows up in "Find All References" in your IDE, use ts-morph.
+
 ## Search Tools
 
-**For code files (.ts, .tsx, .js, .py)** - use ast-grep:
+**For TypeScript identifiers** - use ts-morph to find references:
+```bash
+bun run vendor/beorn-claude-tools/plugins/batch/scripts/ts-rename.ts \
+  <file> <line> <symbol> <newName> --dry-run
+```
+
+**For code patterns** - use ast-grep:
 ```bash
 ast-grep run -p "oldName" -l typescript --json=stream packages/ 2>/dev/null
 ```
@@ -124,7 +159,18 @@ Grep({ pattern: "oldName", path: "packages/", output_mode: "content", "-C": 3 })
 
 ## Apply Tools
 
-**For code files** - use ast-grep bulk mode:
+**For TypeScript identifiers** - use ts-morph (in scripts/ts-rename.ts):
+```bash
+# Preview first
+bun run vendor/beorn-claude-tools/plugins/batch/scripts/ts-rename.ts \
+  src/types.ts 42 oldName newName --dry-run
+
+# Then apply
+bun run vendor/beorn-claude-tools/plugins/batch/scripts/ts-rename.ts \
+  src/types.ts 42 oldName newName
+```
+
+**For code patterns** - use ast-grep bulk mode:
 ```bash
 ast-grep run -p "oldName" -r "newName" -l typescript -U packages/
 ```
@@ -141,7 +187,17 @@ Edit({
 
 ## Verify
 
-Run project verification:
+**MANDATORY for TypeScript**: Check types after ANY batch change:
+
+```bash
+# Check for type errors IMMEDIATELY after batch changes
+bun tsc --noEmit  # or: npx tsc --noEmit
+
+# If type errors, STOP and investigate before continuing
+# Partial renames create broken code that tests won't catch
+```
+
+Then run project verification:
 ```bash
 # Bun projects
 bun fix && bun run test:fast
@@ -150,6 +206,7 @@ bun fix && bun run test:fast
 Report summary:
 ```
 Applied 765 changes across 93 files.
+Type check: PASSED (0 errors)
 Verification: PASSED (all tests pass)
 ```
 
@@ -166,9 +223,10 @@ For terminology migrations, default to **apply all**.
 
 | Operation | Tool | File types |
 |-----------|------|------------|
-| Code refactoring | ast-grep -U | .ts, .tsx, .js, .py |
+| **TypeScript identifier rename** | ts-rename.ts (ts-morph) | .ts, .tsx |
+| Code pattern replacement | ast-grep -U | .ts, .tsx, .js, .py |
 | Text search-replace | Edit replace_all | .md, .txt, any text |
-| Type-safe renames | mcp-refactor-typescript | TypeScript |
+| Type-safe renames (MCP) | mcp-refactor-typescript | TypeScript |
 | File renaming | Bash mv | Any (future) |
 
 ## AST Pattern Syntax (ast-grep)
@@ -182,7 +240,9 @@ For terminology migrations, default to **apply all**.
 
 ## Important
 
-1. **Be aggressive** - apply all matches, let tests catch mistakes
-2. **Use bulk mode** - ast-grep -U for code, Edit replace_all for text
-3. **Trust the tests** - "No refactoring tool guarantees behavior preservation. Your test suite does."
-4. **Check for project scripts** - check-migration.ts tells you exactly what to fix
+1. **Choose the right tool** - ts-morph for TS identifiers, ast-grep for patterns
+2. **Always run tsc** - Check types after batch changes, before running tests
+3. **Be aggressive** - apply all matches, let tests catch mistakes
+4. **Use bulk mode** - ts-morph for symbols, ast-grep -U for patterns, Edit replace_all for text
+5. **Trust the tests** - "No refactoring tool guarantees behavior preservation. Your test suite does."
+6. **Check for project scripts** - check-migration.ts tells you exactly what to fix
