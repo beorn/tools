@@ -10,7 +10,7 @@ Use this skill when the user wants to make changes across multiple files:
 - **Code refactoring**: rename functions, variables, types
 - **Text/markdown updates**: change terminology, update docs
 - **File operations**: batch rename files (future)
-- **Terminology migrations**: vault→repo, old API→new API
+- **Terminology migrations**: widget→gadget, old API→new API
 
 **Trigger phrases**:
 - "rename X to Y everywhere"
@@ -41,7 +41,7 @@ The editset workflow provides safe, reviewable batch renames with checksum verif
 
 ```bash
 cd vendor/beorn-claude-tools/plugins/batch
-bun tools/refactor.ts symbols.find --pattern vault
+bun tools/refactor.ts symbols.find --pattern widget
 ```
 
 Output: JSON array of matching symbols with location and reference count.
@@ -49,7 +49,7 @@ Output: JSON array of matching symbols with location and reference count.
 ### 2. Check for Conflicts
 
 ```bash
-bun tools/refactor.ts rename.batch --pattern vault --replace repo --check-conflicts
+bun tools/refactor.ts rename.batch --pattern widget --replace gadget --check-conflicts
 ```
 
 Output: Conflict report showing:
@@ -60,8 +60,8 @@ Output: Conflict report showing:
 
 ```bash
 # Skip conflicting symbols
-bun tools/refactor.ts rename.batch --pattern vault --replace repo \
-  --skip createVault,Vault \
+bun tools/refactor.ts rename.batch --pattern widget --replace gadget \
+  --skip createWidget,Widget \
   --output editset.json
 ```
 
@@ -106,10 +106,10 @@ The tool preserves case during renames:
 
 | Original | Pattern | Replacement | Result |
 |----------|---------|-------------|--------|
-| `vault` | `vault` | `repo` | `repo` |
-| `Vault` | `vault` | `repo` | `Repo` |
-| `VAULT` | `vault` | `repo` | `REPO` |
-| `vaultPath` | `vault` | `repo` | `repoPath` |
+| `widget` | `widget` | `gadget` | `gadget` |
+| `Widget` | `widget` | `gadget` | `Gadget` |
+| `WIDGET` | `widget` | `gadget` | `GADGET` |
+| `widgetPath` | `widget` | `gadget` | `gadgetPath` |
 
 ## Safety Check
 
@@ -145,11 +145,11 @@ Before making changes, gather project context:
 
 | Context | Confidence |
 |---------|------------|
-| Our code (`const vaultRoot`) | HIGH |
-| Our compound identifier (`vaultHelper`) | HIGH |
-| Our error message (`"vault not found"`) | HIGH |
-| External reference (`"Obsidian vault"`) | LOW |
-| URL/path (`vault.example.com`) | LOW |
+| Our code (`const widgetRoot`) | HIGH |
+| Our compound identifier (`widgetHelper`) | HIGH |
+| Our error message (`"widget not found"`) | HIGH |
+| External reference (`"third-party widget"`) | LOW |
+| URL/path (`widget.example.com`) | LOW |
 
 **Default to HIGH** unless clearly external.
 
@@ -159,11 +159,11 @@ ast-grep misses TypeScript-specific patterns:
 
 ```typescript
 // ast-grep renames this ✓
-const vaultDir = "/path"
+const widgetDir = "/path"
 
 // But MISSES these ✗
-interface TestEnv { vaultDir: string }  // property definition
-({ vaultDir }) => { ... }               // destructuring
+interface TestEnv { widgetDir: string }  // property definition
+({ widgetDir }) => { ... }               // destructuring
 ```
 
 **Rule**: If it shows up in "Find All References" in your IDE, use ts-morph.
@@ -175,8 +175,8 @@ For non-code files, use Edit with `replace_all`:
 ```typescript
 Edit({
   file_path: "docs/README.md",
-  old_string: "vault",
-  new_string: "repo",
+  old_string: "widget",
+  new_string: "gadget",
   replace_all: true
 })
 ```

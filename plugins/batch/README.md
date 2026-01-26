@@ -6,7 +6,7 @@ Batch operations across files with confidence-based auto-apply. Claude automatic
 
 - **Code refactoring**: rename functions, variables, types across TypeScript/JavaScript
 - **Text/markdown updates**: change terminology, update documentation
-- **Terminology migrations**: vault→repo, old API→new API
+- **Terminology migrations**: widget→gadget, old API→new API
 - **Pattern matching**: AST-aware search and replace via ast-grep
 
 ## Installation
@@ -24,8 +24,8 @@ claude plugin install batch@beorn-claude-tools
 Just ask naturally - Claude uses the skill automatically:
 
 ```
-"rename createVault to createRepo across the codebase"
-"change all vault mentions to repo in packages/"
+"rename createWidget to createGadget across the codebase"
+"change all widget mentions to gadget in packages/"
 "update the terminology from X to Y in the docs"
 "refactor oldFunction to newFunction everywhere"
 ```
@@ -105,14 +105,14 @@ bun tools/refactor.ts <command> [options]
 ### Example: Batch Rename
 
 ```bash
-# 1. Find all vault* symbols
-bun tools/refactor.ts symbols.find --pattern vault
+# 1. Find all widget* symbols
+bun tools/refactor.ts symbols.find --pattern widget
 
 # 2. Check for conflicts
-bun tools/refactor.ts rename.batch --pattern vault --replace repo --check-conflicts
+bun tools/refactor.ts rename.batch --pattern widget --replace gadget --check-conflicts
 
 # 3. Create editset
-bun tools/refactor.ts rename.batch --pattern vault --replace repo -o editset.json
+bun tools/refactor.ts rename.batch --pattern widget --replace gadget -o editset.json
 
 # 4. Preview changes
 bun tools/refactor.ts editset.apply editset.json --dry-run
@@ -150,7 +150,7 @@ interface Reference {
 }
 
 interface Editset {
-  id: string             // "rename-vault-to-repo-1706000000"
+  id: string             // "rename-widget-to-gadget-1706000000"
   operation: "rename"
   from: string
   to: string
@@ -191,15 +191,15 @@ Arrow function parameters like `({ vaultPath }) => ...` use `ParameterDeclaratio
 
 ### 4. Partial Migration Conflicts
 
-When a codebase is partially migrated (both `vault*` and `repo*` exist), conflict detection may flag many symbols. Use `--skip` to exclude already-migrated areas, or review conflicts manually.
+When a codebase is partially migrated (both `widget*` and `gadget*` exist), conflict detection may flag many symbols. Use `--skip` to exclude already-migrated areas, or review conflicts manually.
 
 ### Case Preservation
 
 Renames preserve case automatically:
-- `vault` → `repo`
-- `Vault` → `Repo`
-- `VAULT` → `REPO`
-- `vaultPath` → `repoPath`
+- `widget` → `gadget`
+- `Widget` → `Gadget`
+- `WIDGET` → `GADGET`
+- `widgetPath` → `gadgetPath`
 
 ---
 
