@@ -16,7 +16,7 @@ Batch operations across files with confidence-based auto-apply. Claude automatic
 claude plugin marketplace add github:beorn/claude-tools
 
 # Install the plugin
-claude plugin install batch@claude-tools
+claude plugin install batch@@beorn/claude-tools
 ```
 
 ## Usage
