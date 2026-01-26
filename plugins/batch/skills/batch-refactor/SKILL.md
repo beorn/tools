@@ -24,12 +24,41 @@ Use this skill when the user wants to make changes across multiple files:
 
 ## Workflow
 
-1. **GATHER CONTEXT**: Read CLAUDE.md, ADRs, docs to understand the project
-2. **SEARCH**: Find all matches using ast-grep (code) or Grep (text)
-3. **ANALYZE**: Group matches, identify external references, assess clarity
-4. **CLARIFY** (if needed): Ask grouped questions, not item-by-item
-5. **APPLY**: Bulk apply with ast-grep -U or Edit replace_all
-6. **VERIFY**: Run project's test/lint commands
+1. **SAFETY CHECK**: Ensure changes can be undone (git status, clean working tree)
+2. **GATHER CONTEXT**: Read CLAUDE.md, ADRs, docs to understand the project
+3. **SEARCH**: Find all matches using ast-grep (code) or Grep (text)
+4. **ANALYZE**: Group matches, identify external references, assess clarity
+5. **CLARIFY** (if needed): Ask grouped questions, not item-by-item
+6. **APPLY**: Bulk apply with ast-grep -U or Edit replace_all
+7. **VERIFY**: Run project's test/lint commands
+
+## Safety Check
+
+**Before making batch changes, ensure they can be undone.**
+
+```bash
+# Check if in git repo
+git rev-parse --is-inside-work-tree 2>/dev/null
+
+# Check for uncommitted changes
+git status --porcelain
+```
+
+| Situation | Action |
+|-----------|--------|
+| Git repo, clean working tree | ✅ Proceed |
+| Git repo, uncommitted changes | ⚠️ Ask user to commit first or stash |
+| Git worktree | ✅ Proceed (isolated by design) |
+| Not a git repo | ⚠️ Warn user: no undo available, confirm before proceeding |
+
+If changes are uncommitted, ask:
+```
+You have uncommitted changes. Batch operations affect many files.
+Options:
+1. Commit current changes first (recommended)
+2. Proceed anyway (can use git checkout to revert)
+3. Cancel
+```
 
 ## Context Gathering
 
