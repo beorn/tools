@@ -20,13 +20,13 @@ Claude Code plugins that make Claude faster and safer at large-scale code change
 **Why it's safer:**
 - **Checksums**: Won't apply edits to files that changed since proposal
 - **Type-aware**: ts-morph follows TypeScript references, not text matches
-- **Conflict detection**: Catches `vault → repo` conflicts before you break the build
+- **Conflict detection**: Catches `widget → gadget` conflicts before you break the build
 - **Dry-run**: Preview all changes before applying
 
 **What it handles:**
 - Symbol renames across entire codebase
-- Terminology migrations (vault→repo, oldAPI→newAPI)
-- Case preservation (vault→repo, Vault→Repo, VAULT→REPO)
+- Terminology migrations (widget→gadget, oldAPI→newAPI)
+- Case preservation (widget→gadget, Widget→Gadget, WIDGET→GADGET)
 - Destructuring patterns, arrow function params, nested scopes
 
 ```

@@ -187,7 +187,7 @@ Object/array destructuring requires special handling. The pattern `const { foo, 
 
 ### 3. Parameter Destructuring
 
-Arrow function parameters like `({ vaultPath }) => ...` use `ParameterDeclaration` nodes, not `VariableDeclaration`. Both must be handled.
+Arrow function parameters like `({ widgetPath }) => ...` use `ParameterDeclaration` nodes, not `VariableDeclaration`. Both must be handled.
 
 ### 4. Partial Migration Conflicts
 

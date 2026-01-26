@@ -79,16 +79,16 @@ Examples:
   refactor.ts symbol.at src/types.ts 42 5
 
   # List references
-  refactor.ts refs.list "src/types.ts:42:5:vault"
+  refactor.ts refs.list "src/types.ts:42:5:widget"
 
-  # Find all vault symbols
-  refactor.ts symbols.find --pattern vault
+  # Find all widget symbols
+  refactor.ts symbols.find --pattern widget
 
   # Check for naming conflicts first
-  refactor.ts rename.batch --pattern vault --replace repo --check-conflicts
+  refactor.ts rename.batch --pattern widget --replace gadget --check-conflicts
 
   # Create batch rename proposal (skipping conflicting symbols)
-  refactor.ts rename.batch --pattern vault --replace repo --skip createVault,Vault --output editset.json
+  refactor.ts rename.batch --pattern widget --replace gadget --skip createWidget,Widget --output editset.json
 
   # Preview apply
   refactor.ts editset.apply editset.json --dry-run

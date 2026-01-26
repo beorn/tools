@@ -33,7 +33,7 @@ export type Edit = z.infer<typeof Edit>
 
 // Complete editset (rename proposal)
 export const Editset = z.object({
-  id: z.string(), // "rename-vault-to-repo-1706000000"
+  id: z.string(), // "rename-widget-to-gadget-1706000000"
   operation: z.literal("rename"),
   symbolKey: z.string().optional(), // for single-symbol renames
   pattern: z.string().optional(), // for batch renames
