@@ -550,8 +550,8 @@ The tool preserves case during renames:
 | Original | Pattern | Replacement | Result |
 |----------|---------|-------------|--------|
 | `widget` | `widget` | `repo` | `repo` |
-| `Vault` | `widget` | `repo` | `Repo` |
-| `VAULT` | `widget` | `repo` | `REPO` |
+| `Repo` | `widget` | `repo` | `Repo` |
+| `REPO` | `widget` | `repo` | `REPO` |
 | `widgetPath` | `widget` | `repo` | `repoPath` |
 | `WidgetConfig.ts` | `widget` | `repo` | `GadgetConfig.ts` |
 
@@ -1131,11 +1131,11 @@ bun tools/refactor.ts rename.batch --pattern createWidget --replace createGadget
 
 ```typescript
 const widget = {}           // lowercase
-const Vault = {}           // PascalCase
-const VAULT_PATH = ""      // SCREAMING_CASE
+const Repo = {}           // PascalCase
+const REPO_PATH = ""      // SCREAMING_CASE
 const widgetConfig = {}     // camelCase compound
-class VaultManager {}      // PascalCase compound
-const VAULT_OPTIONS = {}   // SCREAMING compound
+class RepoManager {}      // PascalCase compound
+const REPO_OPTIONS = {}   // SCREAMING compound
 ```
 
 **Automatic case preservation:**
@@ -1297,10 +1297,10 @@ Before running batch operations, verify your patterns find what you expect:
 
 ```bash
 # Find files containing pattern
-rg -l "useVault" -g "*.ts"
+rg -l "useRepo" -g "*.ts"
 
 # Show matches with line numbers
-rg -n "useVault" -g "*.ts"
+rg -n "useRepo" -g "*.ts"
 
 # Count matches
 rg -c "widget" -g "*.ts" | head -20

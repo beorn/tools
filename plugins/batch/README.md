@@ -188,13 +188,13 @@ Automatically updates references based on file type:
 
 ```bash
 # 1. Find files matching pattern
-bun tools/refactor.ts file.find --pattern vault --replace repo --glob "**/*.ts"
+bun tools/refactor.ts file.find --pattern repo --replace repo --glob "**/*.ts"
 
 # 2. Check for conflicts
-bun tools/refactor.ts file.rename --pattern vault --replace repo --glob "**/*.ts" --check-conflicts
+bun tools/refactor.ts file.rename --pattern repo --replace repo --glob "**/*.ts" --check-conflicts
 
 # 3. Create editset
-bun tools/refactor.ts file.rename --pattern vault --replace repo --glob "**/*.ts" -o file-editset.json
+bun tools/refactor.ts file.rename --pattern repo --replace repo --glob "**/*.ts" -o file-editset.json
 
 # 4. Preview changes
 bun tools/refactor.ts file.apply file-editset.json --dry-run
@@ -266,10 +266,10 @@ bun tools/refactor.ts editset.apply editset.json
 
 ```bash
 # Preview all changes (dry run)
-bun tools/refactor.ts migrate --from vault --to repo --dry-run
+bun tools/refactor.ts migrate --from repo --to repo --dry-run
 
 # Apply all changes: files → symbols → text
-bun tools/refactor.ts migrate --from vault --to repo
+bun tools/refactor.ts migrate --from repo --to repo
 
 # Outputs editsets to .editsets/ directory:
 #   .editsets/01-file-renames.json
@@ -281,7 +281,7 @@ bun tools/refactor.ts migrate --from vault --to repo
 
 ```bash
 # 1. Generate editset with context
-bun tools/refactor.ts rename.batch --pattern vault --replace repo -o editset.json
+bun tools/refactor.ts rename.batch --pattern repo --replace repo -o editset.json
 
 # 2. LLM reviews and patches (via heredoc)
 bun tools/refactor.ts editset.patch editset.json <<'EOF'
