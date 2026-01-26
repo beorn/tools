@@ -27,11 +27,11 @@ Use this skill when the user wants to make changes across multiple files:
 | What you're changing | File Type | Tool |
 |---------------------|-----------|------|
 | TypeScript identifiers | .ts, .tsx, .js, .jsx | `refactor.ts` (editset workflow) |
-| Code patterns | Any language | ast-grep |
-| String literals | Any | ast-grep or Edit |
-| Text/markdown | .md, .txt | Edit with `replace_all` |
+| Text/markdown | .md, .txt | Edit with `replace_all` (one file at a time) |
 
-**CRITICAL for TypeScript**: Always use ts-morph (via `refactor.ts`) for identifiers. ast-grep misses destructuring patterns.
+**CRITICAL for TypeScript**: Always use ts-morph (via `refactor.ts`) for identifiers. It handles destructuring, arrow function params, and nested scopes that text-based tools miss.
+
+> **Planned**: ast-grep backend for Go, Rust, Python, JSON, YAML. Batch text replace with ripgrep.
 
 ## Editset Workflow (TypeScript)
 
@@ -170,7 +170,7 @@ interface TestEnv { widgetDir: string }  // property definition
 
 ## Text/Markdown Operations
 
-For non-code files, use Edit with `replace_all`:
+For non-code files, use Edit with `replace_all` (one file at a time):
 
 ```typescript
 Edit({
@@ -181,17 +181,12 @@ Edit({
 })
 ```
 
-## Pattern Operations (ast-grep)
+> **Note**: This is not batch — each file requires a separate Edit call. Batch text replace with ripgrep is planned.
 
-For code patterns (not identifiers):
+## Pattern Operations (Planned)
 
-```bash
-# Search
-ast-grep run -p "console.log($MSG)" -l typescript --json=stream packages/
-
-# Replace
-ast-grep run -p "console.log($MSG)" -r "debug($MSG)" -l typescript -U packages/
-```
+> **Not yet implemented**: ast-grep integration for structural patterns is planned.
+> For now, use ts-morph for TypeScript identifiers or Edit for text.
 
 ## Important
 

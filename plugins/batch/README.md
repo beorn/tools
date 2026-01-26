@@ -1,13 +1,14 @@
 # Batch Plugin for Claude Code
 
-Batch operations across files with confidence-based auto-apply. Claude automatically uses this skill when you ask to rename, replace, refactor, or migrate terminology.
+Batch operations across files. Claude automatically uses this skill when you ask to rename, refactor, or migrate terminology.
 
 ## What it does
 
-- **Code refactoring**: rename functions, variables, types across TypeScript/JavaScript
-- **Text/markdown updates**: change terminology, update documentation
-- **Terminology migrations**: widget→gadget, old API→new API
-- **Pattern matching**: AST-aware search and replace via ast-grep
+- **TypeScript/JavaScript refactoring**: rename functions, variables, types across your codebase
+- **Terminology migrations**: widget→gadget, oldAPI→newAPI
+- **Case preservation**: automatically handles Widget→Gadget, WIDGET→GADGET
+
+> **Note**: Currently supports TypeScript/JavaScript only. Multi-language support (Go, Rust, Python, JSON, YAML) and batch text/markdown replace are planned.
 
 ## Installation
 
@@ -34,20 +35,12 @@ No slash command needed - the skill triggers on natural language.
 
 ## How It Works
 
-1. **SEARCH**: Find all matches using ts-morph (code) or ripgrep (text)
-2. **ANALYZE**: Claude reviews each match and scores confidence
-3. **AUTO-APPLY**: HIGH confidence changes applied automatically
-4. **REVIEW**: MEDIUM confidence matches presented for user approval
-5. **SKIP**: LOW confidence matches skipped with explanation
-6. **VERIFY**: Run your project's test/lint commands
-
-### Confidence Scoring
-
-| Confidence | Context | Action |
-|------------|---------|--------|
-| **HIGH** | Function call, import, type reference, variable declaration | Auto-apply |
-| **MEDIUM** | String literal, comment, documentation, markdown | Ask user |
-| **LOW** | Partial match (substring), archive/vendor dirs | Skip |
+1. **FIND**: Discover all symbols matching your pattern using ts-morph AST analysis
+2. **CHECK**: Detect naming conflicts before making changes
+3. **PROPOSE**: Generate an editset with all changes and file checksums
+4. **PREVIEW**: Review changes with `--dry-run` before applying
+5. **APPLY**: Execute all edits atomically, skip any drifted files
+6. **VERIFY**: Run `tsc --noEmit && bun test` to confirm
 
 ## Requirements
 
@@ -60,17 +53,13 @@ No slash command needed - the skill triggers on natural language.
 
 ### Backend System
 
-The plugin uses a backend abstraction for multi-language support:
+The plugin uses ts-morph for type-aware TypeScript/JavaScript refactoring:
 
 ```
-ts-morph backend   → TypeScript/JavaScript (priority 100)
-ast-grep backend   → Pattern-based, any language (priority 10)
+ts-morph backend   → TypeScript/JavaScript (.ts, .tsx, .js, .jsx)
 ```
 
-**Backend selection logic:**
-1. User specifies `--backend=ast-grep` → Use that backend
-2. File is `.ts/.tsx/.js/.jsx` → Use ts-morph (type-aware)
-3. Other file types → Use ast-grep (pattern-based)
+> **Planned**: ast-grep backend for Go, Rust, Python, JSON, YAML. See the backend interface in `lib/backend.ts`.
 
 ### Editset Workflow
 
