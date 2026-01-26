@@ -2,9 +2,19 @@
   "name": "batch",
   "version": "0.1.0",
   "description": "Batch search, select, and transform code with confidence-based auto-apply",
-  "author": "beorn",
+  "author": {
+    "name": "beorn",
+    "url": "https://github.com/beorn"
+  },
   "repository": "https://github.com/beorn/beorn-claude",
   "license": "MIT",
-  "commands": ["commands/batch.md"],
-  "mcpServers": ".mcp.json"
+  "keywords": ["refactoring", "batch", "ast-grep", "code-transform"],
+  "mcpServers": {
+    "refactor-typescript": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["mcp-refactor-typescript"],
+      "env": {}
+    }
+  }
 }
