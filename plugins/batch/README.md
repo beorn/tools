@@ -1,6 +1,6 @@
 # Batch Refactoring Plugin for Claude Code
 
-Intelligent batch refactoring with confidence-based auto-apply. Claude reviews all matches, auto-applies high-confidence changes, and asks about uncertain ones.
+Intelligent batch refactoring with confidence-based auto-apply. Claude automatically uses this skill when you ask to rename or refactor across multiple files.
 
 ## Installation
 
@@ -14,44 +14,38 @@ claude plugin install batch@beorn-claude-tools
 
 ## Usage
 
-```bash
-/batch rename "oldName" "newName" --glob "packages/**/*.ts"
+Just ask naturally - Claude will use the batch refactoring skill automatically:
+
+```
+"rename createVault to createRepo across the codebase"
+"change all vault mentions to repo in packages/"
+"refactor oldFunction to newFunction everywhere"
+"update terminology from X to Y"
 ```
 
-### Workflow
+No slash command needed - the skill triggers on natural language.
+
+## How It Works
 
 1. **SEARCH**: Find all matches using ast-grep (code) or ripgrep (text)
 2. **ANALYZE**: Claude reviews each match and scores confidence
-3. **AUTO-CATEGORIZE**:
-   - HIGH confidence → auto-apply
-   - MEDIUM confidence → ask user
-   - LOW confidence → skip with explanation
-4. **REVIEW**: Present uncertain matches via AskUserQuestion
-5. **APPLY**: Execute approved changes
+3. **AUTO-APPLY**: HIGH confidence changes applied automatically
+4. **REVIEW**: MEDIUM confidence matches presented for user approval
+5. **SKIP**: LOW confidence matches skipped with explanation
 6. **VERIFY**: Run your project's test/lint commands
 
 ### Confidence Scoring
 
-| Confidence | Criteria | Action |
-|------------|----------|--------|
-| **HIGH** | Exact match in code context (function call, import, type) | Auto-apply |
-| **MEDIUM** | Match in string, comment, or ambiguous context | Ask user |
-| **LOW** | False positive, different semantic meaning, or risky | Skip |
+| Confidence | Context | Action |
+|------------|---------|--------|
+| **HIGH** | Function call, import, type reference, variable declaration | Auto-apply |
+| **MEDIUM** | String literal, comment, documentation | Ask user |
+| **LOW** | Partial match (substring), archive/vendor dirs | Skip |
 
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `/batch rename "old" "new" [--glob <pattern>]` | Rename with confidence-based apply |
-| `/batch search "pattern" [--glob <pattern>]` | Preview matches without changes |
-| `/batch apply --all` | Force apply all matches (use with caution) |
-
-## Options
-
-| Option | Description |
-|--------|-------------|
-| `--glob <pattern>` | Limit search to files matching glob (e.g., `"src/**/*.ts"`) |
-| `--mode text\|ast` | Force text-based (ripgrep) or AST-based (ast-grep) search |
+**Examples:**
+- `oldFunc()` call → HIGH (clear code usage)
+- `"oldFunc"` in error message → MEDIUM (might be intentional)
+- `oldFunc` in `myOldFuncHelper` → LOW (different identifier)
 
 ## Requirements
 
@@ -71,33 +65,45 @@ claude plugin install batch@beorn-claude-tools
 Works on **all text files**:
 - **Code** (`.ts`, `.tsx`, `.js`, `.py`, etc.) - AST-aware with ast-grep
 - **Markdown** (`.md`) - Text-based with ripgrep
-- **Comments and notes** - Full support
+- **Comments and documentation** - Full support
 
-## Examples
+## Example Session
 
-### Rename a function across TypeScript files
-```bash
-/batch rename "createVault" "createRepo" --glob "packages/**/*.ts"
+```
+User: rename vaultRoot to repoRoot in packages/km-storage/
+
+Claude: I'll use batch refactoring to rename vaultRoot to repoRoot.
+
+Found 47 matches across 12 files.
+
+Confidence breakdown:
+- HIGH (auto-apply): 38 matches
+- MEDIUM (needs review): 7 matches
+- LOW (skip): 2 matches
+
+[Applies 38 HIGH confidence changes]
+[Asks about 7 MEDIUM confidence changes]
+
+Applied 43 changes (38 auto + 5 user-approved)
+Skipped 4 (2 low-confidence + 2 user-rejected)
+
+Running verification: bun fix && bun run test:fast
+Verification: PASSED
 ```
 
-### Search without applying changes
-```bash
-/batch search "TODO:" --glob "src/**/*"
+## Plugin Structure
+
+```
+batch/
+├── .claude-plugin/
+│   └── plugin.json
+├── skills/
+│   └── batch-refactor/
+│       └── SKILL.md      # Model-invoked skill
+└── README.md
 ```
 
-### Force text-based search for code files
-```bash
-/batch rename "oldName" "newName" --glob "*.ts" --mode text
-```
-
-## How It Works
-
-1. **Search Phase**: Uses ast-grep for structural code patterns or ripgrep for text
-2. **Analysis Phase**: Claude examines each match with surrounding context
-3. **Categorization**: Matches are scored HIGH/MEDIUM/LOW based on semantic certainty
-4. **Review Phase**: MEDIUM matches presented to user for approval
-5. **Apply Phase**: Approved changes applied via Edit tool
-6. **Verify Phase**: User runs their project's tests to confirm correctness
+This plugin uses a **skill** (model-invoked) rather than a command (user-invoked), so Claude automatically uses it when the task matches.
 
 ## License
 
