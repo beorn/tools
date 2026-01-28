@@ -1,0 +1,10 @@
+{
+  "name": "@beorn/claude-tools",
+  "version": "0.1.0",
+  "description": "Claude Code plugins and tools",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
