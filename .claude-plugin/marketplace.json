@@ -1,0 +1,16 @@
+{
+  "name": "beorn-claude-tools",
+  "description": "Beorn's Claude Code tools",
+  "owner": {
+    "name": "beorn",
+    "url": "https://github.com/beorn"
+  },
+  "plugins": [
+    {
+      "name": "batch",
+      "description": "Batch operations across files: rename, search-replace, refactor code, update text/markdown, migrate terminology",
+      "version": "0.3.0",
+      "source": "./batch"
+    }
+  ]
+}
