@@ -1,13 +1,21 @@
 {
-  "name": "@beorn/claude-batch",
-  "version": "0.3.0",
-  "description": "Batch refactoring plugin for Claude Code - rename, search-replace, refactor code, migrate terminology",
+  "name": "@beorn/claude-tools",
+  "version": "0.5.0",
+  "description": "Generic Claude Code tools - batch refactoring, multi-LLM research, TTY testing, session search",
   "type": "module",
   "scripts": {
     "refactor": "bun tools/refactor.ts",
+    "llm": "bun tools/llm.ts",
+    "history": "bun tools/history.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ai": "^6.0.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/xai": "^3.0.0",
+    "@ai-sdk/perplexity": "^3.0.0",
     "ts-morph": "^24.0.0",
     "zod": "^3.23.0"
   },

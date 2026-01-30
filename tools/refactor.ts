@@ -78,135 +78,149 @@ function error(message: string): never {
   process.exit(1)
 }
 
-function usage(): never {
-  console.error(`Usage: refactor.ts <command> [options]
+async function getProjectStats(): Promise<{ tsFiles: number; mdFiles: number; hasAstGrep: boolean; hasTsConfig: boolean }> {
+  const fs = await import("fs")
 
-TypeScript/JavaScript Commands (ts-morph):
+  // Count files using Bun's built-in glob
+  const tsGlob = new Bun.Glob("**/*.{ts,tsx}")
+  const mdGlob = new Bun.Glob("**/*.md")
+
+  let tsFiles = 0
+  let mdFiles = 0
+
+  for await (const _file of tsGlob.scan({ cwd: ".", onlyFiles: true })) {
+    if (!_file.includes("node_modules") && !_file.includes("dist")) tsFiles++
+  }
+
+  for await (const _file of mdGlob.scan({ cwd: ".", onlyFiles: true })) {
+    if (!_file.includes("node_modules")) mdFiles++
+  }
+
+  const hasTsConfig = fs.existsSync("tsconfig.json")
+
+  // Check if ast-grep is available
+  let hasAstGrep = false
+  try {
+    const proc = Bun.spawnSync(["sg", "--version"])
+    hasAstGrep = proc.exitCode === 0
+  } catch {
+    hasAstGrep = false
+  }
+
+  return { tsFiles, mdFiles, hasAstGrep, hasTsConfig }
+}
+
+async function usage(): Promise<never> {
+  const stats = await getProjectStats()
+
+  console.log(`
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     Refactor - Multi-Language Batch Rename                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+PROJECT STATS
+  TypeScript files: ${stats.tsFiles.toLocaleString().padStart(6)}  │  tsconfig.json: ${stats.hasTsConfig ? "✓ found" : "✗ missing"}
+  Markdown files:   ${stats.mdFiles.toLocaleString().padStart(6)}  │  ast-grep (sg): ${stats.hasAstGrep ? "✓ installed" : "○ not found"}
+
+TYPICAL WORKFLOW: Rename "widget" → "gadget" everywhere
+
+  Step 1: Check for conflicts (will "gadget" clash with existing names?)
+    $ bun refactor rename.batch --pattern widget --replace gadget --check-conflicts
+    $ bun refactor file.rename --pattern widget --replace gadget --check-conflicts
+
+  Step 2: Create editsets (proposes changes, doesn't apply yet)
+    $ bun refactor migrate --from widget --to gadget --dry-run --output /tmp/edits
+    Creates: /tmp/edits/01-file-renames.json
+             /tmp/edits/02-symbol-renames.json
+             /tmp/edits/03-text-patterns.json
+
+  Step 3: Preview each phase
+    $ bun refactor file.apply /tmp/edits/01-file-renames.json --dry-run
+    $ bun refactor editset.apply /tmp/edits/02-symbol-renames.json --dry-run
+
+  Step 4: Apply (checksum-protected, skips drifted files)
+    $ bun refactor file.apply /tmp/edits/01-file-renames.json
+    $ bun refactor editset.apply /tmp/edits/02-symbol-renames.json
+    $ bun refactor editset.apply /tmp/edits/03-text-patterns.json
+
+  Step 5: Verify
+    $ bun tsc --noEmit && bun test
+
+QUICK COMMANDS
+
+  migrate --from X --to Y [--dry-run]     Full migration (files + symbols + text)
+  rename.batch --pattern X --replace Y    TypeScript symbols only (functions, vars, types)
+  file.rename --pattern X --replace Y     File names + import paths
+  pattern.replace --pattern X --replace Y Text search/replace (comments, strings, markdown)
+
+EDITSET FORMAT (JSON)
+
+  Editsets are JSON files containing proposed changes with checksums:
+  {
+    "refs": [{ "refId": "abc123", "file": "src/foo.ts", "line": 42,
+               "kind": "call", "scope": "initApp", "replace": "gadget" }],
+    "edits": [{ "file": "src/foo.ts", "checksum": "...", ... }]
+  }
+
+  Fields: refId (unique ID), kind (call|decl|type|string|comment),
+          scope (enclosing function), replace (null to skip)
+
+  Patch editsets with LLM decisions:
+    $ bun refactor editset.patch edits.json <<< '{"abc123": null, "def456": "Gadget"}'
+
+COMMANDS
+
+  migrate                                 Full terminology migration
+    --from <pattern> --to <replacement>   Required: pattern and replacement
+    --glob <glob>                         File filter (default: **/*.{ts,tsx})
+    --dry-run                             Preview without applying
+    --output <dir>                        Editset directory (default: .editsets/)
+
+  rename.batch                            TypeScript symbol rename (ts-morph)
+    --pattern <regex> --replace <string>  Required: pattern and replacement
+    --check-conflicts                     Check for naming conflicts only
+    --skip <names>                        Comma-separated names to skip
+    --output <file>                       Editset file (default: editset.json)
+
+  file.rename                             Rename files + update imports
+    --pattern <string> --replace <string> Required: pattern and replacement
+    --glob <glob>                         File filter (default: **/*.{ts,tsx})
+    --check-conflicts                     Check for conflicts only
+    --output <file>                       Editset file (default: file-editset.json)
+
+  pattern.replace                         Text/structural search-replace
+    --pattern <pattern> --replace <text>  Required: pattern and replacement
+    --glob <glob>                         File filter
+    --backend <name>                      ast-grep (structural) or ripgrep (text)
+    --output <file>                       Editset file (default: editset.json)
+
+  editset.apply <file> [--dry-run]        Apply editset (checksums protect against drift)
+  editset.verify <file>                   Check if editset can be applied
+  editset.patch <file>                    Apply LLM patch from stdin
+  file.apply <file> [--dry-run]           Apply file rename editset
+
+EXPLORATION
+
   symbol.at <file> <line> [col]           Find symbol at location
   refs.list <symbolKey>                   List all references
-  symbols.find --pattern <regex>          Find all symbols matching pattern
-
-  rename.propose <symbolKey> <newName>    Create rename editset
-    --output <file>                       Output file (default: editset.json)
-
-  rename.batch                            Batch rename proposal
-    --pattern <regex>                     Symbol pattern to match
-    --replace <string>                    Replacement string
-    --output <file>                       Output file (default: editset.json)
-    --check-conflicts                     Check for naming conflicts (no editset generated)
-    --skip <names>                        Comma-separated symbol names to skip
-
-File Operations:
-  file.find                               Find files to rename
-    --pattern <string>                    Filename pattern to match (e.g., "repo")
-    --replace <string>                    Replacement (e.g., "repo")
-    --glob <glob>                         File glob filter (default: **/*.{ts,tsx})
-
-  file.rename                             Create file rename editset
-    --pattern <string>                    Filename pattern to match
-    --replace <string>                    Replacement
-    --glob <glob>                         File glob filter (default: **/*.{ts,tsx})
-    --output <file>                       Output file (default: file-editset.json)
-    --check-conflicts                     Check for naming conflicts only
-
-  file.apply <file>                       Apply file rename editset
-    --dry-run                             Preview without applying
-
-  file.verify <file>                      Verify file editset can be applied
-
-Multi-Language Commands (ast-grep/ripgrep):
-  pattern.find                            Find structural patterns
-    --pattern <pattern>                   ast-grep pattern (e.g., "fmt.Println($MSG)")
-    --glob <glob>                         File glob filter (e.g., "**/*.go")
-    --backend <name>                      Force backend: ast-grep, ripgrep (auto-detected)
-
-  pattern.replace                         Create pattern replace editset
-    --pattern <pattern>                   Pattern to match
-    --replace <replacement>               Replacement (supports $1, $MSG metavars)
-    --glob <glob>                         File glob filter
-    --backend <name>                      Force backend: ast-grep, ripgrep
-    --output <file>                       Output file (default: editset.json)
-
+  symbols.find --pattern <regex>          Find symbols matching pattern
+  pattern.find --pattern <p> --glob <g>   Find text/structural patterns
+  wikilink.find --target <file>           Find wiki-links to file
+  wikilink.broken                         Find broken wiki-links
   backends.list                           List available backends
 
-Wiki-link Commands (Obsidian, Foam, Dendron, etc.):
-  wikilink.find                           Find all links to a file
-    --target <file>                       Target file (e.g., "note.md")
-    --glob <glob>                         File glob filter (default: **/*.md)
+DOCUMENTATION
 
-  wikilink.rename                         Update links when renaming file
-    --old <path>                          Current file path
-    --new <path>                          New file path
-    --output <file>                       Output file (default: wikilink-editset.json)
+  Full documentation with examples, edge cases, and LLM patch workflow:
+    skills/batch-refactor/SKILL.md
 
-  wikilink.broken                         Find broken wiki links
-    --glob <glob>                         File glob filter (default: **/*.md)
-
-Editset Commands:
-  editset.select <file>                   Filter editset
-    --include <refIds>                    Comma-separated refIds to include
-    --exclude <refIds>                    Comma-separated refIds to exclude
-    --output <file>                       Output file (default: overwrites input)
-
-  editset.patch <file>                    Apply LLM patch to editset (reads from stdin)
-    --output <file>                       Output file (default: overwrites input)
-
-  editset.apply <file>                    Apply editset with checksums
-    --dry-run                             Preview without applying
-
-  editset.verify <file>                   Verify editset can be applied
-
-Migration Commands:
-  migrate                               Orchestrate full terminology migration
-    --from <pattern>                    Term to replace (e.g., "repo")
-    --to <replacement>                  New term (e.g., "repo")
-    --glob <glob>                       File glob filter (default: **/*.{ts,tsx})
-    --dry-run                           Preview without applying changes
-    --output <dir>                      Directory for editsets (default: .editsets/)
-
-Global Options:
-  --tsconfig <file>                       Path to tsconfig.json (default: tsconfig.json)
-
-Examples:
-  # TypeScript: Find symbol at location
-  refactor.ts symbol.at src/types.ts 42 5
-
-  # TypeScript: Batch rename widget → gadget
-  refactor.ts rename.batch --pattern widget --replace gadget --output editset.json
-
-  # File rename: repo*.ts → repo*.ts
-  refactor.ts file.rename --pattern repo --replace repo --glob "**/*.ts" --output file-editset.json
-  refactor.ts file.apply file-editset.json --dry-run
-  refactor.ts file.apply file-editset.json
-
-  # Go: Find all fmt.Println calls
-  refactor.ts pattern.find --pattern "fmt.Println(\$MSG)" --glob "**/*.go"
-
-  # Go: Replace fmt.Println with log.Info
-  refactor.ts pattern.replace --pattern "fmt.Println(\$MSG)" --replace "log.Info(\$MSG)" --glob "**/*.go"
-
-  # Markdown: Replace "widget" with "gadget" in all docs
-  refactor.ts pattern.replace --pattern "widget" --replace "gadget" --glob "**/*.md" --backend ripgrep
-
-  # Wiki-links: Find all links to a note
-  refactor.ts wikilink.find --target old-note.md
-
-  # Wiki-links: Rename note and update all [[old-note]] links
-  refactor.ts wikilink.rename --old old-note.md --new new-note.md --output wikilink-editset.json
-  refactor.ts file.apply wikilink-editset.json
-
-  # Wiki-links: Find broken links
-  refactor.ts wikilink.broken
-
-  # Preview changes
-  refactor.ts editset.apply editset.json --dry-run
-
-  # Apply changes
-  refactor.ts editset.apply editset.json
-
-  # Full terminology migration: repo → repo
-  refactor.ts migrate --from repo --to repo --dry-run
-  refactor.ts migrate --from repo --to repo
+  Topics covered:
+    • Why ts-morph catches patterns that grep/sed miss (destructuring, re-exports)
+    • Case preservation (widget→gadget, Widget→Gadget, WIDGET→GADGET)
+    • Conflict resolution strategies
+    • LLM patch workflow for selective replacements
+    • Multi-package monorepo migrations
+    • Checksum-based drift protection
 `)
   process.exit(1)
 }
@@ -223,7 +237,7 @@ function hasFlag(name: string): boolean {
 
 async function main() {
   if (!command || command === "--help" || command === "-h") {
-    usage()
+    await usage()
   }
 
   // Lazy project loading - only load when needed
