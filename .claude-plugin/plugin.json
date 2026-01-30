@@ -1,6 +1,6 @@
 {
   "name": "batch",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Batch operations across files: rename, search-replace, refactor code, update text/markdown, migrate terminology. Use instead of sed/awk/perl/python scripts for multi-file edits.",
   "author": {
     "name": "beorn",
