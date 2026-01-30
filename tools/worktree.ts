@@ -152,6 +152,7 @@ export interface CreateOptions {
   install?: boolean
   direnv?: boolean
   hooks?: boolean
+  allowDirty?: boolean // Skip uncommitted changes check
 }
 
 export async function createWorktree(
@@ -159,7 +160,7 @@ export async function createWorktree(
   branch?: string,
   options: CreateOptions = {},
 ): Promise<void> {
-  const { install = true, direnv = true, hooks = true } = options
+  const { install = true, direnv = true, hooks = true, allowDirty = false } = options
 
   const gitRoot = findGitRoot(process.cwd())
   if (!gitRoot) {
@@ -177,9 +178,59 @@ export async function createWorktree(
     process.exit(1)
   }
 
-  // Check for unpushed submodule commits
-  info("Checking submodule state...")
+  // Get submodules list (used in multiple checks)
   const submodules = getSubmodulePaths(gitRoot)
+
+  // Check for uncommitted changes in main repo and submodules
+  // This ensures the new worktree will be an exact copy of the committed state
+  if (!allowDirty) {
+    info("Checking for uncommitted changes...")
+    const issues: string[] = []
+
+    // Check main repo
+    const mainStatus = await getWorktreeStatus(gitRoot)
+    if (mainStatus.dirty) {
+      issues.push(`Main repo has ${mainStatus.changes.length} uncommitted change(s)`)
+      for (const change of mainStatus.changes.slice(0, 3)) {
+        issues.push(DIM + `    ${change}` + RESET)
+      }
+      if (mainStatus.changes.length > 3) {
+        issues.push(DIM + `    ... and ${mainStatus.changes.length - 3} more` + RESET)
+      }
+    }
+
+    // Check submodules for uncommitted changes
+    for (const submodule of submodules) {
+      const subPath = join(gitRoot, submodule)
+      if (!existsSync(join(subPath, ".git"))) continue
+
+      const subStatus = await getWorktreeStatus(subPath)
+      if (subStatus.dirty) {
+        issues.push(`Submodule ${submodule} has ${subStatus.changes.length} uncommitted change(s)`)
+      }
+    }
+
+    if (issues.length > 0) {
+      error("Cannot create worktree - uncommitted changes detected:")
+      console.log("")
+      for (const issue of issues) {
+        console.log(YELLOW + "  " + issue + RESET)
+      }
+      console.log("")
+      console.log("The new worktree would not include these uncommitted changes,")
+      console.log("which could lead to confusion about what code is where.")
+      console.log("")
+      console.log("Options:")
+      console.log(CYAN + "  1. Commit your changes first" + RESET)
+      console.log(CYAN + "  2. Stash your changes: git stash" + RESET)
+      console.log(CYAN + "  3. Use --allow-dirty to create anyway (not recommended)" + RESET)
+      process.exit(1)
+    }
+    success("Working tree is clean")
+  }
+
+  // Check for unpushed submodule commits
+  info("Checking submodule commits are pushed...")
   const unpushed: string[] = []
 
   for (const submodule of submodules) {
@@ -575,9 +626,16 @@ export async function showDefaultInfo(): Promise<void> {
   if (submodules.length > 0) {
     console.log("")
     console.log(BOLD + "Submodule handling" + RESET)
-    console.log(DIM + "  • Create validates all submodule commits are pushed first" + RESET)
-    console.log(DIM + "  • Each worktree gets independent submodule clones (not symlinks)" + RESET)
-    console.log(DIM + "  • Changes in one worktree's submodules don't affect others" + RESET)
+    console.log(DIM + "  Worktrees are created from the COMMITTED state, not working tree." + RESET)
+    console.log(DIM + "  This ensures each worktree is an exact, reproducible copy." + RESET)
+    console.log("")
+    console.log(DIM + "  Before creating:" + RESET)
+    console.log(DIM + "  • Fails if main repo has uncommitted changes" + RESET)
+    console.log(DIM + "  • Fails if any submodule has uncommitted changes" + RESET)
+    console.log(DIM + "  • Fails if submodule commits aren't pushed to remote" + RESET)
+    console.log("")
+    console.log(DIM + "  Each worktree gets independent submodule clones (not symlinks)," + RESET)
+    console.log(DIM + "  so changes in one worktree don't affect others." + RESET)
   }
 }
 
@@ -595,6 +653,7 @@ ${BOLD}CREATE OPTIONS${RESET}
   --no-install      Skip dependency installation
   --no-direnv       Skip direnv allow
   --no-hooks        Skip hook installation
+  --allow-dirty     Create even with uncommitted changes (not recommended)
 
 ${BOLD}REMOVE OPTIONS${RESET}
   --delete-branch   Also delete the branch
@@ -606,12 +665,28 @@ ${BOLD}EXAMPLES${RESET}
   bun worktree create test main                   # Track main branch
   bun worktree remove my-feature --delete-branch  # Remove and delete branch
 
-${BOLD}FEATURES${RESET}
-  - Validates submodule commits are pushed before creating
-  - Clones submodules (not linked) for independent development
-  - Auto-detects bun vs npm for dependency installation
-  - Configures direnv if .envrc present
-  - Installs git hooks via prepare script
+${BOLD}HOW IT WORKS${RESET}
+  Worktrees are created from your COMMITTED state, not your working tree.
+  This ensures each worktree is an exact, reproducible copy.
+
+  ${BOLD}Before creating, the tool validates:${RESET}
+  1. No uncommitted changes in main repo
+  2. No uncommitted changes in any submodule
+  3. All submodule commits are pushed to remote
+
+  If any check fails, you'll be prompted to commit/stash first.
+  Use --allow-dirty to bypass (creates worktree without your local changes).
+
+  ${BOLD}Submodule handling:${RESET}
+  Each worktree gets independent submodule clones (not symlinks).
+  Changes in one worktree's submodules don't affect others.
+  This means you can have different submodule states per worktree.
+
+${BOLD}POST-CREATE SETUP${RESET}
+  - Runs 'git submodule update --init --recursive'
+  - Runs 'bun install' (or npm if no bun.lock)
+  - Runs 'direnv allow' if .envrc present
+  - Runs 'bun run prepare' for git hooks
 `)
 }
 
@@ -634,11 +709,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         error("Usage: bun worktree create <name> [branch]")
         process.exit(1)
       }
-      const branch = args[2]
+      // Branch is the first non-flag argument after name
+      const branch = args.slice(2).find(a => !a.startsWith("--"))
       await createWorktree(name, branch, {
         install: !hasFlag("--no-install"),
         direnv: !hasFlag("--no-direnv"),
         hooks: !hasFlag("--no-hooks"),
+        allowDirty: hasFlag("--allow-dirty"),
       })
       break
     }
