@@ -10,7 +10,7 @@
       "name": "batch",
       "description": "Batch operations across files: rename, search-replace, refactor code, update text/markdown, migrate terminology",
       "version": "0.3.0",
-      "source": "./batch"
+      "source": "."
     }
   ]
 }
