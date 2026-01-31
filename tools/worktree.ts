@@ -550,24 +550,24 @@ export async function showDefaultInfo(): Promise<void> {
   console.log("")
 
   const worktrees = await getWorktrees(gitRoot)
+  const parentDir = dirname(gitRoot)
 
-  // Table header
-  console.log(DIM + "  NAME                      BRANCH              STATUS" + RESET)
-  console.log(DIM + "  " + "─".repeat(60) + RESET)
+  // Tree view
+  console.log(BOLD + "Worktrees" + RESET)
+  console.log(parentDir + "/")
 
-  for (const wt of worktrees) {
+  for (let i = 0; i < worktrees.length; i++) {
+    const wt = worktrees[i]
     const name = basename(wt.path)
     const isMain = wt.path === gitRoot
     const isCurrent = wt.path === currentDir || currentDir.startsWith(wt.path + "/")
+    const isLast = i === worktrees.length - 1
 
     // Check for changes
     const status = await getWorktreeStatus(wt.path)
 
-    // Get last commit info
-    const lastCommit = await safeExec(
-      $`cd ${wt.path} && git log -1 --format="%cr" 2>/dev/null`,
-    )
-    const commitAge = lastCommit.stdout.trim() || "unknown"
+    // Tree prefix (dim lines, white directory name)
+    const prefix = DIM + (isLast ? "└── " : "├── ") + RESET
 
     // Format branch
     let branchColor
@@ -582,19 +582,16 @@ export async function showDefaultInfo(): Promise<void> {
     // Format status
     let statusStr = ""
     if (status.dirty) {
-      statusStr = YELLOW + `${status.changes.length} changes` + RESET
-    } else {
-      statusStr = DIM + "clean" + RESET
+      statusStr = YELLOW + ` (${status.changes.length} changes)` + RESET
     }
 
-    // Current marker
+    // Markers
     const currentMarker = isCurrent ? CYAN + " ◀" + RESET : ""
     const mainMarker = isMain ? DIM + " (primary)" + RESET : ""
 
     console.log(
-      `  ${name.padEnd(26)} ${(branchColor + RESET).padEnd(30)} ${statusStr}${currentMarker}${mainMarker}`,
+      `${prefix}${name.padEnd(24)} ${branchColor}${statusStr}${currentMarker}${mainMarker}`,
     )
-    console.log(DIM + `     ${wt.path}  (${commitAge})` + RESET)
   }
 
   console.log("")
@@ -602,9 +599,13 @@ export async function showDefaultInfo(): Promise<void> {
 
   // Usage section
   console.log("")
-  console.log(BOLD + "What are worktrees?" + RESET)
-  console.log(DIM + "  Worktrees let you work on multiple branches simultaneously without stashing." + RESET)
-  console.log(DIM + "  Each worktree is a separate directory with its own working tree." + RESET)
+  console.log(BOLD + "Why this tool?" + RESET)
+  console.log(DIM + "  Bare 'git worktree add' doesn't handle:" + RESET)
+  console.log(DIM + "  • Submodules (need independent clones, not symlinks)" + RESET)
+  console.log(DIM + "  • Dependencies (bun install / npm install)" + RESET)
+  console.log(DIM + "  • Hooks (git hooks need reinstalling per worktree)" + RESET)
+  console.log(DIM + "  • Direnv (needs 'direnv allow' per worktree)" + RESET)
+  console.log(DIM + "  • Validation (uncommitted changes, unpushed submodules)" + RESET)
 
   console.log("")
   console.log(BOLD + "Commands" + RESET)
