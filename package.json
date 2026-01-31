@@ -10,12 +10,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ai": "^6.0.0",
-    "@ai-sdk/openai": "^3.0.0",
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/google": "^3.0.0",
-    "@ai-sdk/xai": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.0",
     "@ai-sdk/perplexity": "^3.0.0",
+    "@ai-sdk/xai": "^3.0.0",
+    "ai": "^6.0.0",
+    "commander": "^14.0.2",
+    "openai": "^6.17.0",
     "ts-morph": "^24.0.0",
     "zod": "^3.23.0"
   },

@@ -171,6 +171,12 @@ export function getDb(): Database {
   }
 
   dbInstance = new Database(DB_PATH)
+
+  // Enable WAL mode for concurrent access (multiple Claude sessions)
+  // WAL allows readers to not block writers and vice versa
+  dbInstance.exec("PRAGMA journal_mode = WAL")
+  dbInstance.exec("PRAGMA busy_timeout = 5000") // Wait 5s if locked
+
   dbInstance.exec(SCHEMA)
   runMigrations(dbInstance)
   return dbInstance
@@ -300,12 +306,23 @@ export function ftsSearch(
   return { results, total: totalRow.total }
 }
 
+export interface MessageSearchOptions {
+  limit?: number
+  offset?: number
+  projectFilter?: string
+  projectGlob?: string  // Glob pattern for project matching
+  sinceTime?: number    // Filter messages after this timestamp
+  messageType?: "user" | "assistant"  // Filter by message type
+  toolName?: string     // Filter by tool name
+  sessionId?: string    // Filter by session ID
+}
+
 export function ftsSearchWithSnippet(
   db: Database,
   query: string,
-  options: { limit?: number; offset?: number; projectFilter?: string } = {},
+  options: MessageSearchOptions = {},
 ): { results: (MessageRecord & { snippet: string; project_path: string; rank: number })[]; total: number } {
-  const { limit = 50, offset = 0, projectFilter } = options
+  const { limit = 50, offset = 0, projectFilter, sinceTime, messageType, toolName, sessionId } = options
 
   const ftsQuery = toFts5Query(query)
 
@@ -333,6 +350,34 @@ export function ftsSearchWithSnippet(
     countQuery += projectClause
     searchQuery += projectClause
     params.push(`%${projectFilter}%`)
+  }
+
+  if (sinceTime !== undefined) {
+    const timeClause = ` AND m.timestamp >= ?`
+    countQuery += timeClause
+    searchQuery += timeClause
+    params.push(sinceTime)
+  }
+
+  if (messageType) {
+    const typeClause = ` AND m.type = ?`
+    countQuery += typeClause
+    searchQuery += typeClause
+    params.push(messageType)
+  }
+
+  if (toolName) {
+    const toolClause = ` AND m.tool_name = ?`
+    countQuery += toolClause
+    searchQuery += toolClause
+    params.push(toolName)
+  }
+
+  if (sessionId) {
+    const sessionClause = ` AND m.session_id = ?`
+    countQuery += sessionClause
+    searchQuery += sessionClause
+    params.push(sessionId)
   }
 
   searchQuery += ` ORDER BY rank LIMIT ? OFFSET ?`
@@ -435,6 +480,20 @@ export function clearTables(db: Database, tables: ("writes" | "sessions" | "mess
   }
 }
 
+/**
+ * Escape a token for FTS5 query syntax.
+ * FTS5 treats certain characters specially (e.g., . is column selector).
+ * Tokens with special characters are quoted as phrases.
+ */
+function escapeToken(token: string): { text: string; quoted: boolean } {
+  // Special FTS5 characters that need quoting: . () : "
+  if (/[.():]/.test(token)) {
+    // Quote as phrase, escape internal quotes by doubling them
+    return { text: `"${token.replace(/"/g, '""')}"`, quoted: true }
+  }
+  return { text: token, quoted: false }
+}
+
 // Convert search query to FTS5 syntax
 export function toFts5Query(query: string): string {
   // Handle quoted phrases
@@ -459,10 +518,14 @@ export function toFts5Query(query: string): string {
       }
     } else if (token.startsWith("-")) {
       // Negation: NOT term
-      parts.push(`NOT ${token.slice(1)}*`)
+      const term = token.slice(1)
+      const escaped = escapeToken(term)
+      // Quoted phrases can't use prefix matching
+      parts.push(`NOT ${escaped.text}${escaped.quoted ? "" : "*"}`)
     } else {
-      // Prefix match for each term
-      parts.push(`${token}*`)
+      // Prefix match for each term (unless quoted)
+      const escaped = escapeToken(token)
+      parts.push(`${escaped.text}${escaped.quoted ? "" : "*"}`)
     }
   }
 
@@ -625,25 +688,29 @@ export function clearContent(db: Database): void {
   db.prepare("INSERT INTO content_fts(content_fts) VALUES('rebuild')").run()
 }
 
+export interface ContentSearchOptions {
+  limit?: number
+  offset?: number
+  types?: ContentType[]
+  projectFilter?: string
+  sinceTime?: number    // Filter content after this timestamp
+}
+
 /**
  * Unified search across all content types
  */
 export function searchAll(
   db: Database,
   query: string,
-  options: {
-    limit?: number
-    offset?: number
-    types?: ContentType[]
-    projectFilter?: string
-  } = {},
+  options: ContentSearchOptions = {},
 ): { results: (ContentRecord & { snippet: string; rank: number })[]; total: number } {
-  const { limit = 50, offset = 0, types, projectFilter } = options
+  const { limit = 50, offset = 0, types, projectFilter, sinceTime } = options
   const ftsQuery = toFts5Query(query)
 
   const params: (string | number)[] = [ftsQuery]
   let typeClause = ""
   let projectClause = ""
+  let timeClause = ""
 
   if (types && types.length > 0) {
     typeClause = ` AND c.content_type IN (${types.map(() => "?").join(",")})`
@@ -655,11 +722,16 @@ export function searchAll(
     params.push(`%${projectFilter}%`)
   }
 
+  if (sinceTime !== undefined) {
+    timeClause = ` AND c.timestamp >= ?`
+    params.push(sinceTime)
+  }
+
   const countQuery = `
     SELECT COUNT(*) as total
     FROM content_fts f
     JOIN content c ON f.rowid = c.id
-    WHERE content_fts MATCH ?${typeClause}${projectClause}
+    WHERE content_fts MATCH ?${typeClause}${projectClause}${timeClause}
   `
 
   const searchQuery = `
@@ -668,7 +740,7 @@ export function searchAll(
            bm25(content_fts) as rank
     FROM content_fts f
     JOIN content c ON f.rowid = c.id
-    WHERE content_fts MATCH ?${typeClause}${projectClause}
+    WHERE content_fts MATCH ?${typeClause}${projectClause}${timeClause}
     ORDER BY rank
     LIMIT ? OFFSET ?
   `

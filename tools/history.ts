@@ -4,27 +4,25 @@
  *
  * Fast SQLite + FTS5 indexing for searching and managing Claude Code sessions.
  *
- * Commands:
- *   index                 - Build/rebuild session index (FTS5)
- *   fts <query>           - Fast full-text search (<100ms)
- *   now                   - Active sessions in last 5 minutes
- *   hour                  - Last hour activity summary
- *   day                   - Today's activity summary
- *   similar <query>       - Find similar past questions
- *   list [project]        - List all sessions
- *   show <session-id>     - Show session details
- *   grep <pattern>        - Search ALL session content (sequential scan)
- *   search <pattern>      - Search indexed writes by file path
- *   writes [--date D]     - List recent writes
- *   restore <file-path>   - Restore file content from session
- *   stats                 - Show index statistics
+ * Usage:
+ *   bun history [query] [options]     - Search content
+ *   bun history index                 - Build/rebuild index
+ *   bun history now/hour/day          - Activity summaries
+ *   bun history list/show/stats       - Session management
+ *   bun history writes/restore        - File recovery
+ *
+ * Examples:
+ *   bun history "createRepo"              # Search all content
+ *   bun history -q -s 1h "how do I"       # Questions only, last hour
+ *   bun history -i p,m "refactor"         # Plans and messages
+ *   bun history -g "function\\s+\\w+"     # Regex search
  */
 
+import { Command } from "commander"
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs"
 import * as readline from "readline"
-import { Glob } from "bun"
 import {
   getDb,
   closeDb,
@@ -35,26 +33,135 @@ import {
   getActivitySummary,
   findSimilarQueries,
   getIndexMeta,
-  MAX_CONTENT_SIZE,
   getAllSessionTitles,
-  refreshSessionTitles,
   getSessionTitle,
   searchAll,
+  type MessageSearchOptions,
 } from "./lib/history/db"
-import type { ContentType } from "./lib/history/types"
+import type { ContentType, ContentRecord, MessageRecord, JsonlRecord, WriteRecord } from "./lib/history/types"
 import {
   rebuildIndex,
   findSessionFiles,
   extractTextContent,
-  projectPathFromRelative,
 } from "./lib/history/indexer"
-import type { JsonlRecord, WriteRecord } from "./lib/history/types"
 
 // Time windows
 const FIVE_MINUTES_MS = 5 * 60 * 1000
 const ONE_HOUR_MS = 60 * 60 * 1000
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const THIRTY_DAYS_MS = 30 * ONE_DAY_MS
+
+// ============================================================================
+// Parsing utilities
+// ============================================================================
+
+/**
+ * Parse time string to timestamp (milliseconds since epoch).
+ * Returns undefined if parsing fails.
+ *
+ * Supported formats:
+ *   1h, 2h       - Hours ago
+ *   1d, 7d       - Days ago
+ *   1w, 2w       - Weeks ago
+ *   30d          - 30 days ago
+ *   today        - Since midnight today
+ *   yesterday    - Since midnight yesterday
+ */
+function parseTime(timeStr: string): number | undefined {
+  const now = Date.now()
+  const str = timeStr.toLowerCase().trim()
+
+  // Handle relative time formats: 1h, 2d, 3w
+  const match = str.match(/^(\d+)([hdw])$/)
+  if (match) {
+    const amount = parseInt(match[1]!, 10)
+    const unit = match[2]
+    switch (unit) {
+      case "h":
+        return now - amount * ONE_HOUR_MS
+      case "d":
+        return now - amount * ONE_DAY_MS
+      case "w":
+        return now - amount * 7 * ONE_DAY_MS
+    }
+  }
+
+  // Handle special keywords
+  switch (str) {
+    case "today": {
+      const midnight = new Date()
+      midnight.setHours(0, 0, 0, 0)
+      return midnight.getTime()
+    }
+    case "yesterday": {
+      const midnight = new Date()
+      midnight.setHours(0, 0, 0, 0)
+      return midnight.getTime() - ONE_DAY_MS
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Parse include string to content types.
+ * Accepts comma-separated short codes or full names.
+ *
+ * Short codes: p=plan, m=message, s=summary, t=todo
+ * Full names: plans, messages, summaries, todos
+ */
+function parseInclude(includeStr: string): ContentType[] {
+  const types: ContentType[] = []
+  const parts = includeStr.toLowerCase().split(",").map(s => s.trim()).filter(Boolean)
+
+  const shortMap: Record<string, ContentType> = {
+    p: "plan",
+    m: "message",
+    s: "summary",
+    t: "todo",
+  }
+
+  const longMap: Record<string, ContentType> = {
+    plans: "plan",
+    plan: "plan",
+    messages: "message",
+    message: "message",
+    summaries: "summary",
+    summary: "summary",
+    todos: "todo",
+    todo: "todo",
+  }
+
+  for (const part of parts) {
+    if (part.length === 1 && shortMap[part]) {
+      const ct = shortMap[part]!
+      if (!types.includes(ct)) types.push(ct)
+    } else if (longMap[part]) {
+      const ct = longMap[part]!
+      if (!types.includes(ct)) types.push(ct)
+    }
+  }
+
+  return types
+}
+
+/**
+ * Match a project path against a glob pattern.
+ */
+function matchProjectGlob(encodedPath: string, pattern: string): boolean {
+  const normalPath = encodedPath.replace(/-/g, "/")
+  let regexStr = pattern
+    .replace(/\*\*/g, "<<<GLOBSTAR>>>")
+    .replace(/\*/g, "[^/]*")
+    .replace(/<<<GLOBSTAR>>>/g, ".*")
+    .replace(/\?/g, ".")
+  const regex = new RegExp(regexStr, "i")
+  return regex.test(normalPath)
+}
+
+// ============================================================================
+// Formatting utilities
+// ============================================================================
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
@@ -64,10 +171,6 @@ function formatBytes(bytes: number): string {
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString()
-}
-
-function formatDateTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleString()
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -93,8 +196,329 @@ function highlightMatch(text: string, regex: RegExp): string {
 }
 
 // ============================================================================
+// Search options interface
+// ============================================================================
+
+interface SearchOptions {
+  include?: string
+  grep?: boolean
+  question?: boolean
+  response?: boolean
+  tool?: string
+  since?: string
+  project?: string
+  session?: string
+  limit?: string
+  json?: boolean
+}
+
+// ============================================================================
 // Commands
 // ============================================================================
+
+async function cmdSearch(
+  query: string | undefined,
+  options: SearchOptions,
+): Promise<void> {
+  const {
+    include,
+    grep: regexMode,
+    question,
+    response,
+    tool,
+    since,
+    project,
+    session,
+    limit: limitStr,
+    json,
+  } = options
+
+  const limit = limitStr ? parseInt(limitStr, 10) : 10
+
+  // Parse time filter
+  let sinceTime: number | undefined
+  if (since) {
+    sinceTime = parseTime(since)
+    if (sinceTime === undefined) {
+      console.error(`Invalid time format: ${since}`)
+      console.error("Valid formats: 1h, 1d, 1w, today, yesterday")
+      process.exit(1)
+    }
+  } else {
+    // Default: last 30 days
+    sinceTime = Date.now() - THIRTY_DAYS_MS
+  }
+
+  // Parse content types
+  let types: ContentType[] | undefined
+  if (include) {
+    types = parseInclude(include)
+    if (types.length === 0) {
+      console.error(`Invalid include types: ${include}`)
+      console.error("Valid types: p,m,s,t or plans,messages,summaries,todos")
+      process.exit(1)
+    }
+  }
+
+  // Determine message type filter
+  let messageType: "user" | "assistant" | undefined
+  if (question && response) {
+    // Both flags = no filter
+    messageType = undefined
+  } else if (question) {
+    messageType = "user"
+  } else if (response) {
+    messageType = "assistant"
+  }
+
+  // If regex mode, delegate to grep
+  if (regexMode) {
+    if (!query) {
+      console.error("Regex mode requires a search pattern")
+      process.exit(1)
+    }
+    await cmdGrep(query, { project, limit })
+    return
+  }
+
+  // Allow searching without query if filters are provided
+  if (!query && !question && !response && !tool && !since) {
+    printHelp()
+    return
+  }
+
+  // Build search description
+  const searchDesc: string[] = []
+  if (query) searchDesc.push(`"${query}"`)
+  if (types) {
+    const typeNames = types.map(t => t === "message" ? "messages" : t + "s")
+    searchDesc.push(`in ${typeNames.join(", ")}`)
+  }
+  if (messageType === "user") searchDesc.push("(questions only)")
+  else if (messageType === "assistant") searchDesc.push("(responses only)")
+  if (tool) searchDesc.push(`with tool ${tool}`)
+  if (since) searchDesc.push(`since ${since}`)
+  else searchDesc.push("last 30d")
+  if (project) searchDesc.push(`in project ${project}`)
+  if (session) searchDesc.push(`session ${session.slice(0, 8)}...`)
+
+  const DIM = "\x1b[2m"
+  const RESET = "\x1b[0m"
+  console.log(`${DIM}Searching: ${searchDesc.join(" ")}${RESET}\n`)
+
+  const startTime = Date.now()
+  const db = getDb()
+
+  // Determine which sources to search
+  const searchMessages = !types || types.includes("message")
+  const contentTypes = types?.filter(t => t !== "message") as ContentType[] | undefined
+  const searchContent = !types || (contentTypes && contentTypes.length > 0)
+
+  // Build search options
+  const messageOpts: MessageSearchOptions = {
+    limit,
+    sinceTime,
+    messageType,
+    toolName: tool,
+    sessionId: session,
+  }
+
+  // Handle project filter (glob matching)
+  if (project) {
+    // For now, use substring match but we could enhance to glob
+    messageOpts.projectFilter = project.replace(/\*/g, "")
+  }
+
+  // Search messages table if needed
+  let messageResults: { results: (MessageRecord & { snippet: string; project_path: string; rank: number })[]; total: number } = { results: [], total: 0 }
+  if (searchMessages && query) {
+    messageResults = ftsSearchWithSnippet(db, query, messageOpts)
+  } else if (searchMessages && !query) {
+    // No query but have filters - get recent messages
+    const recentQuery = `
+      SELECT m.*, s.project_path, '' as snippet, 0 as rank
+      FROM messages m
+      JOIN sessions s ON m.session_id = s.id
+      WHERE 1=1
+      ${sinceTime ? "AND m.timestamp >= ?" : ""}
+      ${messageType ? "AND m.type = ?" : ""}
+      ${tool ? "AND m.tool_name = ?" : ""}
+      ${session ? "AND m.session_id = ?" : ""}
+      ${project ? "AND s.project_path LIKE ?" : ""}
+      ORDER BY m.timestamp DESC
+      LIMIT ?
+    `
+    const params: (string | number)[] = []
+    if (sinceTime) params.push(sinceTime)
+    if (messageType) params.push(messageType)
+    if (tool) params.push(tool)
+    if (session) params.push(session)
+    if (project) params.push(`%${project.replace(/\*/g, "")}%`)
+    params.push(limit)
+
+    const results = db.prepare(recentQuery).all(...params) as (MessageRecord & { snippet: string; project_path: string; rank: number })[]
+    messageResults = { results, total: results.length }
+  }
+
+  // Search content table if needed (plans, summaries, todos)
+  let contentResults: { results: (ContentRecord & { snippet: string; rank: number })[]; total: number } = { results: [], total: 0 }
+  if (searchContent && contentTypes?.length !== 0 && query) {
+    contentResults = searchAll(db, query, {
+      limit,
+      projectFilter: project?.replace(/\*/g, ""),
+      types: contentTypes,
+      sinceTime,
+    })
+  }
+
+  const total = messageResults.total + contentResults.total
+  const duration = Date.now() - startTime
+
+  // Get session titles for display
+  const sessionTitles = getAllSessionTitles()
+
+  const BOLD = "\x1b[1m"
+  const CYAN = "\x1b[36m"
+  const YELLOW = "\x1b[33m"
+  const GREEN = "\x1b[32m"
+  const MAGENTA = "\x1b[35m"
+
+  const typeIcons: Record<string, string> = {
+    message: "💬",
+    user: "👤",
+    assistant: "🤖",
+    plan: "📋",
+    summary: "📝",
+    todo: "✅",
+  }
+  const typeColors: Record<string, string> = {
+    message: CYAN,
+    user: CYAN,
+    assistant: CYAN,
+    plan: GREEN,
+    summary: YELLOW,
+    todo: MAGENTA,
+  }
+
+  if (json) {
+    const allResults = [
+      ...messageResults.results.map(r => ({
+        contentType: "message" as const,
+        sourceId: r.session_id,
+        projectPath: r.project_path,
+        title: sessionTitles.get(r.session_id) || null,
+        timestamp: r.timestamp,
+        snippet: r.snippet,
+        rank: r.rank,
+        type: r.type,
+      })),
+      ...contentResults.results.map(r => ({
+        contentType: r.content_type,
+        sourceId: r.source_id,
+        projectPath: r.project_path,
+        title: r.title,
+        timestamp: r.timestamp,
+        snippet: r.snippet,
+        rank: r.rank,
+      })),
+    ]
+    console.log(JSON.stringify({ query, total, durationMs: duration, results: allResults }, null, 2))
+    closeDb()
+    return
+  }
+
+  if (messageResults.results.length === 0 && contentResults.results.length === 0) {
+    const queryPart = query ? ` for "${query}"` : ""
+    console.log(`No matches found${queryPart} (searched in ${duration}ms)`)
+    closeDb()
+    return
+  }
+
+  const queryPart = query ? ` for "${query}"` : ""
+  console.log(`Found ${total} matches${queryPart} in ${duration}ms:\n`)
+
+  // Display message results (grouped by session)
+  if (messageResults.results.length > 0) {
+    const bySession = new Map<string, typeof messageResults.results>()
+    for (const r of messageResults.results) {
+      const key = r.session_id
+      const existing = bySession.get(key) || []
+      existing.push(r)
+      bySession.set(key, existing)
+    }
+
+    for (const [sessionId, sessionResults] of bySession) {
+      const first = sessionResults[0]!
+      const displayProject = displayProjectPath(first.project_path)
+      const relTime = formatRelativeTime(first.timestamp)
+      const title = sessionTitles.get(sessionId)
+      const sessionDisplay = title ? `${title} (${sessionId.slice(0, 8)})` : `${sessionId.slice(0, 8)}...`
+
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+      console.log(`📁 ${sessionDisplay}  |  ${displayProject}  |  ${relTime}`)
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+
+      for (const r of sessionResults.slice(0, 3)) {
+        const time = formatTime(r.timestamp)
+        const icon = typeIcons[r.type] || "💬"
+        const role = r.type === "user" ? "User" : r.type === "assistant" ? "Assistant" : r.type
+        console.log(`\n${icon} ${role} (${time}):`)
+        console.log("─".repeat(60))
+        if (r.snippet) {
+          const highlighted = r.snippet
+            .replace(/>>>/g, "\x1b[1m\x1b[33m")
+            .replace(/<<</g, "\x1b[0m")
+          console.log(highlighted)
+        } else if (r.content) {
+          // No snippet, show truncated content
+          const content = r.content.slice(0, 300)
+          console.log(content + (r.content.length > 300 ? "..." : ""))
+        }
+      }
+
+      if (sessionResults.length > 3) {
+        console.log(`\n  ... and ${sessionResults.length - 3} more matches in this session`)
+      }
+      console.log()
+    }
+  }
+
+  // Display content results (plans, summaries, todos)
+  if (contentResults.results.length > 0) {
+    if (messageResults.results.length > 0) {
+      console.log(`\n${"─".repeat(60)}`)
+      console.log(`${BOLD}Other Content${RESET}\n`)
+    }
+
+    for (const r of contentResults.results) {
+      const icon = typeIcons[r.content_type] || "📄"
+      const color = typeColors[r.content_type] || ""
+      const relTime = formatRelativeTime(r.timestamp)
+
+      const titleDisplay = r.title || r.source_id.slice(0, 20)
+      const projectPart = r.project_path ? ` ${DIM}${displayProjectPath(r.project_path)}${RESET}` : ""
+
+      console.log(`${icon} ${color}[${r.content_type}]${RESET} ${BOLD}${titleDisplay}${RESET}${projectPart} ${DIM}(${relTime})${RESET}`)
+
+      const highlighted = r.snippet
+        .replace(/>>>/g, "\x1b[1m\x1b[33m")
+        .replace(/<<</g, "\x1b[0m")
+      const indentedSnippet = highlighted.split("\n").map(line => `   ${line}`).join("\n")
+      console.log(indentedSnippet)
+      console.log()
+    }
+  }
+
+  const shownCount = messageResults.results.length + contentResults.results.length
+  if (total > limit) {
+    console.log(`${DIM}(showing ${shownCount} of ${total} matches, use -n/--limit <num> to see more)${RESET}`)
+  } else if (shownCount === limit && total === limit) {
+    // We hit the limit exactly - there may be more
+    console.log(`${DIM}(showing ${shownCount} matches, use -n/--limit <num> to see more if needed)${RESET}`)
+  }
+
+  closeDb()
+}
 
 async function cmdIndex(options: { incremental?: boolean }): Promise<void> {
   console.log(options.incremental ? "Updating session index..." : "Building session index...")
@@ -106,231 +530,21 @@ async function cmdIndex(options: { incremental?: boolean }): Promise<void> {
   const result = await rebuildIndex(db, {
     incremental: options.incremental,
     onProgress: (progress) => {
-      // Only update progress every 50 files to reduce output
       if (progress.filesProcessed - lastProgressUpdate >= 50) {
         lastProgressUpdate = progress.filesProcessed
         process.stdout.write(`\r${progress.filesProcessed} files, ${progress.messagesIndexed} messages...`)
       }
     },
   })
-  process.stdout.write("\r" + " ".repeat(60) + "\r") // Clear progress line
+  process.stdout.write("\r" + " ".repeat(60) + "\r")
 
   console.log(`\n\n✓ Indexed content:`)
   console.log(`  ${result.messages.toLocaleString()} messages from ${result.files} session files`)
-  if (result.writes > 0) {
-    console.log(`  ${result.writes.toLocaleString()} file writes`)
-  }
-  if (result.summaries > 0) {
-    console.log(`  ${result.summaries.toLocaleString()} session summaries`)
-  }
-  if (result.plans > 0) {
-    console.log(`  ${result.plans.toLocaleString()} plan files`)
-  }
-  if (result.todos > 0) {
-    console.log(`  ${result.todos.toLocaleString()} todo lists`)
-  }
-  if (result.skippedOld > 0) {
-    console.log(`  (skipped ${result.skippedOld} sessions older than 30 days)`)
-  }
-
-  closeDb()
-}
-
-async function cmdFts(
-  query: string,
-  options: { limit?: number; project?: string; json?: boolean },
-): Promise<void> {
-  const { limit = 20, project, json } = options
-  const startTime = Date.now()
-
-  const db = getDb()
-  const { results, total } = ftsSearchWithSnippet(db, query, {
-    limit,
-    projectFilter: project,
-  })
-  const duration = Date.now() - startTime
-
-  // Get session titles for display
-  const sessionTitles = getAllSessionTitles()
-
-  if (json) {
-    console.log(JSON.stringify({
-      query,
-      total,
-      durationMs: duration,
-      results: results.map(r => ({
-        sessionId: r.session_id,
-        sessionTitle: sessionTitles.get(r.session_id) || null,
-        projectPath: r.project_path,
-        type: r.type,
-        timestamp: r.timestamp,
-        snippet: r.snippet,
-        rank: r.rank,
-      })),
-    }, null, 2))
-    closeDb()
-    return
-  }
-
-  if (results.length === 0) {
-    console.log(`No matches found for "${query}" (searched in ${duration}ms)`)
-    closeDb()
-    return
-  }
-
-  console.log(`Found ${total} matches for "${query}" in ${duration}ms:\n`)
-
-  // Group by session for cleaner output
-  const bySession = new Map<string, typeof results>()
-  for (const r of results) {
-    const key = r.session_id
-    const existing = bySession.get(key) || []
-    existing.push(r)
-    bySession.set(key, existing)
-  }
-
-  for (const [sessionId, sessionResults] of bySession) {
-    const first = sessionResults[0]!
-    const displayProject = displayProjectPath(first.project_path)
-    const relTime = formatRelativeTime(first.timestamp)
-    const title = sessionTitles.get(sessionId)
-    const sessionDisplay = title ? `${title} (${sessionId.slice(0, 8)})` : `${sessionId.slice(0, 8)}...`
-
-    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
-    console.log(`📁 ${sessionDisplay}  |  ${displayProject}  |  ${relTime}`)
-    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
-
-    for (const r of sessionResults.slice(0, 3)) {
-      const time = formatTime(r.timestamp)
-      const role = r.type === "user" ? "👤 User" : r.type === "assistant" ? "🤖 Assistant" : r.type
-      console.log(`\n${role} (${time}):`)
-      console.log("─".repeat(60))
-      // Snippet has >>> and <<< markers for highlighting
-      const highlighted = r.snippet
-        .replace(/>>>/g, "\x1b[1m\x1b[33m")
-        .replace(/<<</g, "\x1b[0m")
-      console.log(highlighted)
-    }
-
-    if (sessionResults.length > 3) {
-      console.log(`\n  ... and ${sessionResults.length - 3} more matches in this session`)
-    }
-    console.log()
-  }
-
-  if (total > limit) {
-    console.log(`(showing ${results.length} of ${total} matches, use --limit N for more)`)
-  }
-
-  closeDb()
-}
-
-/**
- * Unified search across all content types: messages, plans, summaries, todos
- */
-async function cmdFind(
-  query: string,
-  options: { limit?: number; project?: string; type?: string; json?: boolean },
-): Promise<void> {
-  const { limit = 30, project, type, json } = options
-  const startTime = Date.now()
-
-  const db = getDb()
-
-  // Parse type filter
-  let types: ContentType[] | undefined
-  if (type) {
-    types = type.split(",").map(t => t.trim()) as ContentType[]
-  }
-
-  const { results, total } = searchAll(db, query, {
-    limit,
-    projectFilter: project,
-    types,
-  })
-  const duration = Date.now() - startTime
-
-  // Get session titles for display
-  const sessionTitles = getAllSessionTitles()
-
-  if (json) {
-    console.log(JSON.stringify({
-      query,
-      total,
-      durationMs: duration,
-      results: results.map(r => ({
-        contentType: r.content_type,
-        sourceId: r.source_id,
-        projectPath: r.project_path,
-        title: r.title || sessionTitles.get(r.source_id) || null,
-        timestamp: r.timestamp,
-        snippet: r.snippet,
-        rank: r.rank,
-      })),
-    }, null, 2))
-    closeDb()
-    return
-  }
-
-  if (results.length === 0) {
-    console.log(`No matches found for "${query}" (searched in ${duration}ms)`)
-    closeDb()
-    return
-  }
-
-  const DIM = "\x1b[2m"
-  const BOLD = "\x1b[1m"
-  const RESET = "\x1b[0m"
-  const CYAN = "\x1b[36m"
-  const YELLOW = "\x1b[33m"
-  const GREEN = "\x1b[32m"
-  const MAGENTA = "\x1b[35m"
-
-  console.log(`Found ${total} matches for "${query}" in ${duration}ms:\n`)
-
-  // Group by content type for cleaner output
-  const typeIcons: Record<string, string> = {
-    message: "💬",
-    plan: "📋",
-    summary: "📝",
-    todo: "✅",
-  }
-  const typeColors: Record<string, string> = {
-    message: CYAN,
-    plan: GREEN,
-    summary: YELLOW,
-    todo: MAGENTA,
-  }
-
-  for (const r of results) {
-    const icon = typeIcons[r.content_type] || "📄"
-    const color = typeColors[r.content_type] || ""
-    const relTime = formatRelativeTime(r.timestamp)
-
-    // Build title display
-    let titleDisplay = r.title
-    if (!titleDisplay && r.content_type === "message") {
-      titleDisplay = sessionTitles.get(r.source_id) || null
-    }
-    const titlePart = titleDisplay ? `${BOLD}${titleDisplay}${RESET}` : `${DIM}${r.source_id.slice(0, 8)}${RESET}`
-
-    // Project path for messages
-    const projectPart = r.project_path ? ` ${DIM}${displayProjectPath(r.project_path)}${RESET}` : ""
-
-    console.log(`${icon} ${color}[${r.content_type}]${RESET} ${titlePart}${projectPart} ${DIM}(${relTime})${RESET}`)
-
-    // Show snippet
-    const highlighted = r.snippet
-      .replace(/>>>/g, "\x1b[1m\x1b[33m")
-      .replace(/<<</g, "\x1b[0m")
-    const indentedSnippet = highlighted.split("\n").map(line => `   ${line}`).join("\n")
-    console.log(indentedSnippet)
-    console.log()
-  }
-
-  if (total > limit) {
-    console.log(`${DIM}(showing ${results.length} of ${total} matches, use --limit N for more)${RESET}`)
-  }
+  if (result.writes > 0) console.log(`  ${result.writes.toLocaleString()} file writes`)
+  if (result.summaries > 0) console.log(`  ${result.summaries.toLocaleString()} session summaries`)
+  if (result.plans > 0) console.log(`  ${result.plans.toLocaleString()} plan files`)
+  if (result.todos > 0) console.log(`  ${result.todos.toLocaleString()} todo lists`)
+  if (result.skippedOld > 0) console.log(`  (skipped ${result.skippedOld} sessions older than 30 days)`)
 
   closeDb()
 }
@@ -345,9 +559,7 @@ async function cmdNow(): Promise<void> {
     return
   }
 
-  // Get session titles
   const sessionTitles = getAllSessionTitles()
-
   console.log("Active sessions (last 5 minutes):\n")
 
   for (const session of active) {
@@ -390,7 +602,6 @@ async function cmdHour(): Promise<void> {
   }
 
   console.log(`Total: ${totalMessages} messages across ${totalSessions} sessions in ${summary.length} projects`)
-
   closeDb()
 }
 
@@ -420,101 +631,19 @@ async function cmdDay(): Promise<void> {
   }
 
   console.log(`Total: ${totalMessages} messages across ${totalSessions} sessions in ${summary.length} projects`)
-
   closeDb()
-}
-
-async function cmdSimilar(query: string, options: { limit?: number }): Promise<void> {
-  const { limit = 5 } = options
-  const db = getDb()
-  const results = findSimilarQueries(db, query, { limit })
-
-  if (results.length === 0) {
-    console.log(`No similar queries found for "${query}"`)
-    closeDb()
-    return
-  }
-
-  console.log(`Similar past queries for "${query}":\n`)
-
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i]!
-    const displayProject = displayProjectPath(r.project_path)
-    const relTime = formatRelativeTime(r.timestamp)
-
-    console.log(`${i + 1}. ${displayProject} (${relTime})`)
-    console.log(`   📝 User: ${(r.user_content || "").slice(0, 200)}${(r.user_content?.length || 0) > 200 ? "..." : ""}`)
-    if (r.assistant_content) {
-      console.log(`   🤖 Response: ${r.assistant_content.slice(0, 200)}${r.assistant_content.length > 200 ? "..." : ""}`)
-    }
-    console.log()
-  }
-
-  closeDb()
-}
-
-// ============================================================================
-// Legacy commands (backwards compatible)
-// ============================================================================
-
-interface SessionInfo {
-  file: string
-  sessionId: string
-  project: string
-  size: number
-  mtime: Date
-  messageCount: number
-  firstTimestamp?: string
-  lastTimestamp?: string
-}
-
-async function getSessionInfo(filePath: string): Promise<SessionInfo> {
-  const stats = fs.statSync(filePath)
-  const relativePath = path.relative(PROJECTS_DIR, filePath)
-  const project = relativePath.split(path.sep)[0] || "unknown"
-
-  let messageCount = 0
-  let firstTimestamp: string | undefined
-  let lastTimestamp: string | undefined
-  let sessionId = path.basename(filePath, ".jsonl")
-
-  const fileStream = fs.createReadStream(filePath)
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  })
-
-  for await (const line of rl) {
-    if (!line.trim()) continue
-    try {
-      const record = JSON.parse(line) as JsonlRecord
-      if (record.sessionId) sessionId = record.sessionId
-      if (record.timestamp) {
-        if (!firstTimestamp) firstTimestamp = record.timestamp
-        lastTimestamp = record.timestamp
-      }
-      if (record.type === "assistant" || record.type === "user") {
-        messageCount++
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  return {
-    file: relativePath,
-    sessionId,
-    project,
-    size: stats.size,
-    mtime: stats.mtime,
-    messageCount,
-    firstTimestamp,
-    lastTimestamp,
-  }
 }
 
 async function cmdList(projectFilter?: string): Promise<void> {
   console.log("Scanning sessions...\n")
+
+  interface SessionInfo {
+    file: string
+    sessionId: string
+    project: string
+    size: number
+    mtime: Date
+  }
 
   const sessions: SessionInfo[] = []
 
@@ -522,8 +651,13 @@ async function cmdList(projectFilter?: string): Promise<void> {
     const relativePath = path.relative(PROJECTS_DIR, sessionFile)
     const project = relativePath.split(path.sep)[0] || ""
 
-    if (projectFilter && !project.toLowerCase().includes(projectFilter.toLowerCase())) {
-      continue
+    // Use glob matching if pattern contains wildcards, otherwise substring
+    if (projectFilter) {
+      if (projectFilter.includes("*")) {
+        if (!matchProjectGlob(project, projectFilter)) continue
+      } else if (!project.toLowerCase().includes(projectFilter.toLowerCase())) {
+        continue
+      }
     }
 
     const stats = fs.statSync(sessionFile)
@@ -533,31 +667,20 @@ async function cmdList(projectFilter?: string): Promise<void> {
       project,
       size: stats.size,
       mtime: stats.mtime,
-      messageCount: 0,
-      firstTimestamp: undefined,
-      lastTimestamp: undefined,
     })
   }
 
-  // Sort by modification time, newest first
   sessions.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
-  // Split into recent (<30 days) and older (>30 days)
   const cutoffTime = Date.now() - THIRTY_DAYS_MS
   const recentSessions = sessions.filter(s => s.mtime.getTime() >= cutoffTime)
   const olderSessions = sessions.filter(s => s.mtime.getTime() < cutoffTime)
 
-  // Get session titles
   const sessionTitles = getAllSessionTitles()
 
-  // Display recent sessions (flat list, sorted by recency)
   if (recentSessions.length === 0) {
     console.log("No sessions in the last 30 days")
   } else {
-    const DIM = "\x1b[2m"
-    const RESET = "\x1b[0m"
-
-    // Calculate column widths for alignment
     const maxNameLen = Math.min(40, Math.max(...recentSessions.map(s => {
       const title = sessionTitles.get(s.sessionId)
       return (title || displayProjectPath(s.project)).length
@@ -568,20 +691,14 @@ async function cmdList(projectFilter?: string): Promise<void> {
       const displayProject = displayProjectPath(s.project)
       const date = s.mtime.toLocaleDateString() + " " + s.mtime.toLocaleTimeString()
       const size = formatBytes(s.size).padStart(8)
-
-      // Name: title if available, otherwise short project path
       const nameDisplay = (title || displayProject).slice(0, 40).padEnd(maxNameLen)
-
-      // Single line: name  id  size  date
       console.log(`${nameDisplay}  ${s.sessionId}  ${size}  ${date}`)
     }
   }
 
-  // Summary line for recent sessions
   const recentTotalSize = recentSessions.reduce((sum, s) => sum + s.size, 0)
   console.log(`Showing ${recentSessions.length} sessions (${formatBytes(recentTotalSize)}) from the last 30 days`)
 
-  // Summary of older sessions
   if (olderSessions.length > 0) {
     const olderTotalSize = olderSessions.reduce((sum, s) => sum + s.size, 0)
     console.log(`\nNot shown: ${olderSessions.length} sessions (${formatBytes(olderTotalSize)}) older than 30 days`)
@@ -606,33 +723,46 @@ async function cmdShow(sessionIdOrFile: string): Promise<void> {
 
   console.log(`Session: ${path.relative(PROJECTS_DIR, sessionFile)}\n`)
 
-  const info = await getSessionInfo(sessionFile)
-  const displayProject = displayProjectPath(info.project)
+  const stats = fs.statSync(sessionFile)
+  const relativePath = path.relative(PROJECTS_DIR, sessionFile)
+  const project = relativePath.split(path.sep)[0] || "unknown"
+  const sessionId = path.basename(sessionFile, ".jsonl")
 
-  // Get session title
+  let messageCount = 0
+  let firstTimestamp: string | undefined
+  let lastTimestamp: string | undefined
+
+  const fileStream = fs.createReadStream(sessionFile)
+  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity })
+
+  for await (const line of rl) {
+    if (!line.trim()) continue
+    try {
+      const record = JSON.parse(line) as JsonlRecord
+      if (record.timestamp) {
+        if (!firstTimestamp) firstTimestamp = record.timestamp
+        lastTimestamp = record.timestamp
+      }
+      if (record.type === "assistant" || record.type === "user") messageCount++
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
   const db = getDb()
-  const title = getSessionTitle(db, info.sessionId)
+  const title = getSessionTitle(db, sessionId)
 
-  console.log(`Session ID:    ${info.sessionId}`)
-  if (title) {
-    console.log(`Title:         ${title}`)
-  }
-  console.log(`Project:       ${displayProject}`)
-  console.log(`Size:          ${formatBytes(info.size)}`)
-  console.log(`Messages:      ${info.messageCount}`)
-  if (info.firstTimestamp) {
-    console.log(`Started:       ${new Date(info.firstTimestamp).toLocaleString()}`)
-  }
-  if (info.lastTimestamp) {
-    console.log(`Last activity: ${new Date(info.lastTimestamp).toLocaleString()}`)
-  }
+  console.log(`Session ID:    ${sessionId}`)
+  if (title) console.log(`Title:         ${title}`)
+  console.log(`Project:       ${displayProjectPath(project)}`)
+  console.log(`Size:          ${formatBytes(stats.size)}`)
+  console.log(`Messages:      ${messageCount}`)
+  if (firstTimestamp) console.log(`Started:       ${new Date(firstTimestamp).toLocaleString()}`)
+  if (lastTimestamp) console.log(`Last activity: ${new Date(lastTimestamp).toLocaleString()}`)
 
-  // Show file writes in this session
   const writes = db
-    .prepare(
-      "SELECT file_path, timestamp, content_size FROM writes WHERE session_id = ? ORDER BY timestamp",
-    )
-    .all(info.sessionId) as { file_path: string; timestamp: string; content_size: number }[]
+    .prepare("SELECT file_path, timestamp, content_size FROM writes WHERE session_id = ? ORDER BY timestamp")
+    .all(sessionId) as { file_path: string; timestamp: string; content_size: number }[]
 
   if (writes.length > 0) {
     console.log(`\nFile writes (${writes.length}):`)
@@ -642,59 +772,59 @@ async function cmdShow(sessionIdOrFile: string): Promise<void> {
       const shortPath = w.file_path.replace(os.homedir(), "~")
       console.log(`  ${time}  ${size.padStart(8)}  ${shortPath}`)
     }
-    if (writes.length > 20) {
-      console.log(`  ... and ${writes.length - 20} more writes`)
-    }
+    if (writes.length > 20) console.log(`  ... and ${writes.length - 20} more writes`)
   }
 
   closeDb()
 }
 
-async function cmdSearch(pattern: string): Promise<void> {
+async function cmdStats(): Promise<void> {
   const db = getDb()
 
-  // Convert glob pattern to SQL LIKE pattern
-  const sqlPattern = pattern
-    .replace(/\*\*/g, "%")
-    .replace(/\*/g, "%")
-    .replace(/\?/g, "_")
+  const totalWrites = (db.prepare("SELECT COUNT(*) as count FROM writes").get() as { count: number }).count
+  const uniqueFiles = (db.prepare("SELECT COUNT(DISTINCT file_path) as count FROM writes").get() as { count: number }).count
+  const uniqueSessions = (db.prepare("SELECT COUNT(DISTINCT session_id) as count FROM writes").get() as { count: number }).count
+  const totalWriteSize = (db.prepare("SELECT SUM(content_size) as total FROM writes").get() as { total: number }).total
+  const storedContent = (db.prepare("SELECT COUNT(*) as count FROM writes WHERE content IS NOT NULL").get() as { count: number }).count
 
-  const rows = db
-    .prepare(`
-      SELECT file_path, timestamp, content_hash, content_size, session_id
-      FROM writes
-      WHERE file_path LIKE ?
-      ORDER BY timestamp DESC
-    `)
-    .all(`%${sqlPattern}%`) as WriteRecord[]
+  const totalMessages = (db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number }).count
+  const totalSessions = (db.prepare("SELECT COUNT(*) as count FROM sessions").get() as { count: number }).count
+  const userMessages = (db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'user'").get() as { count: number }).count
+  const assistantMessages = (db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'assistant'").get() as { count: number }).count
 
-  if (rows.length === 0) {
-    console.log(`No writes found matching: ${pattern}`)
-    closeDb()
-    return
-  }
+  const lastRebuild = getIndexMeta(db, "last_rebuild")
+  const rebuildDuration = getIndexMeta(db, "rebuild_duration_ms")
 
-  console.log(`Found ${rows.length} writes matching "${pattern}":\n`)
+  console.log("Session Index Statistics\n")
+  console.log("=== Messages (FTS5) ===")
+  console.log(`Total sessions:          ${totalSessions.toLocaleString()}`)
+  console.log(`Total messages indexed:  ${totalMessages.toLocaleString()}`)
+  console.log(`  User messages:         ${userMessages.toLocaleString()}`)
+  console.log(`  Assistant messages:    ${assistantMessages.toLocaleString()}`)
+  console.log()
+  console.log("=== File Writes ===")
+  console.log(`Total writes indexed:    ${totalWrites.toLocaleString()}`)
+  console.log(`Unique files:            ${uniqueFiles.toLocaleString()}`)
+  console.log(`Unique sessions:         ${uniqueSessions.toLocaleString()}`)
+  console.log(`Total content written:   ${formatBytes(totalWriteSize || 0)}`)
+  console.log(`Writes with content:     ${storedContent.toLocaleString()} (${totalWrites > 0 ? ((storedContent / totalWrites) * 100).toFixed(1) : 0}%)`)
+  console.log()
+  console.log("=== Index Info ===")
+  console.log(`Last rebuild:            ${lastRebuild ? new Date(lastRebuild).toLocaleString() : "never"}`)
+  if (rebuildDuration) console.log(`Rebuild duration:        ${(parseInt(rebuildDuration, 10) / 1000).toFixed(1)}s`)
+  console.log(`Database location:       ${DB_PATH}`)
 
-  // Group by file path
-  const byPath = new Map<string, WriteRecord[]>()
-  for (const row of rows) {
-    const existing = byPath.get(row.file_path) || []
-    existing.push(row)
-    byPath.set(row.file_path, existing)
-  }
+  const topFiles = db.prepare(`
+    SELECT file_path, COUNT(*) as count FROM writes
+    GROUP BY file_path ORDER BY count DESC LIMIT 10
+  `).all() as { file_path: string; count: number }[]
 
-  for (const [filePath, versions] of byPath) {
-    console.log(`📄 ${filePath}`)
-    for (const v of versions.slice(0, 5)) {
-      const date = new Date(v.timestamp).toLocaleString()
-      const size = formatBytes(v.content_size)
-      console.log(`   ${date}  ${size}  [${v.content_hash}]  session:${v.session_id.slice(0, 8)}`)
+  if (topFiles.length > 0) {
+    console.log("\nMost frequently written files:")
+    for (const f of topFiles) {
+      const shortPath = f.file_path.replace(os.homedir(), "~")
+      console.log(`  ${f.count.toString().padStart(4)}x  ${shortPath}`)
     }
-    if (versions.length > 5) {
-      console.log(`   ... and ${versions.length - 5} more versions`)
-    }
-    console.log()
   }
 
   closeDb()
@@ -725,9 +855,7 @@ async function cmdGrep(
     const relativePath = path.relative(PROJECTS_DIR, sessionFile)
     const projectName = relativePath.split(path.sep)[0] || ""
 
-    if (project && !projectName.toLowerCase().includes(project.toLowerCase())) {
-      continue
-    }
+    if (project && !projectName.toLowerCase().includes(project.toLowerCase())) continue
 
     filesSearched++
 
@@ -740,11 +868,8 @@ async function cmdGrep(
 
       try {
         const record = JSON.parse(line) as JsonlRecord
-
         const textContent = extractTextContent(record)
-        if (!textContent) continue
-
-        if (!regex.test(textContent)) continue
+        if (!textContent || !regex.test(textContent)) continue
 
         const contentLines = textContent.split("\n")
         for (let j = 0; j < contentLines.length; j++) {
@@ -767,13 +892,11 @@ async function cmdGrep(
 
           if (matches.length >= limit) break
         }
-
         if (matches.length >= limit) break
       } catch {
         // Skip malformed JSON
       }
     }
-
     if (matches.length >= limit) break
   }
 
@@ -784,7 +907,6 @@ async function cmdGrep(
 
   console.log(`Found ${matches.length} matches in ${filesSearched} files:\n`)
 
-  // Group by session
   const bySession = new Map<string, GrepMatch[]>()
   for (const match of matches) {
     const key = match.sessionId
@@ -808,34 +930,25 @@ async function cmdGrep(
 
       console.log(`\n${role} (${time}):`)
       console.log("─".repeat(60))
-
-      const highlighted = highlightMatch(match.context, regex)
-      console.log(highlighted)
+      console.log(highlightMatch(match.context, regex))
     }
 
-    if (sessionMatches.length > 5) {
-      console.log(`\n  ... and ${sessionMatches.length - 5} more matches in this session`)
-    }
+    if (sessionMatches.length > 5) console.log(`\n  ... and ${sessionMatches.length - 5} more matches in this session`)
     console.log()
   }
 
-  if (matches.length >= limit) {
-    console.log(`\n(showing first ${limit} matches, use --limit N for more)`)
-  }
+  if (matches.length >= limit) console.log(`\n(showing first ${limit} matches, use -n/--limit for more)`)
 }
 
-async function cmdWrites(dateFilter?: string): Promise<void> {
+async function cmdWrites(options: { date?: string }): Promise<void> {
   const db = getDb()
 
-  let query = `
-    SELECT file_path, timestamp, content_hash, content_size, session_id
-    FROM writes
-  `
+  let query = `SELECT file_path, timestamp, content_hash, content_size, session_id FROM writes`
   const params: string[] = []
 
-  if (dateFilter) {
+  if (options.date) {
     query += ` WHERE timestamp LIKE ?`
-    params.push(`${dateFilter}%`)
+    params.push(`${options.date}%`)
   }
 
   query += ` ORDER BY timestamp DESC LIMIT 100`
@@ -843,12 +956,12 @@ async function cmdWrites(dateFilter?: string): Promise<void> {
   const rows = db.prepare(query).all(...params) as WriteRecord[]
 
   if (rows.length === 0) {
-    console.log(dateFilter ? `No writes found for date: ${dateFilter}` : "No writes found")
+    console.log(options.date ? `No writes found for date: ${options.date}` : "No writes found")
     closeDb()
     return
   }
 
-  console.log(`Recent writes${dateFilter ? ` on ${dateFilter}` : ""}:\n`)
+  console.log(`Recent writes${options.date ? ` on ${options.date}` : ""}:\n`)
 
   for (const row of rows) {
     const date = new Date(row.timestamp).toLocaleString()
@@ -857,22 +970,19 @@ async function cmdWrites(dateFilter?: string): Promise<void> {
     console.log(`${date}  ${size.padStart(8)}  ${shortPath}`)
   }
 
-  if (rows.length === 100) {
-    console.log("\n(showing first 100 results)")
-  }
-
+  if (rows.length === 100) console.log("\n(showing first 100 results)")
   closeDb()
 }
 
-async function cmdRestore(filePath: string, sessionId?: string): Promise<void> {
+async function cmdRestore(filePath: string, options: { session?: string }): Promise<void> {
   const db = getDb()
 
   let query = `SELECT * FROM writes WHERE file_path LIKE ?`
   const params: string[] = [`%${filePath}`]
 
-  if (sessionId) {
+  if (options.session) {
     query += ` AND session_id LIKE ?`
-    params.push(`${sessionId}%`)
+    params.push(`${options.session}%`)
   }
 
   query += ` ORDER BY timestamp DESC`
@@ -909,9 +1019,7 @@ async function cmdRestore(filePath: string, sessionId?: string): Promise<void> {
       const date = new Date(row.timestamp).toLocaleString()
       const hasContent = row.content ? "✓" : "✗"
       console.log(`${i + 1}. ${date}  [${row.content_hash}]  ${hasContent}content  session:${row.session_id.slice(0, 8)}`)
-      if (row.file_path !== filePath) {
-        console.log(`   ${row.file_path}`)
-      }
+      if (row.file_path !== filePath) console.log(`   ${row.file_path}`)
     }
 
     console.log("\nTo restore a specific version, use:")
@@ -921,64 +1029,48 @@ async function cmdRestore(filePath: string, sessionId?: string): Promise<void> {
   closeDb()
 }
 
-async function cmdStats(): Promise<void> {
+async function cmdWritesSearch(pattern: string): Promise<void> {
   const db = getDb()
 
-  const totalWrites = (db.prepare("SELECT COUNT(*) as count FROM writes").get() as { count: number }).count
-  const uniqueFiles = (db.prepare("SELECT COUNT(DISTINCT file_path) as count FROM writes").get() as { count: number }).count
-  const uniqueSessions = (db.prepare("SELECT COUNT(DISTINCT session_id) as count FROM writes").get() as { count: number }).count
-  const totalWriteSize = (db.prepare("SELECT SUM(content_size) as total FROM writes").get() as { total: number }).total
-  const storedContent = (db.prepare("SELECT COUNT(*) as count FROM writes WHERE content IS NOT NULL").get() as { count: number }).count
+  const sqlPattern = pattern.replace(/\*\*/g, "%").replace(/\*/g, "%").replace(/\?/g, "_")
 
-  // New message stats
-  const totalMessages = (db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number }).count
-  const totalSessions = (db.prepare("SELECT COUNT(*) as count FROM sessions").get() as { count: number }).count
-  const userMessages = (db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'user'").get() as { count: number }).count
-  const assistantMessages = (db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'assistant'").get() as { count: number }).count
+  const rows = db.prepare(`
+    SELECT file_path, timestamp, content_hash, content_size, session_id
+    FROM writes WHERE file_path LIKE ? ORDER BY timestamp DESC
+  `).all(`%${sqlPattern}%`) as WriteRecord[]
 
-  const lastRebuild = getIndexMeta(db, "last_rebuild")
-  const rebuildDuration = getIndexMeta(db, "rebuild_duration_ms")
-
-  console.log("Session Index Statistics\n")
-  console.log("=== Messages (FTS5) ===")
-  console.log(`Total sessions:          ${totalSessions.toLocaleString()}`)
-  console.log(`Total messages indexed:  ${totalMessages.toLocaleString()}`)
-  console.log(`  User messages:         ${userMessages.toLocaleString()}`)
-  console.log(`  Assistant messages:    ${assistantMessages.toLocaleString()}`)
-  console.log()
-  console.log("=== File Writes ===")
-  console.log(`Total writes indexed:    ${totalWrites.toLocaleString()}`)
-  console.log(`Unique files:            ${uniqueFiles.toLocaleString()}`)
-  console.log(`Unique sessions:         ${uniqueSessions.toLocaleString()}`)
-  console.log(`Total content written:   ${formatBytes(totalWriteSize || 0)}`)
-  console.log(`Writes with content:     ${storedContent.toLocaleString()} (${totalWrites > 0 ? ((storedContent / totalWrites) * 100).toFixed(1) : 0}%)`)
-  console.log()
-  console.log("=== Index Info ===")
-  console.log(`Last rebuild:            ${lastRebuild ? new Date(lastRebuild).toLocaleString() : "never"}`)
-  if (rebuildDuration) {
-    console.log(`Rebuild duration:        ${(parseInt(rebuildDuration, 10) / 1000).toFixed(1)}s`)
+  if (rows.length === 0) {
+    console.log(`No writes found matching: ${pattern}`)
+    closeDb()
+    return
   }
-  console.log(`Database location:       ${DB_PATH}`)
 
-  // Top 10 most written files
-  const topFiles = db.prepare(`
-    SELECT file_path, COUNT(*) as count
-    FROM writes
-    GROUP BY file_path
-    ORDER BY count DESC
-    LIMIT 10
-  `).all() as { file_path: string; count: number }[]
+  console.log(`Found ${rows.length} writes matching "${pattern}":\n`)
 
-  if (topFiles.length > 0) {
-    console.log("\nMost frequently written files:")
-    for (const f of topFiles) {
-      const shortPath = f.file_path.replace(os.homedir(), "~")
-      console.log(`  ${f.count.toString().padStart(4)}x  ${shortPath}`)
+  const byPath = new Map<string, WriteRecord[]>()
+  for (const row of rows) {
+    const existing = byPath.get(row.file_path) || []
+    existing.push(row)
+    byPath.set(row.file_path, existing)
+  }
+
+  for (const [fp, versions] of byPath) {
+    console.log(`📄 ${fp}`)
+    for (const v of versions.slice(0, 5)) {
+      const date = new Date(v.timestamp).toLocaleString()
+      const size = formatBytes(v.content_size)
+      console.log(`   ${date}  ${size}  [${v.content_hash}]  session:${v.session_id.slice(0, 8)}`)
     }
+    if (versions.length > 5) console.log(`   ... and ${versions.length - 5} more versions`)
+    console.log()
   }
 
   closeDb()
 }
+
+// ============================================================================
+// Help display
+// ============================================================================
 
 function printHelp(): void {
   const DIM = "\x1b[2m"
@@ -991,26 +1083,12 @@ function printHelp(): void {
 ${BOLD}History${RESET} - Search and manage Claude Code session history
 `)
 
-  // Try to show live stats
+  // Show live stats
   try {
     const db = getDb()
-
-    // Get stats
     const totalSessions = (db.prepare("SELECT COUNT(*) as count FROM sessions").get() as { count: number }).count
     const totalMessages = (db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number }).count
     const totalWrites = (db.prepare("SELECT COUNT(*) as count FROM writes").get() as { count: number }).count
-
-    // Get recent activity (last 24 hours)
-    const oneDayAgo = Date.now() - ONE_DAY_MS
-    const recentSessions = db.prepare(`
-      SELECT s.project_path, s.id as session_id, s.updated_at as last_activity, s.message_count as msg_count
-      FROM sessions s
-      WHERE s.updated_at > ?
-      ORDER BY s.updated_at DESC
-      LIMIT 5
-    `).all(oneDayAgo) as { project_path: string; session_id: string; last_activity: number; msg_count: number }[]
-
-    // Get active now (last 5 min)
     const activeNow = getActiveSessionsInWindow(db, FIVE_MINUTES_MS)
 
     console.log(`${BOLD}Index Stats${RESET}`)
@@ -1027,37 +1105,28 @@ ${BOLD}History${RESET} - Search and manage Claude Code session history
       console.log()
     }
 
-    if (recentSessions.length > 0) {
-      // Get session titles
-      const sessionTitles = getAllSessionTitles()
-
-      console.log(`${BOLD}Recent Sessions${RESET} ${DIM}(last 24h)${RESET}`)
-      for (const s of recentSessions) {
-        const project = displayProjectPath(s.project_path)
-        const relTime = formatRelativeTime(s.last_activity)
-        const title = sessionTitles.get(s.session_id)
-        const sessionDisplay = title
-          ? `${CYAN}${title}${RESET} ${DIM}(${s.session_id.slice(0, 8)})${RESET}`
-          : s.session_id.slice(0, 8)
-        console.log(`  ${sessionDisplay}  ${project} ${DIM}(${s.msg_count} msgs, ${relTime})${RESET}`)
-      }
-      console.log()
-    }
-
     closeDb()
   } catch {
     console.log(`${DIM}No index found. Run 'bun history index' to build.${RESET}`)
     console.log()
   }
 
-  console.log(`${BOLD}Commands${RESET}
+  console.log(`${BOLD}Usage${RESET}
+  bun history [query] [options]
 
-  ${YELLOW}Search (find anything)${RESET}
-    find <query>         Search ALL content: messages, plans, todos, summaries
-    fts <query>          Search session messages only
-    similar <query>      Find similar past questions
-    grep <pattern>       Regex search (slow, no index needed)
+${BOLD}Search Options${RESET}
+  ${CYAN}-i, --include <types>${RESET}   Content types: p,m,s,t or plans,messages,summaries,todos
+  ${CYAN}-g, --grep${RESET}              Regex mode (slower, scans files)
+  ${CYAN}-q, --question${RESET}          Only user questions (type=user)
+  ${CYAN}-r, --response${RESET}          Only assistant responses (type=assistant)
+  ${CYAN}-t, --tool <name>${RESET}       Messages with specific tool (Write, Bash, etc.)
+  ${CYAN}-s, --since <time>${RESET}      Time window: 1h, 1d, 1w, today, yesterday ${DIM}(default: 30d)${RESET}
+  ${CYAN}-p, --project <glob>${RESET}    Project glob match (e.g., "*km*", "*/pim/*")
+  ${CYAN}--session <id>${RESET}          Specific session
+  ${CYAN}-n, --limit <num>${RESET}       Max results ${DIM}(default: 10)${RESET}
+  ${CYAN}--json${RESET}                  JSON output
 
+${BOLD}Commands${RESET}
   ${YELLOW}Activity${RESET}
     now                  Active sessions (last 5 minutes)
     hour                 Last hour summary
@@ -1069,7 +1138,7 @@ ${BOLD}History${RESET} - Search and manage Claude Code session history
     stats                Full index statistics
 
   ${YELLOW}File Recovery${RESET}
-    search <pattern>     Search writes by file path
+    writes-search <pat>  Search writes by file path
     writes [--date D]    List recent writes
     restore <file>       Restore file content
 
@@ -1077,186 +1146,147 @@ ${BOLD}History${RESET} - Search and manage Claude Code session history
     index                Build/rebuild FTS5 index
     index --incremental  Only index new sessions
 
-${BOLD}Options${RESET}
-  --limit <n>          Max results (default: 30)
-  --project <name>     Filter by project
-  --type <types>       Filter by type: message,plan,summary,todo
-  --json               Output as JSON
-
 ${BOLD}Examples${RESET}
-  ${DIM}# Find anything${RESET}
-  bun history find "test infrastructure"
-  bun history find "refactor" --type plan,summary
+  ${DIM}# Basic search (all content)${RESET}
+  bun history "createRepo"
 
-  ${DIM}# Search sessions only${RESET}
-  bun history fts "createBoard" --project km
+  ${DIM}# Questions only, last hour${RESET}
+  bun history -q -s 1h "how do I"
 
-  ${DIM}# Check what's happening${RESET}
-  bun history now
+  ${DIM}# All questions from today (no query needed)${RESET}
+  bun history -q -s today
 
-  ${DIM}# Recover lost work${RESET}
-  bun history restore src/index.ts
+  ${DIM}# Plans and messages about refactoring${RESET}
+  bun history -i p,m "refactor"
+
+  ${DIM}# Regex search for function patterns${RESET}
+  bun history -g "function\\s+\\w+Async"
+
+  ${DIM}# All Write operations in km project today${RESET}
+  bun history -t Write -p "*km*" -s 1d
+
+  ${DIM}# Assistant responses mentioning errors, last week${RESET}
+  bun history -r -s 1w "error"
 `)
 }
 
 // ============================================================================
-// Main entry point
+// CLI with Commander.js
 // ============================================================================
 
+const program = new Command()
+
+program
+  .name("history")
+  .description("Search and manage Claude Code session history")
+  .version("1.0.0")
+  .allowUnknownOption(false)
+
+// Default command: search
+program
+  .argument("[query]", "Search query")
+  .option("-i, --include <types>", "Content types: p,m,s,t or plans,messages,summaries,todos")
+  .option("-g, --grep", "Regex mode (slower, scans files)")
+  .option("-q, --question", "Only user questions")
+  .option("-r, --response", "Only assistant responses")
+  .option("-t, --tool <name>", "Messages with specific tool")
+  .option("-s, --since <time>", "Time window: 1h, 1d, 1w, today, yesterday (default: 30d)")
+  .option("-p, --project <glob>", "Project glob match")
+  .option("--session <id>", "Specific session")
+  .option("-n, --limit <num>", "Max results (default: 10)")
+  .option("--json", "JSON output")
+  .action(async (query: string | undefined, options: SearchOptions) => {
+    await cmdSearch(query, options)
+  })
+
+// Subcommands
+program
+  .command("index")
+  .description("Build/rebuild FTS5 index")
+  .option("--incremental", "Only index new sessions")
+  .action(async (options: { incremental?: boolean }) => {
+    await cmdIndex(options)
+  })
+
+program
+  .command("now")
+  .description("Active sessions (last 5 minutes)")
+  .action(cmdNow)
+
+program
+  .command("hour")
+  .description("Last hour summary")
+  .action(cmdHour)
+
+program
+  .command("day")
+  .description("Today's summary")
+  .action(cmdDay)
+
+program
+  .command("list [project]")
+  .description("List all sessions")
+  .action(cmdList)
+
+program
+  .command("show <session-id>")
+  .description("Show session details")
+  .action(cmdShow)
+
+program
+  .command("stats")
+  .description("Full index statistics")
+  .action(cmdStats)
+
+program
+  .command("writes")
+  .description("List recent writes")
+  .option("--date <date>", "Filter by date")
+  .action(cmdWrites)
+
+program
+  .command("writes-search <pattern>")
+  .alias("ws")
+  .description("Search writes by file path")
+  .action(cmdWritesSearch)
+
+program
+  .command("restore <file>")
+  .description("Restore file content")
+  .option("--session <id>", "Specific session")
+  .action(cmdRestore)
+
+// Override help to use our custom format
+program.configureHelp({
+  helpWidth: 100,
+})
+
+// Handle no args - show help
+program.hook("preAction", (thisCommand) => {
+  // If no args and no options, show help
+  const opts = thisCommand.opts()
+  const args = thisCommand.args
+  if (args.length === 0 && Object.keys(opts).length === 0 && thisCommand.name() === "history") {
+    // Will be handled in action
+  }
+})
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const args = argv
-  const command = args[0]
-
-  function getArg(name: string): string | undefined {
-    const idx = args.indexOf(name)
-    if (idx === -1) return undefined
-    return args[idx + 1]
+  // If no args, show help
+  if (argv.length === 0) {
+    printHelp()
+    return
   }
 
-  function hasFlag(name: string): boolean {
-    return args.includes(name)
-  }
-
-  switch (command) {
-    case "index":
-    case "rebuild":
-      await cmdIndex({ incremental: hasFlag("--incremental") })
-      break
-
-    case "find":
-    case "f": {
-      if (!args[1]) {
-        console.error("Usage: bun history find <query>")
-        process.exit(1)
-      }
-      // Join all non-flag arguments as the query
-      const findQuery = args.slice(1).filter((a, i, arr) => {
-        if (a.startsWith("--")) return false
-        if (i > 0 && ["--limit", "--project", "--type"].includes(arr[i - 1]!)) return false
-        return true
-      }).join(" ")
-      await cmdFind(findQuery, {
-        limit: getArg("--limit") ? parseInt(getArg("--limit")!, 10) : undefined,
-        project: getArg("--project"),
-        type: getArg("--type"),
-        json: hasFlag("--json"),
-      })
-      break
+  try {
+    await program.parseAsync(["node", "history", ...argv])
+  } catch (err) {
+    // Commander handles errors
+    if (err instanceof Error && err.message.includes("unknown option")) {
+      console.error(err.message)
+      process.exit(1)
     }
-
-    case "fts": {
-      if (!args[1]) {
-        console.error("Usage: bun history fts <query>")
-        process.exit(1)
-      }
-      // Join all non-flag arguments as the query
-      const ftsQuery = args.slice(1).filter((a, i, arr) => {
-        if (a.startsWith("--")) return false
-        if (i > 0 && ["--limit", "--project"].includes(arr[i - 1]!)) return false
-        return true
-      }).join(" ")
-      await cmdFts(ftsQuery, {
-        limit: getArg("--limit") ? parseInt(getArg("--limit")!, 10) : undefined,
-        project: getArg("--project"),
-        json: hasFlag("--json"),
-      })
-      break
-    }
-
-    case "now":
-      await cmdNow()
-      break
-
-    case "hour":
-      await cmdHour()
-      break
-
-    case "day":
-      await cmdDay()
-      break
-
-    case "similar":
-      if (!args[1]) {
-        console.error("Usage: bun history similar <query>")
-        process.exit(1)
-      }
-      const similarQuery = args.slice(1).filter((a, i, arr) => {
-        if (a.startsWith("--")) return false
-        if (i > 0 && ["--limit"].includes(arr[i - 1]!)) return false
-        return true
-      }).join(" ")
-      await cmdSimilar(similarQuery, {
-        limit: getArg("--limit") ? parseInt(getArg("--limit")!, 10) : undefined,
-      })
-      break
-
-    case "list":
-      await cmdList(args[1])
-      break
-
-    case "show":
-      if (!args[1]) {
-        console.error("Usage: bun history show <session-id>")
-        process.exit(1)
-      }
-      await cmdShow(args[1])
-      break
-
-    case "search":
-      if (!args[1]) {
-        console.error("Usage: bun history search <pattern>")
-        process.exit(1)
-      }
-      await cmdSearch(args[1])
-      break
-
-    case "grep": {
-      if (!args[1]) {
-        console.error("Usage: bun history grep <pattern> [--project name] [--limit n] [--context n]")
-        process.exit(1)
-      }
-      const grepOptions: { project?: string; limit?: number; context?: number } = {}
-      grepOptions.project = getArg("--project")
-      const limitArg = getArg("--limit")
-      if (limitArg) grepOptions.limit = parseInt(limitArg, 10)
-      const contextArg = getArg("--context")
-      if (contextArg) grepOptions.context = parseInt(contextArg, 10)
-      await cmdGrep(args[1], grepOptions)
-      break
-    }
-
-    case "writes": {
-      const dateFilter = getArg("--date")
-      await cmdWrites(dateFilter)
-      break
-    }
-
-    case "restore": {
-      if (!args[1]) {
-        console.error("Usage: bun history restore <file-path> [--session <id>]")
-        process.exit(1)
-      }
-      const sessionId = getArg("--session")
-      await cmdRestore(args[1], sessionId)
-      break
-    }
-
-    case "stats":
-      await cmdStats()
-      break
-
-    case "help":
-    case "--help":
-    case "-h":
-      printHelp()
-      break
-
-    default:
-      if (command) {
-        console.error(`Unknown command: ${command}`)
-      }
-      printHelp()
-      process.exit(command ? 1 : 0)
+    throw err
   }
 }
 
