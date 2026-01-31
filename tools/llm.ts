@@ -95,6 +95,10 @@ KEYWORDS
   debate                 Query 3 models, synthesize consensus (~$1-3, confirms)
   quick/cheap/mini/nano  Cheap/fast model if you really want it (~$0.01)
 
+FLAGS
+  -y, --yes              Skip confirmation prompts (for scripting)
+  --dry-run              Show what would happen without calling APIs
+
 FEATURES
   • Checks session history first (avoids duplicate research)
   • Cost confirmation for expensive queries (deep, debate)
@@ -133,6 +137,8 @@ function getQuestion(): string {
   // Find the question (first non-flag argument after command)
   const nonFlags = args.slice(1).filter((a, i, arr) => {
     if (a.startsWith("--")) return false
+    // Filter short flags like -y, -h
+    if (a.match(/^-[a-zA-Z]$/)) return false
     // Check if previous arg was a flag that takes a value
     if (i > 0 && arr[i - 1]?.startsWith("--")) {
       const flagName = arr[i - 1]
@@ -275,24 +281,37 @@ async function main() {
       if (!deepModel) error("No deep research model available. " + (deepWarning || ""))
 
       console.error(`Deep research: ${topic}`)
-      console.error(`Model: ${deepModel.displayName}\n`)
+      console.error(`Model: ${deepModel.displayName}`)
+      console.error(`Estimated cost: ~$2-5\n`)
       if (deepWarning) console.error(`⚠️  ${deepWarning}\n`)
-      console.error("⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ")
 
-      const confirm = await new Promise<string>((resolve) => {
-        process.stdin.setRawMode?.(true)
-        process.stdin.resume()
-        process.stdin.once("data", (data) => {
-          process.stdin.setRawMode?.(false)
-          resolve(data.toString().trim().toLowerCase())
-        })
-      })
-
-      if (confirm === "n" || confirm === "no") {
-        console.error("Cancelled.")
+      // Dry run - show what would happen without calling API
+      if (hasFlag("--dry-run")) {
+        console.error("🔍 Dry run - would call deep research API")
+        console.error(`   Model: ${deepModel.modelId}`)
+        console.error(`   Provider: ${deepModel.provider}`)
         process.exit(0)
       }
-      console.error()
+
+      // Skip confirmation with --yes or -y flag
+      if (!hasFlag("--yes") && !hasFlag("-y")) {
+        console.error("⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ")
+
+        const confirm = await new Promise<string>((resolve) => {
+          process.stdin.setRawMode?.(true)
+          process.stdin.resume()
+          process.stdin.once("data", (data) => {
+            process.stdin.setRawMode?.(false)
+            resolve(data.toString().trim().toLowerCase())
+          })
+        })
+
+        if (confirm === "n" || confirm === "no") {
+          console.error("Cancelled.")
+          process.exit(0)
+        }
+        console.error()
+      }
 
       const response = await research(topic, {
         stream: true,
@@ -318,24 +337,38 @@ async function main() {
       if (debateModels.length < 2) error("Need at least 2 models for debate. " + (debateWarning || ""))
 
       console.error(`Multi-model debate: ${question}`)
-      console.error(`Models: ${debateModels.map(m => m.displayName).join(", ")}\n`)
+      console.error(`Models: ${debateModels.map(m => m.displayName).join(", ")}`)
+      console.error(`Estimated cost: ~$1-3\n`)
       if (debateWarning) console.error(`⚠️  ${debateWarning}\n`)
-      console.error("⚠️  This queries multiple models (~$1-3). Proceed? [Y/n] ")
 
-      const confirm = await new Promise<string>((resolve) => {
-        process.stdin.setRawMode?.(true)
-        process.stdin.resume()
-        process.stdin.once("data", (data) => {
-          process.stdin.setRawMode?.(false)
-          resolve(data.toString().trim().toLowerCase())
-        })
-      })
-
-      if (confirm === "n" || confirm === "no") {
-        console.error("Cancelled.")
+      // Dry run - show what would happen without calling API
+      if (hasFlag("--dry-run")) {
+        console.error("🔍 Dry run - would query these models:")
+        for (const m of debateModels) {
+          console.error(`   • ${m.displayName} (${m.provider})`)
+        }
         process.exit(0)
       }
-      console.error()
+
+      // Skip confirmation with --yes or -y flag
+      if (!hasFlag("--yes") && !hasFlag("-y")) {
+        console.error("⚠️  This queries multiple models (~$1-3). Proceed? [Y/n] ")
+
+        const confirm = await new Promise<string>((resolve) => {
+          process.stdin.setRawMode?.(true)
+          process.stdin.resume()
+          process.stdin.once("data", (data) => {
+            process.stdin.setRawMode?.(false)
+            resolve(data.toString().trim().toLowerCase())
+          })
+        })
+
+        if (confirm === "n" || confirm === "no") {
+          console.error("Cancelled.")
+          process.exit(0)
+        }
+        console.error()
+      }
 
       const result = await consensus({
         question,

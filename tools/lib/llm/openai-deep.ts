@@ -122,11 +122,24 @@ Please provide:
       }
     }
   } catch (error) {
+    // Provide helpful error messages for common issues
+    let errorMessage = error instanceof Error ? error.message : String(error)
+
+    if (errorMessage.includes("verified")) {
+      errorMessage = "Organization not verified. Visit https://platform.openai.com/settings/organization/general to verify."
+    } else if (errorMessage.includes("rate_limit") || errorMessage.includes("429")) {
+      errorMessage = "Rate limited. Wait a moment and try again."
+    } else if (errorMessage.includes("insufficient_quota") || errorMessage.includes("billing")) {
+      errorMessage = "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing"
+    } else if (errorMessage.includes("invalid_api_key") || errorMessage.includes("401")) {
+      errorMessage = "Invalid API key. Check OPENAI_API_KEY environment variable."
+    }
+
     return {
       model,
       content: "",
       durationMs: Date.now() - startTime,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     }
   }
 }
