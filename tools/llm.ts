@@ -14,6 +14,8 @@
  */
 
 import { ask, research, compare } from "./lib/llm/research"
+import { retrieveResponse } from "./lib/llm/openai-deep"
+import { listPartials, findPartialByResponseId, cleanupPartials, type PartialFile } from "./lib/llm/persistence"
 import { consensus, deepConsensus } from "./lib/llm/consensus"
 import { getAvailableProviders, getProviderEnvVar, isProviderAvailable } from "./lib/llm/providers"
 import {
@@ -111,6 +113,12 @@ PROVIDERS
   ${available.includes("xai" as any) ? "✓" : "○"} xAI (Grok)  ${available.includes("xai" as any) ? "ready" : "set XAI_API_KEY"}
   ${available.includes("perplexity" as any) ? "✓" : "○"} Perplexity  ${available.includes("perplexity" as any) ? "ready" : "set PERPLEXITY_API_KEY"}
 
+RECOVERY (for interrupted deep research)
+  llm recover                       List incomplete/partial responses
+  llm recover <response_id>         Retrieve response by ID from OpenAI
+  llm partials                      Alias for 'recover' (list partials)
+  llm partials --clean              Clean up old partial files (>7 days)
+
 ADVANCED (backwards compatible)
   llm ask "question"                Standard query
   llm ask --model gpt-5.2 "q"       Specific model
@@ -157,6 +165,8 @@ const KEYWORDS = [
   "quick", "cheap", "mini", "nano",
   // Other modes
   "opinion", "debate",
+  // Recovery
+  "recover", "partials",
   // Original commands (backwards compat)
   "ask", "prepare", "consensus", "models", "compare", "update-pricing"
 ]
@@ -779,6 +789,96 @@ async function main() {
       console.error("  - Google: https://ai.google.dev/pricing")
       console.error("  - xAI: https://x.ai/api")
       console.error("  - Perplexity: https://docs.perplexity.ai/guides/pricing")
+      break
+    }
+
+    case "recover":
+    case "partials": {
+      const responseId = getQuestion()
+
+      // Clean up old partials if requested
+      if (hasFlag("--clean")) {
+        const deleted = cleanupPartials()
+        console.error(`✓ Cleaned up ${deleted} old partial file(s)`)
+        break
+      }
+
+      // If response ID provided, try to retrieve it
+      if (responseId) {
+        console.error(`Retrieving response: ${responseId}...\n`)
+
+        // First check local partials
+        const localPartial = findPartialByResponseId(responseId)
+        if (localPartial) {
+          console.error(`Found local partial (${localPartial.content.length} chars):\n`)
+          console.log(localPartial.content)
+
+          if (!localPartial.metadata.completedAt) {
+            console.error("\n---")
+            console.error("This response was interrupted. Attempting to retrieve from OpenAI...")
+          }
+        }
+
+        // Try to retrieve from OpenAI
+        const response = await retrieveResponse(responseId)
+
+        if (response.error) {
+          if (!localPartial) {
+            error(`Failed to retrieve: ${response.error}`)
+          }
+          console.error(`\n⚠️  Could not retrieve from OpenAI: ${response.error}`)
+        } else {
+          console.error(`\nStatus: ${response.status}`)
+          if (response.status === "completed") {
+            console.error("Full response from OpenAI:\n")
+            console.log(response.content)
+            if (response.usage) {
+              console.error(`\n[${response.usage.totalTokens} tokens]`)
+            }
+          } else if (response.status === "in_progress") {
+            console.error("Response still in progress. Try again in a moment.")
+          } else if (response.status === "queued") {
+            console.error("Response is queued. Try again in a moment.")
+          } else {
+            console.error(`Response status: ${response.status}`)
+          }
+        }
+        break
+      }
+
+      // List all partials
+      const partials = listPartials({ includeCompleted: hasFlag("--all") })
+
+      if (partials.length === 0) {
+        console.error("No incomplete responses found.")
+        console.error("\nPartial responses are saved automatically during deep research calls.")
+        console.error("If interrupted, they appear here for recovery.")
+        break
+      }
+
+      console.error(`Found ${partials.length} partial response(s):\n`)
+
+      for (const partial of partials) {
+        const age = Date.now() - new Date(partial.metadata.startedAt).getTime()
+        const ageStr = age < 3600000
+          ? `${Math.round(age / 60000)}m ago`
+          : age < 86400000
+            ? `${Math.round(age / 3600000)}h ago`
+            : `${Math.round(age / 86400000)}d ago`
+
+        const status = partial.metadata.completedAt ? "✓ completed" : "⚠️  interrupted"
+        const preview = partial.content.slice(0, 100).replace(/\n/g, " ")
+
+        console.error(`  ${partial.metadata.responseId}`)
+        console.error(`    ${status} | ${ageStr} | ${partial.metadata.model}`)
+        console.error(`    Topic: ${partial.metadata.topic.slice(0, 60)}...`)
+        console.error(`    Content: ${preview}${partial.content.length > 100 ? "..." : ""}`)
+        console.error(`    (${partial.content.length} chars saved)`)
+        console.error()
+      }
+
+      console.error("To retrieve a response: llm recover <response_id>")
+      console.error("To clean up old partials: llm partials --clean")
       break
     }
 

@@ -5,6 +5,8 @@
 export * from "./types"
 export * from "./providers"
 export * from "./research"
+export * from "./persistence"
+export { retrieveResponse, resumeStream, isOpenAIDeepResearch } from "./openai-deep"
 // Re-export consensus but exclude ConsensusOptions (already exported from types)
 export { consensus, deepConsensus } from "./consensus"
 export type { ConsensusOptions as ConsensusCallOptions } from "./consensus"

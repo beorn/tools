@@ -43,6 +43,7 @@ export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>
 export const ModelResponseSchema = z.object({
   model: ModelSchema,
   content: z.string(),
+  responseId: z.string().optional(), // API response ID for recovery
   reasoning: z.string().optional(), // Extended thinking/chain-of-thought
   citations: z.array(z.object({
     title: z.string().optional(),
