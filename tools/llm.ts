@@ -100,11 +100,14 @@ KEYWORDS
 FLAGS
   -y, --yes              Skip confirmation prompts (for scripting)
   --dry-run              Show what would happen without calling APIs
+  --no-recover           Skip auto-recovery of incomplete responses
 
 FEATURES
+  • Auto-recovery: Checks for interrupted responses and recovers them
   • Checks session history first (avoids duplicate research)
   • Cost confirmation for expensive queries (deep, debate)
   • Streams responses in real-time
+  • Persistence: Saves progress to disk during streaming
 
 PROVIDERS
   ${available.includes("openai" as any) ? "✓" : "○"} OpenAI      ${available.includes("openai" as any) ? "ready" : "set OPENAI_API_KEY"}
@@ -155,6 +158,76 @@ function getQuestion(): string {
     return true
   })
   return nonFlags.join(" ")
+}
+
+/**
+ * Check for and auto-recover incomplete responses
+ * Returns true if user wants to continue with new query
+ */
+async function checkAndRecoverPartials(): Promise<boolean> {
+  if (hasFlag("--no-recover")) return true
+
+  const partials = listPartials()
+  if (partials.length === 0) return true
+
+  console.error(`📦 Found ${partials.length} incomplete response(s) - attempting recovery...\n`)
+
+  let recoveredAny = false
+  for (const partial of partials) {
+    const age = Date.now() - new Date(partial.metadata.startedAt).getTime()
+    const ageStr = age < 3600000
+      ? `${Math.round(age / 60000)}m ago`
+      : `${Math.round(age / 3600000)}h ago`
+
+    console.error(`  ${partial.metadata.responseId}`)
+    console.error(`    Started: ${ageStr} | Topic: ${partial.metadata.topic.slice(0, 50)}...`)
+
+    // Try to retrieve from OpenAI
+    if (partial.metadata.responseId) {
+      const recovered = await retrieveResponse(partial.metadata.responseId)
+      if (recovered.status === "completed" && recovered.content) {
+        console.error(`    ✅ Recovered from OpenAI (${recovered.content.length} chars)`)
+        console.error(`\n--- Recovered Response ---\n`)
+        console.log(recovered.content)
+        if (recovered.usage) {
+          console.error(`\n[Recovered: ${recovered.usage.totalTokens} tokens]`)
+        }
+        // Clean up the partial file
+        const { completePartial } = await import("./lib/llm/persistence")
+        completePartial(partial.path, { delete: true })
+        console.error(`\n--- End Recovered Response ---\n`)
+        recoveredAny = true
+      } else if (recovered.status === "in_progress" || recovered.status === "queued") {
+        console.error(`    ⏳ Still ${recovered.status} on OpenAI - will complete soon`)
+        console.error(`    Run 'llm recover ${partial.metadata.responseId}' to check again`)
+      } else {
+        console.error(`    ⚠️  Could not recover (status: ${recovered.status})`)
+        if (partial.content.length > 0) {
+          console.error(`    Local partial has ${partial.content.length} chars saved`)
+        }
+      }
+    }
+    console.error()
+  }
+
+  // If we recovered anything or have partials, ask if user still wants to run new query
+  if (!hasFlag("--yes") && !hasFlag("-y")) {
+    console.error("Continue with new query? [Y/n] ")
+    const confirm = await new Promise<string>((resolve) => {
+      process.stdin.setRawMode?.(true)
+      process.stdin.resume()
+      process.stdin.once("data", (data) => {
+        process.stdin.setRawMode?.(false)
+        resolve(data.toString().trim().toLowerCase())
+      })
+    })
+    if (confirm === "n" || confirm === "no") {
+      return false
+    }
+    console.error()
+  }
+
+  return true
 }
 
 // Keywords that trigger specific modes
@@ -287,6 +360,13 @@ async function main() {
       const topic = getQuestion()
       if (!topic) error("Usage: llm deep <topic>")
 
+      // Check for incomplete partials and attempt auto-recovery
+      const shouldContinue = await checkAndRecoverPartials()
+      if (!shouldContinue) {
+        console.error("Cancelled.")
+        process.exit(0)
+      }
+
       const { model: deepModel, warning: deepWarning } = getBestAvailableModel("deep", isProviderAvailable)
       if (!deepModel) error("No deep research model available. " + (deepWarning || ""))
 
@@ -343,6 +423,13 @@ async function main() {
     case "debate": {
       const question = getQuestion()
       if (!question) error("Usage: llm debate <question>")
+
+      // Check for incomplete partials and attempt auto-recovery
+      const shouldContinueDebate = await checkAndRecoverPartials()
+      if (!shouldContinueDebate) {
+        console.error("Cancelled.")
+        process.exit(0)
+      }
 
       const { models: debateModels, warning: debateWarning } = getBestAvailableModels("debate", isProviderAvailable, 3)
       if (debateModels.length < 2) error("Need at least 2 models for debate. " + (debateWarning || ""))
