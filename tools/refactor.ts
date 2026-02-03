@@ -185,7 +185,7 @@ API MIGRATION EXAMPLE: Migrate test framework API
       --glob "**/*.test.tsx" \\
       --prompt "Migrate render API:
         - const { lastFrame, stdin } = render(...) → const app = render(...)
-        - lastFrame() → app.html
+        - lastFrame() → app.ansi
         - stdin.write('\\x1b[A') → await app.press('ArrowUp')" \\
       --output /tmp/migrate.json
 

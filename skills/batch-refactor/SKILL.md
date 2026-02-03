@@ -885,7 +885,7 @@ bun tools/refactor.ts pattern.migrate \
   --glob "**/*.test.tsx" \
   --prompt "Migrate old render() API to new App API:
     - const { lastFrame, stdin } = render(...) → const app = render(...)
-    - lastFrame() → app.html
+    - lastFrame() → app.ansi
     - stripAnsi(lastFrame()) → app.text
     - stdin.write('\\x1b[A') → await app.press('ArrowUp')
     - stdin.write('\\x1b[B') → await app.press('ArrowDown')" \
@@ -949,7 +949,7 @@ The LLM sees each match with ~3 lines of context. Write prompts that:
 # Good prompt example:
 --prompt "Migrate test API:
   - const { lastFrame, stdin } = render(...) → const app = render(...)
-  - lastFrame() → app.html
+  - lastFrame() → app.ansi
   - stripAnsi(lastFrame()) → app.text (remove stripAnsi wrapper)
   - stdin.write('x') → await app.press('x')
   - stdin.write('\\x1b[A') → await app.press('ArrowUp')
