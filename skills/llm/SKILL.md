@@ -43,14 +43,14 @@ bun llm.ts ask --model gpt-4o "What are the pros and cons of TypeScript?"
 bun llm.ts ask --json "What is Bun?"
 ```
 
-### research - Deep Research
+### --deep - Deep Research
 
 ```bash
 # Deep research (level 3)
-bun llm.ts research "Best practices for TUI testing in 2025"
+bun llm.ts --deep "Best practices for TUI testing in 2025"
 
 # With specific model
-bun llm.ts research --model perplexity-sonar-pro "State of WebAssembly in 2025"
+bun llm.ts --deep --model perplexity-sonar-pro "State of WebAssembly in 2025"
 ```
 
 ### consensus - Multi-Model Agreement
@@ -66,11 +66,11 @@ bun llm.ts consensus --models gpt-4o,claude-sonnet-4,gemini-2.5-pro "Best state 
 bun llm.ts consensus --no-synthesis "What's the best way to handle errors in Go?"
 ```
 
-### deep - Full Deep Research
+### deep (level 5) - Full Deep Consensus
 
 ```bash
 # All deep research models + synthesis (level 5)
-bun llm.ts deep "Comprehensive analysis of AI coding assistants in 2025"
+bun llm.ts --deep "Comprehensive analysis of AI coding assistants in 2025"
 ```
 
 ### models - List Available Models
@@ -158,7 +158,7 @@ bun llm.ts ask "Is it better to use React Context or Zustand for global state?"
 ### Research a topic
 ```bash
 # Deep research with citations
-bun llm.ts research "How do modern TUI frameworks handle accessibility?"
+bun llm.ts --deep "How do modern TUI frameworks handle accessibility?"
 ```
 
 ### Build consensus

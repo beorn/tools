@@ -2,9 +2,9 @@
 /**
  * llm.ts - Multi-LLM research CLI
  *
- * Simple keyword-based interface:
- *   llm "question"              Quick answer, cheap (~$0.01)
- *   llm deep "topic"            Deep research with web search (~$2-5)
+ * Simple interface:
+ *   llm "question"              Quick answer (~$0.02)
+ *   llm --deep "topic"          Deep research with web search (~$2-5)
  *   llm opinion "question"      Second opinion from GPT/Gemini (~$0.02)
  *   llm debate "question"       Multi-model consensus (~$1-3)
  *
@@ -80,27 +80,31 @@ function usage(): never {
 
 USAGE
   llm "question"                    Answer using gpt-5.2 (~$0.02)
-  llm deep "topic"                  Deep research with web search (~$2-5)
+  llm --deep "topic"                Deep research with web search (~$2-5)
   llm opinion "question"            Second opinion from Gemini (~$0.02)
   llm debate "question"             Multi-model consensus (~$1-3)
 
 EXAMPLES
-  llm "what port does postgres use"                    Standard answer
-  llm deep "best practices for TUI testing 2026"       Thorough research
-  llm opinion "is my caching approach reasonable"      Get a second opinion
-  llm debate "monorepo vs polyrepo for our use case"   Multiple perspectives
+  llm "what port does postgres use"                      Standard answer
+  llm --deep "best practices for TUI testing 2026"       Thorough research
+  llm opinion "is my caching approach reasonable"        Get a second opinion
+  llm debate "monorepo vs polyrepo for our use case"     Multiple perspectives
 
 KEYWORDS
   (none)                 Default: gpt-5.2 (~$0.02)
-  deep/research/think    Web search, citations, thorough (~$2-5, confirms)
   opinion                Second opinion from different provider (~$0.02)
   debate                 Query 3 models, synthesize consensus (~$1-3, confirms)
   quick/cheap/mini/nano  Cheap/fast model if you really want it (~$0.01)
 
 FLAGS
+  --deep, /deep          Deep research with web search (~$2-5, confirms)
+  --ask, /ask            Explicit default mode (syntactic sugar)
   -y, --yes              Skip confirmation prompts (for scripting)
   --dry-run              Show what would happen without calling APIs
   --no-recover           Skip auto-recovery of incomplete responses
+  --with-history         Include relevant context from session history
+  --context <text>       Provide explicit context (prepended to topic)
+  --context-file <path>  Read context from a file
 
 FEATURES
   • Auto-recovery: Checks for interrupted responses and recovers them
@@ -150,10 +154,12 @@ function getQuestion(): string {
     if (a.startsWith("--")) return false
     // Filter short flags like -y, -h
     if (a.match(/^-[a-zA-Z]$/)) return false
+    // Filter /deep and /ask when used as first arg
+    if (a === "/deep" || a === "/ask") return false
     // Check if previous arg was a flag that takes a value
     if (i > 0 && arr[i - 1]?.startsWith("--")) {
       const flagName = arr[i - 1]
-      if (["--model", "--models", "--provider"].includes(flagName!)) return false
+      if (["--model", "--models", "--provider", "--context", "--context-file"].includes(flagName!)) return false
     }
     return true
   })
@@ -232,8 +238,6 @@ async function checkAndRecoverPartials(): Promise<boolean> {
 
 // Keywords that trigger specific modes
 const KEYWORDS = [
-  // Deep research aliases
-  "deep", "research", "think",
   // Cheap/fast aliases
   "quick", "cheap", "mini", "nano",
   // Other modes
@@ -257,9 +261,13 @@ async function main() {
     console.error(staleWarning + "\n")
   }
 
+  // Flag-based mode detection (before keyword/default dispatch)
+  const isDeepFlag = hasFlag("--deep") || command === "/deep"
+  const isAskFlag = hasFlag("--ask") || command === "/ask"
+
   // If first arg is not a keyword, treat entire args as a question (default mode)
   const isKeyword = KEYWORDS.includes(command!)
-  if (!isKeyword) {
+  if (!isKeyword && !isDeepFlag && !isAskFlag) {
     // Default mode: use best available model
     const question = args.join(" ")
     if (!question) usage()
@@ -297,6 +305,136 @@ async function main() {
     if (response.usage) {
       const cost = estimateCost(model, response.usage.promptTokens, response.usage.completionTokens)
       console.error(`\n[${response.usage.totalTokens} tokens, ${formatCost(cost)}, ${response.durationMs}ms]`)
+    }
+    process.exit(0)
+  }
+
+  if (isDeepFlag) {
+    const topic = isKeyword ? getQuestion() : args.filter(a => !a.startsWith("--") && !a.match(/^-[a-zA-Z]$/) && a !== "/deep").join(" ")
+    if (!topic) error("Usage: llm --deep <topic>")
+
+    // Build context from various sources
+    const withHistory = hasFlag("--with-history")
+    const contextArg = getArg("--context")
+    const contextFile = getArg("--context-file")
+
+    let contextParts: string[] = []
+
+    if (contextArg) {
+      contextParts.push(contextArg)
+    }
+
+    if (contextFile) {
+      try {
+        const fileContent = await Bun.file(contextFile).text()
+        contextParts.push(fileContent)
+      } catch (err) {
+        error(`Failed to read context file: ${contextFile}`)
+      }
+    }
+
+    if (withHistory) {
+      try {
+        const db = getDb()
+        const { results } = ftsSearchWithSnippet(db, topic, { limit: 3 })
+        closeDb()
+
+        if (results.length > 0) {
+          console.error("📚 Including context from session history...\n")
+          const historyContext = "Relevant context from previous sessions:\n\n" +
+            results.map(r => {
+              const role = r.type === "user" ? "User" : "Assistant"
+              return `[${role}]: ${r.snippet.replace(/>>>/g, "").replace(/<<</g, "")}`
+            }).join("\n\n")
+          contextParts.push(historyContext)
+        }
+      } catch {
+        // History not indexed, continue without
+      }
+    }
+
+    const context = contextParts.length > 0 ? contextParts.join("\n\n---\n\n") : undefined
+
+    const shouldContinue = await checkAndRecoverPartials()
+    if (!shouldContinue) {
+      console.error("Cancelled.")
+      process.exit(0)
+    }
+
+    const { model: deepModel, warning: deepWarning } = getBestAvailableModel("deep", isProviderAvailable)
+    if (!deepModel) error("No deep research model available. " + (deepWarning || ""))
+
+    console.error(`Deep research: ${topic}`)
+    console.error(`Model: ${deepModel.displayName}`)
+    console.error(`Estimated cost: ~$2-5\n`)
+    if (deepWarning) console.error(`⚠️  ${deepWarning}\n`)
+    if (context) console.error(`📎 Context provided (${context.length} chars)\n`)
+
+    if (hasFlag("--dry-run")) {
+      console.error("🔍 Dry run - would call deep research API")
+      console.error(`   Model: ${deepModel.modelId}`)
+      console.error(`   Provider: ${deepModel.provider}`)
+      if (context) console.error(`   Context: ${context.slice(0, 100)}...`)
+      process.exit(0)
+    }
+
+    if (!hasFlag("--yes") && !hasFlag("-y")) {
+      console.error("⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ")
+
+      const confirm = await new Promise<string>((resolve) => {
+        process.stdin.setRawMode?.(true)
+        process.stdin.resume()
+        process.stdin.once("data", (data) => {
+          process.stdin.setRawMode?.(false)
+          resolve(data.toString().trim().toLowerCase())
+        })
+      })
+
+      if (confirm === "n" || confirm === "no") {
+        console.error("Cancelled.")
+        process.exit(0)
+      }
+      console.error()
+    }
+
+    const response = await research(topic, {
+      context,
+      stream: true,
+      onToken: (token) => process.stdout.write(token),
+    })
+
+    console.log()
+    if (response.error) {
+      console.error(`\nError: ${response.error}`)
+    }
+    if (response.usage) {
+      const cost = estimateCost(response.model, response.usage.promptTokens, response.usage.completionTokens)
+      console.error(`\n[${response.model.displayName}] ${response.usage.totalTokens} tokens, ${formatCost(cost)}, ${response.durationMs}ms`)
+    }
+    process.exit(0)
+  }
+
+  if (isAskFlag) {
+    // /ask and --ask: run default (plain question) mode explicitly
+    const question = isKeyword ? getQuestion() : args.filter(a => !a.startsWith("--") && !a.match(/^-[a-zA-Z]$/) && a !== "/ask").join(" ")
+    if (!question) error("Usage: llm --ask <question>")
+
+    const { model, warning } = getBestAvailableModel("default", isProviderAvailable)
+    if (!model) error("No model available. " + (warning || ""))
+    if (warning) console.error(`⚠️  ${warning}\n`)
+
+    console.error(`[${model.displayName}]\n`)
+
+    const askResponse = await ask(question, "standard", {
+      modelOverride: model.modelId,
+      stream: true,
+      onToken: (token) => process.stdout.write(token),
+    })
+
+    console.log()
+    if (askResponse.usage) {
+      const cost = estimateCost(model, askResponse.usage.promptTokens, askResponse.usage.completionTokens)
+      console.error(`\n[${askResponse.usage.totalTokens} tokens, ${formatCost(cost)}, ${askResponse.durationMs}ms]`)
     }
     process.exit(0)
   }
@@ -353,76 +491,56 @@ async function main() {
       break
     }
 
-    // Deep research aliases
-    case "deep":
-    case "research":
-    case "think": {
-      const topic = getQuestion()
-      if (!topic) error("Usage: llm deep <topic>")
-
-      // Check for incomplete partials and attempt auto-recovery
-      const shouldContinue = await checkAndRecoverPartials()
-      if (!shouldContinue) {
-        console.error("Cancelled.")
-        process.exit(0)
-      }
-
-      const { model: deepModel, warning: deepWarning } = getBestAvailableModel("deep", isProviderAvailable)
-      if (!deepModel) error("No deep research model available. " + (deepWarning || ""))
-
-      console.error(`Deep research: ${topic}`)
-      console.error(`Model: ${deepModel.displayName}`)
-      console.error(`Estimated cost: ~$2-5\n`)
-      if (deepWarning) console.error(`⚠️  ${deepWarning}\n`)
-
-      // Dry run - show what would happen without calling API
-      if (hasFlag("--dry-run")) {
-        console.error("🔍 Dry run - would call deep research API")
-        console.error(`   Model: ${deepModel.modelId}`)
-        console.error(`   Provider: ${deepModel.provider}`)
-        process.exit(0)
-      }
-
-      // Skip confirmation with --yes or -y flag
-      if (!hasFlag("--yes") && !hasFlag("-y")) {
-        console.error("⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ")
-
-        const confirm = await new Promise<string>((resolve) => {
-          process.stdin.setRawMode?.(true)
-          process.stdin.resume()
-          process.stdin.once("data", (data) => {
-            process.stdin.setRawMode?.(false)
-            resolve(data.toString().trim().toLowerCase())
-          })
-        })
-
-        if (confirm === "n" || confirm === "no") {
-          console.error("Cancelled.")
-          process.exit(0)
-        }
-        console.error()
-      }
-
-      const response = await research(topic, {
-        stream: true,
-        onToken: (token) => process.stdout.write(token),
-      })
-
-      console.log()
-      if (response.error) {
-        console.error(`\nError: ${response.error}`)
-      }
-      if (response.usage) {
-        const cost = estimateCost(response.model, response.usage.promptTokens, response.usage.completionTokens)
-        console.error(`\n[${response.model.displayName}] ${response.usage.totalTokens} tokens, ${formatCost(cost)}, ${response.durationMs}ms`)
-      }
-      break
-    }
-
     // Alias for consensus
     case "debate": {
       const question = getQuestion()
       if (!question) error("Usage: llm debate <question>")
+
+      // Build context from various sources
+      const withHistoryDebate = hasFlag("--with-history")
+      const contextArgDebate = getArg("--context")
+      const contextFileDebate = getArg("--context-file")
+
+      let contextPartsDebate: string[] = []
+
+      // Explicit context from --context flag
+      if (contextArgDebate) {
+        contextPartsDebate.push(contextArgDebate)
+      }
+
+      // Context from file
+      if (contextFileDebate) {
+        try {
+          const fileContent = await Bun.file(contextFileDebate).text()
+          contextPartsDebate.push(fileContent)
+        } catch (err) {
+          error(`Failed to read context file: ${contextFileDebate}`)
+        }
+      }
+
+      // History context from session database
+      if (withHistoryDebate) {
+        try {
+          const db = getDb()
+          const { results } = ftsSearchWithSnippet(db, question, { limit: 3 })
+          closeDb()
+
+          if (results.length > 0) {
+            console.error("📚 Including context from session history...\n")
+            const historyContext = "Relevant context from previous sessions:\n\n" +
+              results.map(r => {
+                const role = r.type === "user" ? "User" : "Assistant"
+                return `[${role}]: ${r.snippet.replace(/>>>/g, "").replace(/<<</g, "")}`
+              }).join("\n\n")
+            contextPartsDebate.push(historyContext)
+          }
+        } catch {
+          // History not indexed, continue without
+        }
+      }
+
+      const contextDebate = contextPartsDebate.length > 0 ? contextPartsDebate.join("\n\n---\n\n") : undefined
+      const enrichedQuestion = contextDebate ? `${contextDebate}\n\n---\n\n${question}` : question
 
       // Check for incomplete partials and attempt auto-recovery
       const shouldContinueDebate = await checkAndRecoverPartials()
@@ -438,6 +556,7 @@ async function main() {
       console.error(`Models: ${debateModels.map(m => m.displayName).join(", ")}`)
       console.error(`Estimated cost: ~$1-3\n`)
       if (debateWarning) console.error(`⚠️  ${debateWarning}\n`)
+      if (contextDebate) console.error(`📎 Context provided (${contextDebate.length} chars)\n`)
 
       // Dry run - show what would happen without calling API
       if (hasFlag("--dry-run")) {
@@ -445,6 +564,7 @@ async function main() {
         for (const m of debateModels) {
           console.error(`   • ${m.displayName} (${m.provider})`)
         }
+        if (contextDebate) console.error(`   Context: ${contextDebate.slice(0, 100)}...`)
         process.exit(0)
       }
 
@@ -469,7 +589,7 @@ async function main() {
       }
 
       const result = await consensus({
-        question,
+        question: enrichedQuestion,
         modelIds: debateModels.map(m => m.modelId),
         synthesize: true,
         onModelComplete: (response) => {
