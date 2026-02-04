@@ -146,6 +146,11 @@ Please provide:
 
       // If stream ended without completing (connection dropped during deep research),
       // fall back to polling retrieveResponse() until the background response finishes
+      if (!completed && !responseId && background) {
+        process.stderr.write(
+          "\n⚠️  Stream ended without yielding any events (no response ID received)\n",
+        )
+      }
       if (!completed && responseId && background) {
         process.stderr.write(
           "\n⏳ Stream disconnected, polling for background response...\n",
@@ -161,11 +166,21 @@ Please provide:
         })
 
         if (pollResult.content) {
-          onToken(pollResult.content)
+          // Polled content is the complete response — use it instead of stream fragments
+          const newContent = pollResult.content.slice(fullText.length)
+          if (newContent) onToken(newContent)
           fullText = pollResult.content
           process.stderr.write("\n")
 
           if (partialPath) {
+            // Rewrite partial with complete content (stream fragments may be incomplete)
+            writePartialHeader(partialPath, {
+              responseId,
+              model: model.displayName,
+              modelId: model.modelId,
+              topic,
+              startedAt: new Date().toISOString(),
+            })
             appendPartial(partialPath, fullText)
           }
         }
@@ -263,6 +278,8 @@ Please provide:
       errorMessage =
         "Invalid API key. Check OPENAI_API_KEY environment variable."
     }
+
+    process.stderr.write(`\n❌ Deep research error: ${errorMessage}\n`)
 
     return {
       model,
