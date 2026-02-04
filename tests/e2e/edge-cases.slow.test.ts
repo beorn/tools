@@ -9,13 +9,13 @@
  * 5. Verifying TypeScript compiles after rename
  */
 
-import { describe, test, expect, beforeAll } from "bun:test"
+import { describe, test, expect, beforeAll } from "vitest"
 import { spawnSync } from "child_process"
 import { cpSync, mkdtempSync, readFileSync } from "fs"
 import { join, dirname } from "path"
 import { tmpdir } from "os"
 
-const PLUGIN_ROOT = join(dirname(import.meta.path), "../..")
+const PLUGIN_ROOT = join(dirname(import.meta.filename), "../..")
 const FIXTURES_ROOT = join(PLUGIN_ROOT, "tests/fixtures/edge-cases")
 
 // Helper to run refactor CLI

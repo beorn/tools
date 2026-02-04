@@ -8,7 +8,7 @@
  * 4. wikilink.broken - Detect broken links
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test"
+import { describe, test, expect, beforeAll, afterAll } from "vitest"
 import { spawnSync } from "child_process"
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs"
 import { join } from "path"
@@ -75,7 +75,7 @@ describe("E2E: Wikilink Backend", () => {
     }
 
     // Find plugin root (go up from tests/e2e/ to plugin root)
-    pluginRoot = join(import.meta.dir, "../..")
+    pluginRoot = join(import.meta.dirname, "../..")
 
     // Create temp directory with test vault
     tempDir = mkdtempSync(join(tmpdir(), "wikilink-e2e-"))

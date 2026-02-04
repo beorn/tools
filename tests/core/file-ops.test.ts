@@ -2,15 +2,15 @@
  * file-ops.test.ts - Tests for batch file rename operations
  */
 
-import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach, spyOn } from "bun:test"
+import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest"
 import fs from "fs"
 import path from "path"
 
 // Silence console.error from library logging (tests use spies when they need output)
-let errorSpy: ReturnType<typeof spyOn>
+let errorSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
-  errorSpy = spyOn(console, "error").mockImplementation(() => {})
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -26,7 +26,7 @@ import {
 } from "../../tools/lib/core/file-ops"
 
 // Test fixture directory
-const FIXTURE_DIR = path.join(import.meta.dir, "../fixtures/file-ops-test")
+const FIXTURE_DIR = path.join(import.meta.dirname, "../fixtures/file-ops-test")
 
 function setupFixtures() {
   // Clean up and recreate fixture directory
@@ -192,7 +192,7 @@ describe("applyFileRenames", () => {
 
   test("dry run does not rename files", async () => {
     // Spy on console.log since dry run logs what it would do
-    const logSpy = spyOn(console, "log").mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 
     const editset = await createFileRenameProposal("widget", "gadget", "**/*.ts", FIXTURE_DIR)
     const result = applyFileRenames(editset, true, FIXTURE_DIR)

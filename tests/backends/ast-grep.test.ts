@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect } from "vitest"
 
 // Import to trigger registration
 import { AstGrepBackend, findPatterns, createPatternReplaceProposal } from "../../tools/lib/backends/ast-grep"
