@@ -393,8 +393,9 @@ function getRefKind(node: Node): RefKind {
   if (Node.isInterfaceDeclaration(parent)) return "type"
 
   // String literals
-  if (Node.isStringLiteral(node) || Node.isTemplateExpression(node))
+  if (Node.isStringLiteral(node) || Node.isTemplateExpression(node)) {
     return "string"
+  }
 
   // Comments would need special handling - for now treat as decl
   // (ts-morph doesn't easily expose comments as nodes)

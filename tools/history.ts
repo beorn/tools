@@ -608,16 +608,21 @@ async function cmdIndex(options: { incremental?: boolean }): Promise<void> {
   console.log(
     `  ${result.messages.toLocaleString()} messages from ${result.files} session files`,
   )
-  if (result.writes > 0)
+  if (result.writes > 0) {
     console.log(`  ${result.writes.toLocaleString()} file writes`)
-  if (result.summaries > 0)
+  }
+  if (result.summaries > 0) {
     console.log(`  ${result.summaries.toLocaleString()} session summaries`)
-  if (result.plans > 0)
+  }
+  if (result.plans > 0) {
     console.log(`  ${result.plans.toLocaleString()} plan files`)
-  if (result.todos > 0)
+  }
+  if (result.todos > 0) {
     console.log(`  ${result.todos.toLocaleString()} todo lists`)
-  if (result.skippedOld > 0)
+  }
+  if (result.skippedOld > 0) {
     console.log(`  (skipped ${result.skippedOld} sessions older than 30 days)`)
+  }
 
   closeDb()
 }
@@ -860,10 +865,12 @@ async function cmdShow(sessionIdOrFile: string): Promise<void> {
   console.log(`Project:       ${displayProjectPath(project)}`)
   console.log(`Size:          ${formatBytes(stats.size)}`)
   console.log(`Messages:      ${messageCount}`)
-  if (firstTimestamp)
+  if (firstTimestamp) {
     console.log(`Started:       ${new Date(firstTimestamp).toLocaleString()}`)
-  if (lastTimestamp)
+  }
+  if (lastTimestamp) {
     console.log(`Last activity: ${new Date(lastTimestamp).toLocaleString()}`)
+  }
 
   const writes = db
     .prepare(
@@ -883,8 +890,9 @@ async function cmdShow(sessionIdOrFile: string): Promise<void> {
       const shortPath = w.file_path.replace(os.homedir(), "~")
       console.log(`  ${time}  ${size.padStart(8)}  ${shortPath}`)
     }
-    if (writes.length > 20)
+    if (writes.length > 20) {
       console.log(`  ... and ${writes.length - 20} more writes`)
+    }
   }
 
   closeDb()
@@ -971,10 +979,11 @@ async function cmdStats(): Promise<void> {
   console.log(
     `Last rebuild:            ${lastRebuild ? new Date(lastRebuild).toLocaleString() : "never"}`,
   )
-  if (rebuildDuration)
+  if (rebuildDuration) {
     console.log(
       `Rebuild duration:        ${(parseInt(rebuildDuration, 10) / 1000).toFixed(1)}s`,
     )
+  }
   console.log(`Database location:       ${DB_PATH}`)
 
   const topFiles = db
@@ -1020,8 +1029,9 @@ async function cmdGrep(
     const relativePath = path.relative(PROJECTS_DIR, sessionFile)
     const projectName = relativePath.split(path.sep)[0] || ""
 
-    if (project && !projectName.toLowerCase().includes(project.toLowerCase()))
+    if (project && !projectName.toLowerCase().includes(project.toLowerCase())) {
       continue
+    }
 
     filesSearched++
 
@@ -1114,15 +1124,17 @@ async function cmdGrep(
       console.log(highlightMatch(match.context, regex))
     }
 
-    if (sessionMatches.length > 5)
+    if (sessionMatches.length > 5) {
       console.log(
         `\n  ... and ${sessionMatches.length - 5} more matches in this session`,
       )
+    }
     console.log()
   }
 
-  if (matches.length >= limit)
+  if (matches.length >= limit) {
     console.log(`\n(showing first ${limit} matches, use -n/--limit for more)`)
+  }
 }
 
 async function cmdWrites(options: { date?: string }): Promise<void> {
@@ -1272,8 +1284,9 @@ async function cmdWritesSearch(pattern: string): Promise<void> {
         `   ${date}  ${size}  [${v.content_hash}]  session:${v.session_id.slice(0, 8)}`,
       )
     }
-    if (versions.length > 5)
+    if (versions.length > 5) {
       console.log(`   ... and ${versions.length - 5} more versions`)
+    }
     console.log()
   }
 

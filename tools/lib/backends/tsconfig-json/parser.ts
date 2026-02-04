@@ -47,24 +47,26 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
     // baseUrl
     if (typeof compilerOptions.baseUrl === "string") {
       const ref = findStringInJson(content, compilerOptions.baseUrl)
-      if (ref)
+      if (ref) {
         refs.push({
           field: "compilerOptions.baseUrl",
           path: compilerOptions.baseUrl,
           ...ref,
         })
+      }
     }
 
     // outDir, rootDir, declarationDir
     for (const field of ["outDir", "rootDir", "declarationDir", "outFile"]) {
       if (typeof compilerOptions[field] === "string") {
         const ref = findStringInJson(content, compilerOptions[field] as string)
-        if (ref)
+        if (ref) {
           refs.push({
             field: `compilerOptions.${field}`,
             path: compilerOptions[field] as string,
             ...ref,
           })
+        }
       }
     }
 
@@ -96,12 +98,13 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
       for (const typeRoot of compilerOptions.typeRoots) {
         if (typeof typeRoot === "string") {
           const ref = findStringInJson(content, typeRoot)
-          if (ref)
+          if (ref) {
             refs.push({
               field: "compilerOptions.typeRoots[]",
               path: typeRoot,
               ...ref,
             })
+          }
         }
       }
     }
@@ -136,8 +139,9 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
         typeof ref.path === "string"
       ) {
         const pathRef = findStringInJson(content, ref.path)
-        if (pathRef)
+        if (pathRef) {
           refs.push({ field: "references[].path", path: ref.path, ...pathRef })
+        }
       }
     }
   }

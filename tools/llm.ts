@@ -176,8 +176,9 @@ function getQuestion(): string {
           "--context",
           "--context-file",
         ].includes(flagName!)
-      )
+      ) {
         return false
+      }
     }
     return true
   })
@@ -453,15 +454,17 @@ async function main() {
       "deep",
       isProviderAvailable,
     )
-    if (!deepModel)
+    if (!deepModel) {
       error("No deep research model available. " + (deepWarning || ""))
+    }
 
     console.error(`Deep research: ${topic}`)
     console.error(`Model: ${deepModel.displayName}`)
     console.error(`Estimated cost: ~$2-5\n`)
     if (deepWarning) console.error(`⚠️  ${deepWarning}\n`)
-    if (context)
+    if (context) {
       console.error(`📎 Context provided (${context.length} chars)\n`)
+    }
 
     if (hasFlag("--dry-run")) {
       console.error("🔍 Dry run - would call deep research API")
@@ -601,8 +604,9 @@ async function main() {
         "opinion",
         isProviderAvailable,
       )
-      if (!model)
+      if (!model) {
         error("No model available for second opinion. " + (warning || ""))
+      }
       if (warning) console.error(`⚠️  ${warning}\n`)
 
       console.error(`[Second opinion from ${model.displayName}]\n`)
@@ -695,8 +699,9 @@ async function main() {
 
       const { models: debateModels, warning: debateWarning } =
         getBestAvailableModels("debate", isProviderAvailable, 3)
-      if (debateModels.length < 2)
+      if (debateModels.length < 2) {
         error("Need at least 2 models for debate. " + (debateWarning || ""))
+      }
 
       console.error(`Multi-model debate: ${question}`)
       console.error(
@@ -704,8 +709,9 @@ async function main() {
       )
       console.error(`Estimated cost: ~$1-3\n`)
       if (debateWarning) console.error(`⚠️  ${debateWarning}\n`)
-      if (contextDebate)
+      if (contextDebate) {
         console.error(`📎 Context provided (${contextDebate.length} chars)\n`)
+      }
 
       // Dry run - show what would happen without calling API
       if (hasFlag("--dry-run")) {
@@ -713,8 +719,9 @@ async function main() {
         for (const m of debateModels) {
           console.error(`   • ${m.displayName} (${m.provider})`)
         }
-        if (contextDebate)
+        if (contextDebate) {
           console.error(`   Context: ${contextDebate.slice(0, 100)}...`)
+        }
         process.exit(0)
       }
 

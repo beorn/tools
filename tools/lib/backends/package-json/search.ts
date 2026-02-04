@@ -173,8 +173,9 @@ export function findBrokenPackageJsonPaths(
 
     for (const pathRef of pathRefs) {
       // Skip non-file paths (like package names in dependencies)
-      if (!pathRef.path.startsWith(".") && !pathRef.path.startsWith("/"))
+      if (!pathRef.path.startsWith(".") && !pathRef.path.startsWith("/")) {
         continue
+      }
 
       // Check if the referenced file exists
       const resolvedPath = join(pkgDir, pathRef.path)

@@ -86,12 +86,13 @@ export function parsePackageJson(content: string): PackagePathRef[] {
             for (const p of paths) {
               if (typeof p === "string") {
                 const ref = findStringInJson(content, p, p)
-                if (ref)
+                if (ref) {
                   refs.push({
                     field: `typesVersions.${version}.${pattern}`,
                     path: p,
                     ...ref,
                   })
+                }
               }
             }
           }

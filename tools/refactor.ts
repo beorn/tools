@@ -1168,8 +1168,9 @@ async function main() {
       } else {
         const result = getBestAvailableModel("default", isProviderAvailable)
         model = result.model
-        if (!model)
+        if (!model) {
           error("No LLM model available. Set OPENAI_API_KEY or similar.")
+        }
         if (result.warning) console.error(`⚠️  ${result.warning}`)
       }
 
