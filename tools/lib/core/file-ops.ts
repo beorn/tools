@@ -233,12 +233,13 @@ export function findImportEdits(
 
     // Process import declarations: import { x } from "./foo"
     for (const importDecl of sourceFile.getImportDeclarations()) {
-      const moduleSpecifier = importDecl.getModuleSpecifierValue()
+      const specNode = importDecl.getModuleSpecifier()
       const edit = createImportEdit(
         sourceFilePath,
         sourceFileDir,
-        moduleSpecifier,
-        importDecl.getModuleSpecifier(),
+        importDecl.getModuleSpecifierValue(),
+        specNode.getStart(),
+        specNode.getEnd(),
         fileContent,
         oldPathToOp,
         cwd,
@@ -251,11 +252,13 @@ export function findImportEdits(
       const moduleSpecifier = exportDecl.getModuleSpecifierValue()
       if (!moduleSpecifier) continue // export { x } without from clause
 
+      const specNode = exportDecl.getModuleSpecifier()!
       const edit = createImportEdit(
         sourceFilePath,
         sourceFileDir,
         moduleSpecifier,
-        exportDecl.getModuleSpecifier()!,
+        specNode.getStart(),
+        specNode.getEnd(),
         fileContent,
         oldPathToOp,
         cwd,
@@ -281,7 +284,7 @@ export function findImportEdits(
             const end =
               start + quote!.length + moduleSpecifier!.length + quote!.length
 
-            const edit = createImportEditFromStringLiteral(
+            const edit = createImportEdit(
               sourceFilePath,
               sourceFileDir,
               moduleSpecifier!,
@@ -306,62 +309,10 @@ export function findImportEdits(
 }
 
 /**
- * Create an edit for an import/export module specifier
+ * Create an edit for an import/export module specifier.
+ * Works with both AST nodes (getStart/getEnd) and raw offsets.
  */
 function createImportEdit(
-  sourceFilePath: string,
-  sourceFileDir: string,
-  moduleSpecifier: string,
-  specifierNode: { getStart(): number; getEnd(): number },
-  fileContent: string,
-  oldPathToOp: Map<string, FileOp>,
-  cwd: string,
-): Edit | null {
-  // Only handle relative imports
-  if (!moduleSpecifier.startsWith(".")) return null
-
-  // Resolve the import to an absolute path
-  const resolvedPath = resolveModulePath(sourceFileDir, moduleSpecifier)
-
-  // Check if this import points to a renamed file
-  const op =
-    oldPathToOp.get(resolvedPath) ||
-    oldPathToOp.get(resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, ""))
-  if (!op) return null
-
-  // Calculate the new relative path from the importing file to the new location
-  const absNewPath = path.isAbsolute(op.newPath)
-    ? op.newPath
-    : path.join(cwd, op.newPath)
-  const newRelativePath = computeNewRelativePath(
-    sourceFileDir,
-    absNewPath,
-    moduleSpecifier,
-  )
-
-  // The specifier node includes the quotes, so we replace the whole thing
-  const start = specifierNode.getStart()
-  const end = specifierNode.getEnd()
-
-  // Determine quote style from original
-  const originalQuote = fileContent[start]
-  const newSpecifier = `${originalQuote}${newRelativePath}${originalQuote}`
-
-  // Convert to relative path for the edit
-  const relativeFilePath = path.relative(cwd, sourceFilePath)
-
-  return {
-    file: relativeFilePath,
-    offset: start,
-    length: end - start,
-    replacement: newSpecifier,
-  }
-}
-
-/**
- * Create an edit for a string literal (dynamic import or require)
- */
-function createImportEditFromStringLiteral(
   sourceFilePath: string,
   sourceFileDir: string,
   moduleSpecifier: string,
@@ -371,19 +322,14 @@ function createImportEditFromStringLiteral(
   oldPathToOp: Map<string, FileOp>,
   cwd: string,
 ): Edit | null {
-  // Only handle relative imports
   if (!moduleSpecifier.startsWith(".")) return null
 
-  // Resolve the import to an absolute path
   const resolvedPath = resolveModulePath(sourceFileDir, moduleSpecifier)
-
-  // Check if this import points to a renamed file
   const op =
     oldPathToOp.get(resolvedPath) ||
     oldPathToOp.get(resolvedPath.replace(/\.(ts|tsx|js|jsx)$/, ""))
   if (!op) return null
 
-  // Calculate the new relative path
   const absNewPath = path.isAbsolute(op.newPath)
     ? op.newPath
     : path.join(cwd, op.newPath)
@@ -393,15 +339,11 @@ function createImportEditFromStringLiteral(
     moduleSpecifier,
   )
 
-  // Determine quote style from original
   const originalQuote = fileContent[start]
   const newSpecifier = `${originalQuote}${newRelativePath}${originalQuote}`
 
-  // Convert to relative path for the edit
-  const relativeFilePath = path.relative(cwd, sourceFilePath)
-
   return {
-    file: relativeFilePath,
+    file: path.relative(cwd, sourceFilePath),
     offset: start,
     length: end - start,
     replacement: newSpecifier,

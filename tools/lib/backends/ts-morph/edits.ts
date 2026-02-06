@@ -228,11 +228,7 @@ function generateEditsFromRefs(
     })
   }
 
-  // Sort edits by file then by offset (descending for safe application)
-  return edits.sort((a, b) => {
-    if (a.file !== b.file) return a.file.localeCompare(b.file)
-    return b.offset - a.offset // Descending for reverse application
-  })
+  return sortEditsForApplication(edits)
 }
 
 function generateBatchEdits(
@@ -272,11 +268,7 @@ function generateBatchEdits(
     }
   }
 
-  // Sort by file then by offset descending
-  return allEdits.sort((a, b) => {
-    if (a.file !== b.file) return a.file.localeCompare(b.file)
-    return b.offset - a.offset
-  })
+  return sortEditsForApplication(allEdits)
 }
 
 function createDefinitionEdit(
@@ -315,4 +307,11 @@ function createDefinitionEdit(
     length: sym.name.length,
     replacement: newName,
   }
+}
+
+/** Sort edits by file, then by offset descending (for safe reverse application) */
+function sortEditsForApplication(edits: Edit[]): Edit[] {
+  return edits.sort((a, b) =>
+    a.file !== b.file ? a.file.localeCompare(b.file) : b.offset - a.offset,
+  )
 }

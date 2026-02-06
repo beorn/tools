@@ -205,6 +205,25 @@ function highlightMatch(text: string, regex: RegExp): string {
   )
 }
 
+function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>()
+  for (const item of items) {
+    const key = keyFn(item)
+    let group = map.get(key)
+    if (!group) {
+      group = []
+      map.set(key, group)
+    }
+    group.push(item)
+  }
+  return map
+}
+
+function formatSessionId(id: string, titleMap: Map<string, string>): string {
+  const title = titleMap.get(id)
+  return title ? `${title} (${id.slice(0, 8)})` : `${id.slice(0, 8)}...`
+}
+
 // ============================================================================
 // Search options interface
 // ============================================================================
@@ -270,16 +289,15 @@ async function cmdSearch(
     }
   }
 
-  // Determine message type filter
-  let messageType: "user" | "assistant" | undefined
-  if (question && response) {
-    // Both flags = no filter
-    messageType = undefined
-  } else if (question) {
-    messageType = "user"
-  } else if (response) {
-    messageType = "assistant"
-  }
+  // Determine message type filter (both flags = no filter)
+  const messageType: "user" | "assistant" | undefined =
+    question && response
+      ? undefined
+      : question
+        ? "user"
+        : response
+          ? "assistant"
+          : undefined
 
   // If regex mode, delegate to grep
   if (regexMode) {
@@ -474,22 +492,13 @@ async function cmdSearch(
 
   // Display message results (grouped by session)
   if (messageResults.results.length > 0) {
-    const bySession = new Map<string, typeof messageResults.results>()
-    for (const r of messageResults.results) {
-      const key = r.session_id
-      const existing = bySession.get(key) || []
-      existing.push(r)
-      bySession.set(key, existing)
-    }
+    const bySession = groupBy(messageResults.results, (r) => r.session_id)
 
     for (const [sessionId, sessionResults] of bySession) {
       const first = sessionResults[0]!
       const displayProject = displayProjectPath(first.project_path)
       const relTime = formatRelativeTime(first.timestamp)
-      const title = sessionTitles.get(sessionId)
-      const sessionDisplay = title
-        ? `${title} (${sessionId.slice(0, 8)})`
-        : `${sessionId.slice(0, 8)}...`
+      const sessionDisplay = formatSessionId(sessionId, sessionTitles)
 
       console.log(
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -643,10 +652,7 @@ async function cmdNow(): Promise<void> {
   for (const session of active) {
     const displayProject = displayProjectPath(session.project_path)
     const relTime = formatRelativeTime(session.last_activity)
-    const title = sessionTitles.get(session.session_id)
-    const sessionDisplay = title
-      ? `${title} (${session.session_id.slice(0, 8)})`
-      : `${session.session_id.slice(0, 8)}...`
+    const sessionDisplay = formatSessionId(session.session_id, sessionTitles)
     console.log(`📁 ${displayProject}`)
     console.log(`   Session: ${sessionDisplay}`)
     console.log(
@@ -1085,13 +1091,7 @@ async function cmdGrep(
 
   console.log(`Found ${matches.length} matches in ${filesSearched} files:\n`)
 
-  const bySession = new Map<string, GrepMatch[]>()
-  for (const match of matches) {
-    const key = match.sessionId
-    const existing = bySession.get(key) || []
-    existing.push(match)
-    bySession.set(key, existing)
-  }
+  const bySession = groupBy(matches, (m) => m.sessionId)
 
   for (const [sessionId, sessionMatches] of bySession) {
     const firstMatch = sessionMatches[0]!
@@ -1268,12 +1268,7 @@ async function cmdWritesSearch(pattern: string): Promise<void> {
 
   console.log(`Found ${rows.length} writes matching "${pattern}":\n`)
 
-  const byPath = new Map<string, WriteRecord[]>()
-  for (const row of rows) {
-    const existing = byPath.get(row.file_path) || []
-    existing.push(row)
-    byPath.set(row.file_path, existing)
-  }
+  const byPath = groupBy(rows, (r) => r.file_path)
 
   for (const [fp, versions] of byPath) {
     console.log(`📄 ${fp}`)
