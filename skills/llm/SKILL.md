@@ -215,6 +215,7 @@ TaskOutput(task_id=<id>, block=true, timeout=600000)
 ```
 
 **Anti-pattern** — do NOT do this:
+
 ```
 # BAD: Manual polling wastes 5+ turns on sleep/read cycles
 Bash("sleep 30 && wc -l /tmp/output")
