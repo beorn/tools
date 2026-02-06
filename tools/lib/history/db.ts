@@ -613,8 +613,8 @@ function escapeToken(token: string): { text: string; quoted: boolean } {
   const cleaned = token.replace(/[?!.,;]+$/, "")
   if (cleaned.length === 0) return { text: '""', quoted: true }
 
-  // Special FTS5 characters that need quoting: . () : * ^ $ {} [] | \ + !
-  if (/[.():*^${}[\]|\\+!]/.test(cleaned)) {
+  // Special FTS5 characters that need quoting: . () : * ^ $ {} [] | \ + ! # @ ~ ' < > -
+  if (/[.():*^${}[\]|\\+!#@~'<>-]/.test(cleaned)) {
     // Quote as phrase, escape internal quotes by doubling them
     return { text: `"${cleaned.replace(/"/g, '""')}"`, quoted: true }
   }
