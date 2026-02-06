@@ -125,12 +125,12 @@ describe("parseTimeToMs", () => {
 // ============================================================================
 
 describe("toFts5Query", () => {
-  test("simple word becomes prefix match", () => {
-    expect(toFts5Query("hello")).toBe("hello*")
+  test("simple word is quoted", () => {
+    expect(toFts5Query("hello")).toBe('"hello"')
   })
 
-  test("multiple words each get prefix matching", () => {
-    expect(toFts5Query("hello world")).toBe("hello* world*")
+  test("multiple words each get quoted", () => {
+    expect(toFts5Query("hello world")).toBe('"hello" "world"')
   })
 
   test("quoted phrases are preserved as FTS5 phrases", () => {
@@ -138,34 +138,29 @@ describe("toFts5Query", () => {
   })
 
   test("negation with - prefix adds NOT", () => {
-    expect(toFts5Query("-exclude")).toBe("NOT exclude*")
+    expect(toFts5Query("-exclude")).toBe('NOT "exclude"')
   })
 
   test("mixed query: words, negation, and quoted phrases", () => {
     expect(toFts5Query('hello -bad "exact phrase"')).toBe(
-      'hello* NOT bad* "exact phrase"',
+      '"hello" NOT "bad" "exact phrase"',
     )
   })
 
-  test("dots are quoted as FTS5 special characters", () => {
-    const result = toFts5Query("file.ts")
-    // Dots trigger quoting, which means the token is wrapped in double quotes
-    expect(result).toBe('"file.ts"')
+  test("dots are quoted", () => {
+    expect(toFts5Query("file.ts")).toBe('"file.ts"')
   })
 
   test("parentheses are quoted", () => {
-    const result = toFts5Query("func()")
-    expect(result).toBe('"func()"')
+    expect(toFts5Query("func()")).toBe('"func()"')
   })
 
   test("colons are quoted", () => {
-    const result = toFts5Query("key:value")
-    expect(result).toBe('"key:value"')
+    expect(toFts5Query("key:value")).toBe('"key:value"')
   })
 
   test("negation with special characters quotes the term", () => {
-    const result = toFts5Query("-file.ts")
-    expect(result).toBe('NOT "file.ts"')
+    expect(toFts5Query("-file.ts")).toBe('NOT "file.ts"')
   })
 
   test("empty string returns empty", () => {
@@ -173,7 +168,7 @@ describe("toFts5Query", () => {
   })
 
   test("multiple spaces are collapsed", () => {
-    expect(toFts5Query("hello   world")).toBe("hello* world*")
+    expect(toFts5Query("hello   world")).toBe('"hello" "world"')
   })
 
   test("single quoted phrase only", () => {
@@ -187,25 +182,39 @@ describe("toFts5Query", () => {
   })
 
   test("word followed by quoted phrase", () => {
-    expect(toFts5Query('search "inline edit"')).toBe('search* "inline edit"')
+    expect(toFts5Query('search "inline edit"')).toBe('"search" "inline edit"')
   })
 
   test("trailing question marks are stripped", () => {
-    expect(toFts5Query("what is this?")).toBe("what* is* this*")
+    expect(toFts5Query("what is this?")).toBe('"what" "is" "this"')
   })
 
   test("trailing exclamation marks are stripped", () => {
-    expect(toFts5Query("fix this!")).toBe("fix* this*")
+    expect(toFts5Query("fix this!")).toBe('"fix" "this"')
   })
 
   test("trailing commas are stripped", () => {
-    expect(toFts5Query("hello, world")).toBe("hello* world*")
+    expect(toFts5Query("hello, world")).toBe('"hello" "world"')
   })
 
   test("natural language question works", () => {
     expect(toFts5Query("how does inline edit work?")).toBe(
-      "how* does* inline* edit* work*",
+      '"how" "does" "inline" "edit" "work"',
     )
+  })
+
+  test("single quotes are safely quoted", () => {
+    expect(toFts5Query("i'm getting errors")).toBe('"i\'m" "getting" "errors"')
+  })
+
+  test("angle brackets are safely quoted", () => {
+    expect(toFts5Query("fix <error> handling")).toBe(
+      '"fix" "<error>" "handling"',
+    )
+  })
+
+  test("hyphens in tokens are safely quoted", () => {
+    expect(toFts5Query("km-tui")).toBe('"km-tui"')
   })
 })
 

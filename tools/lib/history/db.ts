@@ -609,16 +609,12 @@ export function clearTables(
  * Tokens with special characters are quoted as phrases.
  */
 function escapeToken(token: string): { text: string; quoted: boolean } {
-  // Strip trailing punctuation that would confuse FTS5 (? ! . ,)
+  // Strip trailing punctuation that would confuse FTS5
   const cleaned = token.replace(/[?!.,;]+$/, "")
   if (cleaned.length === 0) return { text: '""', quoted: true }
-
-  // Special FTS5 characters that need quoting: . () : * ^ $ {} [] | \ + ! # @ ~ ' < > -
-  if (/[.():*^${}[\]|\\+!#@~'<>-]/.test(cleaned)) {
-    // Quote as phrase, escape internal quotes by doubling them
-    return { text: `"${cleaned.replace(/"/g, '""')}"`, quoted: true }
-  }
-  return { text: cleaned, quoted: false }
+  // Always quote as phrase — bulletproof against any FTS5 special chars.
+  // Only need to escape internal double quotes by doubling them.
+  return { text: `"${cleaned.replace(/"/g, '""')}"`, quoted: true }
 }
 
 // Convert search query to FTS5 syntax
