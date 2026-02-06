@@ -45,7 +45,12 @@ export interface SessionIndexEntry {
 }
 
 // Content types for unified search
-export type ContentType = "message" | "plan" | "summary" | "todo"
+export type ContentType =
+  | "message"
+  | "plan"
+  | "summary"
+  | "todo"
+  | "first_prompt"
 
 // Unified content record for FTS
 export interface ContentRecord {

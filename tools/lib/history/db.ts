@@ -324,7 +324,7 @@ export function ftsSearch(
     WHERE messages_fts MATCH ?
   `
   let searchQuery = `
-    SELECT m.*, s.project_path, bm25(messages_fts) as rank
+    SELECT m.*, s.project_path, bm25(messages_fts, 10.0, 1.0, 2.0) as rank
     FROM messages_fts f
     JOIN messages m ON f.rowid = m.id
     JOIN sessions s ON m.session_id = s.id
@@ -359,6 +359,7 @@ export interface MessageSearchOptions {
   messageType?: "user" | "assistant" // Filter by message type
   toolName?: string // Filter by tool name
   sessionId?: string // Filter by session ID
+  snippetTokens?: number // Snippet window size (default 64)
 }
 
 export function ftsSearchWithSnippet(
@@ -381,6 +382,7 @@ export function ftsSearchWithSnippet(
     messageType,
     toolName,
     sessionId,
+    snippetTokens = 64,
   } = options
 
   const ftsQuery = toFts5Query(query)
@@ -394,8 +396,8 @@ export function ftsSearchWithSnippet(
   `
   let searchQuery = `
     SELECT m.*, s.project_path,
-           snippet(messages_fts, 0, '>>>', '<<<', '...', 64) as snippet,
-           bm25(messages_fts) as rank
+           snippet(messages_fts, 0, '>>>', '<<<', '...', ${snippetTokens}) as snippet,
+           bm25(messages_fts, 10.0, 1.0, 2.0) as rank
     FROM messages_fts f
     JOIN messages m ON f.rowid = m.id
     JOIN sessions s ON m.session_id = s.id
@@ -536,7 +538,7 @@ export function findSimilarQueries(
       m1.session_id,
       s.project_path,
       m1.timestamp,
-      bm25(messages_fts) as rank
+      bm25(messages_fts, 10.0, 1.0, 2.0) as rank
     FROM messages_fts f
     JOIN messages m1 ON f.rowid = m1.id
     JOIN sessions s ON m1.session_id = s.id
@@ -598,12 +600,16 @@ export function clearTables(
  * Tokens with special characters are quoted as phrases.
  */
 function escapeToken(token: string): { text: string; quoted: boolean } {
-  // Special FTS5 characters that need quoting: . () : "
-  if (/[.():]/.test(token)) {
+  // Strip trailing punctuation that would confuse FTS5 (? ! . ,)
+  const cleaned = token.replace(/[?!.,;]+$/, "")
+  if (cleaned.length === 0) return { text: '""', quoted: true }
+
+  // Special FTS5 characters that need quoting: . () : * ^ $ {} [] | \ + !
+  if (/[.():*^${}[\]|\\+!]/.test(cleaned)) {
     // Quote as phrase, escape internal quotes by doubling them
-    return { text: `"${token.replace(/"/g, '""')}"`, quoted: true }
+    return { text: `"${cleaned.replace(/"/g, '""')}"`, quoted: true }
   }
-  return { text: token, quoted: false }
+  return { text: cleaned, quoted: false }
 }
 
 // Convert search query to FTS5 syntax
@@ -820,6 +826,7 @@ export interface ContentSearchOptions {
   types?: ContentType[]
   projectFilter?: string
   sinceTime?: number // Filter content after this timestamp
+  snippetTokens?: number // Snippet window size (default 64)
 }
 
 /**
@@ -833,7 +840,14 @@ export function searchAll(
   results: (ContentRecord & { snippet: string; rank: number })[]
   total: number
 } {
-  const { limit = 50, offset = 0, types, projectFilter, sinceTime } = options
+  const {
+    limit = 50,
+    offset = 0,
+    types,
+    projectFilter,
+    sinceTime,
+    snippetTokens = 64,
+  } = options
   const ftsQuery = toFts5Query(query)
 
   const params: (string | number)[] = [ftsQuery]
@@ -865,8 +879,8 @@ export function searchAll(
 
   const searchQuery = `
     SELECT c.*,
-           snippet(content_fts, 1, '>>>', '<<<', '...', 64) as snippet,
-           bm25(content_fts) as rank
+           snippet(content_fts, 1, '>>>', '<<<', '...', ${snippetTokens}) as snippet,
+           bm25(content_fts, 2.0, 10.0) as rank
     FROM content_fts f
     JOIN content c ON f.rowid = c.id
     WHERE content_fts MATCH ?${typeClause}${projectClause}${timeClause}

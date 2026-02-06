@@ -129,6 +129,7 @@ function parseInclude(includeStr: string): ContentType[] {
     m: "message",
     s: "summary",
     t: "todo",
+    f: "first_prompt",
   }
 
   const longMap: Record<string, ContentType> = {
@@ -140,6 +141,9 @@ function parseInclude(includeStr: string): ContentType[] {
     summary: "summary",
     todos: "todo",
     todo: "todo",
+    first_prompt: "first_prompt",
+    first_prompts: "first_prompt",
+    prompts: "first_prompt",
   }
 
   for (const part of parts) {
@@ -622,6 +626,9 @@ async function cmdIndex(options: { incremental?: boolean }): Promise<void> {
   }
   if (result.summaries > 0) {
     console.log(`  ${result.summaries.toLocaleString()} session summaries`)
+  }
+  if (result.firstPrompts > 0) {
+    console.log(`  ${result.firstPrompts.toLocaleString()} first prompts`)
   }
   if (result.plans > 0) {
     console.log(`  ${result.plans.toLocaleString()} plan files`)

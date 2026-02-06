@@ -298,6 +298,7 @@ export interface IndexResult {
   plans: number
   todos: number
   summaries: number
+  firstPrompts: number
   skippedOld: number
 }
 
@@ -321,26 +322,22 @@ export function pruneOldSessions(
 
   const sessionIds = oldSessions.map((s) => s.id)
 
-  // Delete messages for old sessions
-  let messagesDeleted = 0
-  for (const id of sessionIds) {
-    const result = db
-      .prepare("DELETE FROM messages WHERE session_id = ?")
-      .run(id)
-    messagesDeleted += result.changes
-  }
+  // Batch delete for efficiency
+  const placeholders = sessionIds.map(() => "?").join(",")
 
-  // Delete writes for old sessions
-  let writesDeleted = 0
-  for (const id of sessionIds) {
-    const result = db.prepare("DELETE FROM writes WHERE session_id = ?").run(id)
-    writesDeleted += result.changes
-  }
+  const messagesResult = db
+    .prepare(`DELETE FROM messages WHERE session_id IN (${placeholders})`)
+    .run(...sessionIds)
+  const messagesDeleted = messagesResult.changes
 
-  // Delete the sessions themselves
-  for (const id of sessionIds) {
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(id)
-  }
+  const writesResult = db
+    .prepare(`DELETE FROM writes WHERE session_id IN (${placeholders})`)
+    .run(...sessionIds)
+  const writesDeleted = writesResult.changes
+
+  db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(
+    ...sessionIds,
+  )
 
   // Rebuild FTS index to remove deleted data
   db.prepare("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')").run()
@@ -426,6 +423,23 @@ export async function rebuildIndex(
     }
   }
 
+  // Index session first prompts (enables topic-level recall)
+  let totalFirstPrompts = 0
+  for (const entry of sessionEntries) {
+    if (entry.firstPrompt) {
+      insertContent(
+        db,
+        "first_prompt",
+        entry.sessionId,
+        entry.projectPath || null,
+        entry.customTitle || null,
+        entry.firstPrompt,
+        entry.created ? new Date(entry.created).getTime() : Date.now(),
+      )
+      totalFirstPrompts++
+    }
+  }
+
   // Index plan files
   for (const planFile of findPlanFiles()) {
     try {
@@ -494,6 +508,7 @@ export async function rebuildIndex(
   setIndexMeta(db, "total_plans", String(totalPlans))
   setIndexMeta(db, "total_todos", String(totalTodos))
   setIndexMeta(db, "total_summaries", String(totalSummaries))
+  setIndexMeta(db, "total_first_prompts", String(totalFirstPrompts))
 
   return {
     files: totalFiles,
@@ -502,6 +517,7 @@ export async function rebuildIndex(
     plans: totalPlans,
     todos: totalTodos,
     summaries: totalSummaries,
+    firstPrompts: totalFirstPrompts,
     skippedOld,
   }
 }
