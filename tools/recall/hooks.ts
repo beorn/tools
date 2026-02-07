@@ -6,7 +6,7 @@
 import * as path from "path"
 import * as os from "os"
 import { hookRecall } from "../lib/history/recall"
-import { summarizeUnprocessedDays } from "./summarize"
+import { summarizeUnprocessedDays } from "./summarize-daily"
 
 // ============================================================================
 // Stdin reader

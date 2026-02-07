@@ -25,7 +25,7 @@ import { cmdStatus } from "./recall/status"
 import { cmdSessions, cmdIndex } from "./recall/sessions"
 import { cmdFiles } from "./recall/files"
 import { cmdHook, cmdRemember } from "./recall/hooks"
-import { cmdSummarize } from "./recall/summarize"
+import { cmdSummarize } from "./recall/summarize-daily"
 
 // ============================================================================
 // CLI
