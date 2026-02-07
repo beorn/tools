@@ -441,13 +441,14 @@ function buildSessionIndex(sessions: DaySession[]): string {
 }
 
 /**
- * Extract key content from a session's transcript (last N user/assistant messages).
+ * Extract key content from a session's transcript.
+ * Samples from beginning, middle, and end of the session.
+ * Includes both text and tool_use content (file edits, commands).
  */
 function extractSessionContent(
   session: DaySession,
   log: (msg: string) => void,
 ): string | null {
-  // Find the JSONL file for this session
   const jsonlPath = findSessionJsonl(session.id)
   if (!jsonlPath) {
     log(`no JSONL found for ${session.id.slice(0, 8)}`)
@@ -455,48 +456,55 @@ function extractSessionContent(
   }
 
   try {
-    const content = fs.readFileSync(jsonlPath, "utf8")
-    const lines = content.split("\n").filter(Boolean)
+    const raw = fs.readFileSync(jsonlPath, "utf8")
+    const lines = raw.split("\n").filter(Boolean)
 
-    // Take last 100 lines for large sessions, all for small ones
-    const relevantLines = lines.length > 100 ? lines.slice(-100) : lines
+    // Sample from beginning (first 40), middle (40 around center), end (last 40)
+    // This captures initial goals, mid-session work, and final outcomes.
+    const sampled = sampleLines(lines, 40)
 
     const messages: string[] = []
-    for (const line of relevantLines) {
-      try {
-        const entry = JSON.parse(line) as {
-          type?: string
-          message?: {
-            content?: Array<{ type?: string; text?: string } | string>
-          }
-          content?: string | unknown[]
-        }
+    let hasUserText = false
 
+    for (const line of sampled) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const entry = JSON.parse(line) as any
         if (entry.type !== "user" && entry.type !== "assistant") continue
 
-        let text = ""
-        if (entry.message?.content) {
-          text = entry.message.content
-            .map((c) => {
-              if (typeof c === "string") return c
-              if (c && typeof c === "object" && "text" in c) return c.text
-              return ""
-            })
-            .filter(Boolean)
-            .join("\n")
-        } else if (typeof entry.content === "string") {
-          text = entry.content
+        const parts: string[] = []
+        const content = entry.message?.content
+        if (!Array.isArray(content)) continue
+
+        for (const block of content) {
+          if (typeof block === "string") {
+            if (block.length > 20) parts.push(block)
+            continue
+          }
+          if (!block || typeof block !== "object") continue
+
+          if (block.type === "text" && block.text && block.text.length > 20) {
+            parts.push(truncStr(block.text, 1500))
+            if (entry.type === "user") hasUserText = true
+          } else if (block.type === "tool_use") {
+            // Summarize tool calls — this is where the substance often is
+            const summary = summarizeToolUse(block)
+            if (summary) parts.push(summary)
+          }
+          // Skip tool_result (large file dumps, noise)
         }
 
-        if (text && text.length > 20) {
-          // Truncate very long messages
-          const truncated =
-            text.length > 2000 ? text.slice(0, 2000) + "..." : text
-          messages.push(`[${entry.type}]: ${truncated}`)
+        if (parts.length > 0) {
+          messages.push(`[${entry.type}]: ${parts.join(" | ")}`)
         }
       } catch {
         // Skip unparseable lines
       }
+    }
+
+    // Detect likely sub-agent: no real user text input
+    if (!hasUserText && messages.length > 0) {
+      log(`${session.id.slice(0, 8)} likely sub-agent (no user text)`)
     }
 
     if (messages.length === 0) return null
@@ -509,16 +517,68 @@ function extractSessionContent(
     })
 
     // Limit per-session extract to ~4KB
-    let joined = messages.join("\n---\n")
+    let joined = messages.join("\n")
     if (joined.length > 4000) {
       joined = joined.slice(-4000)
     }
 
-    return `### Session ${shortId} (${time}) — ${title} [${session.messageCount} msgs]\n\n${joined}`
+    const subAgentLabel = hasUserText ? "" : " [sub-agent]"
+    return `### Session ${shortId} (${time}) — ${title}${subAgentLabel}\n\n${joined}`
   } catch {
     log(`error reading ${session.id.slice(0, 8)}`)
     return null
   }
+}
+
+/** Sample lines from beginning, middle, and end of array. */
+function sampleLines(lines: string[], perSection: number): string[] {
+  if (lines.length <= perSection * 3) return lines
+  const start = lines.slice(0, perSection)
+  const midPoint = Math.floor(lines.length / 2)
+  const half = Math.floor(perSection / 2)
+  const middle = lines.slice(midPoint - half, midPoint + half)
+  const end = lines.slice(-perSection)
+  return [...start, ...middle, ...end]
+}
+
+/** Truncate text to max length. */
+function truncStr(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) + "..." : text
+}
+
+/** Summarize a tool_use block into a brief description. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function summarizeToolUse(block: any): string | null {
+  const name = block.name as string | undefined
+  const input = block.input as Record<string, unknown> | undefined
+  if (!name || !input) return null
+
+  switch (name) {
+    case "Edit":
+    case "MultiEdit":
+      return `[Edit] ${fileBasename(input.file_path as string)}`
+    case "Write":
+      return `[Write] ${fileBasename(input.file_path as string)}`
+    case "Read":
+      return null // too noisy
+    case "Bash": {
+      const cmd = input.command as string | undefined
+      return cmd ? `[Bash] ${truncStr(cmd, 120)}` : null
+    }
+    case "Grep":
+      return `[Search] "${truncStr(String(input.pattern || ""), 50)}"`
+    case "Glob":
+      return null // too noisy
+    case "Task":
+      return `[Task] ${truncStr(String(input.description || input.prompt || ""), 80)}`
+    default:
+      return `[${name}]`
+  }
+}
+
+function fileBasename(filePath: string | undefined): string {
+  if (!filePath) return "?"
+  return filePath.split("/").pop() || filePath
 }
 
 /**
