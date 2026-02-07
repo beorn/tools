@@ -141,10 +141,20 @@ export async function summarizeDay(
     }
   }
 
-  // Filter out tiny sessions (agent sub-sessions with < 5 messages)
-  const meaningfulSessions = sessions.filter((s) => s.messageCount >= 5)
+  // Filter out trivially short sessions (< 5KB JSONL).
+  // Sub-agent transcripts are included since there's no parent_id to filter on;
+  // the 30KB context limit and LLM deduplication handles overlap naturally.
+  const meaningfulSessions = sessions.filter((s) => {
+    const jsonlPath = findSessionJsonl(s.id)
+    if (!jsonlPath) return false
+    try {
+      return fs.statSync(jsonlPath).size > 5_000
+    } catch {
+      return false
+    }
+  })
   log(
-    `${sessions.length} total sessions, ${meaningfulSessions.length} with >= 5 messages`,
+    `${sessions.length} total sessions, ${meaningfulSessions.length} meaningful (>5KB)`,
   )
 
   if (meaningfulSessions.length === 0) {
@@ -189,7 +199,7 @@ export async function summarizeDay(
   // Build the full context for LLM
   const totalSessions = meaningfulSessions.length
   const totalMessages = meaningfulSessions.reduce(
-    (s, sess) => s + sess.messageCount,
+    (s, sess) => s + (sess.messageCount || 0),
     0,
   )
   const projects = [...new Set(meaningfulSessions.map((s) => s.project))]
@@ -255,7 +265,8 @@ export async function summarizeDay(
   fs.mkdirSync(memoryDir, { recursive: true })
 
   const memoryFile = path.join(memoryDir, `${date}.md`)
-  const header = `# ${date}\n\n${totalSessions} sessions, ${totalMessages} messages | ${projects.map(displayProject).join(", ")}\n\n`
+  const msgInfo = totalMessages > 0 ? `, ${totalMessages} messages` : ""
+  const header = `# ${date}\n\n${totalSessions} sessions${msgInfo} | ${projects.map(displayProject).join(", ")}\n\n`
   const sessionsIndex = buildSessionIndex(meaningfulSessions)
 
   fs.writeFileSync(memoryFile, header + synthesis + "\n\n" + sessionsIndex)
@@ -423,9 +434,8 @@ function buildSessionIndex(sessions: DaySession[]): string {
       minute: "2-digit",
     })
     const title = s.title || displayProject(s.project)
-    lines.push(
-      `- \`${s.id.slice(0, 8)}\` ${time} — ${title} (${s.messageCount} msgs)`,
-    )
+    const msgLabel = s.messageCount > 0 ? ` (${s.messageCount} msgs)` : ""
+    lines.push(`- \`${s.id.slice(0, 8)}\` ${time} — ${title}${msgLabel}`)
   }
   return lines.join("\n") + "\n"
 }
