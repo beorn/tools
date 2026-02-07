@@ -636,14 +636,25 @@ function indexBeads(
 }
 
 /**
- * Index session memory files from memory/sessions/*.md
+ * Index session memory files from ~/.claude/projects/<encoded>/memory/sessions/*.md
+ * (Falls back to <projectRoot>/memory/sessions/ for legacy files)
  */
 function indexSessionMemory(
   db: Database,
   projectRoot: string,
   projectPath: string,
 ): number {
-  const memoryDir = path.join(projectRoot, "memory", "sessions")
+  const encodedPath = encodeProjectPath(projectRoot)
+  const primaryDir = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodedPath,
+    "memory",
+    "sessions",
+  )
+  const legacyDir = path.join(projectRoot, "memory", "sessions")
+  const memoryDir = fs.existsSync(primaryDir) ? primaryDir : legacyDir
   if (!fs.existsSync(memoryDir)) return 0
 
   let count = 0

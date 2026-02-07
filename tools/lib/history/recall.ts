@@ -1479,7 +1479,8 @@ export async function remember(
   fs.mkdirSync(memoryDir, { recursive: true })
 
   // Append to dated memory file
-  const today = new Date().toISOString().split("T")[0]
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
   const memoryFile = path.join(memoryDir, `${today}.md`)
   const time = new Date().toTimeString().slice(0, 5)
   const entry = `\n## Session ${sessionId.slice(0, 8)} (${time})\n\n${synthesis}\n`

@@ -25,6 +25,7 @@ import { cmdStatus } from "./recall/status"
 import { cmdSessions, cmdIndex } from "./recall/sessions"
 import { cmdFiles } from "./recall/files"
 import { cmdHook, cmdRemember } from "./recall/hooks"
+import { cmdSummarize } from "./recall/summarize"
 
 // ============================================================================
 // CLI
@@ -37,6 +38,7 @@ const SUBCOMMANDS = new Set([
   "files",
   "hook",
   "remember",
+  "summarize",
   "help",
   "--help",
   "-h",
@@ -143,6 +145,17 @@ program
   .option("--json", "Output as JSON")
   .action(async (opts: { json?: boolean }) => {
     await cmdRemember(opts)
+  })
+
+// ── summarize ─────────────────────────────────────────────────────────
+program
+  .command("summarize [date]")
+  .description(
+    "Daily summary across all sessions (default: all unprocessed days)",
+  )
+  .option("-p, --project <glob>", "Project filter")
+  .action(async (date: string | undefined, opts: { project?: string }) => {
+    await cmdSummarize(date, { verbose: true, project: opts.project })
   })
 
 // ============================================================================

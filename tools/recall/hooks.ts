@@ -4,7 +4,9 @@
  */
 
 import * as path from "path"
-import { hookRecall, remember } from "../lib/history/recall"
+import * as os from "os"
+import { hookRecall } from "../lib/history/recall"
+import { summarizeUnprocessedDays } from "./summarize"
 
 // ============================================================================
 // Stdin reader
@@ -70,55 +72,40 @@ export async function cmdHook(): Promise<void> {
 // Remember command — SessionEnd
 // ============================================================================
 
+/**
+ * SessionEnd hook: trigger daily summarization for any unprocessed past days.
+ * No per-session LLM call — daily summaries are more useful and less noisy.
+ */
 export async function cmdRemember(opts: { json?: boolean }): Promise<void> {
   const startTime = Date.now()
   try {
+    // Read stdin (required by hook protocol, but we only need session_id for logging)
     const stdin = await readStdin()
-    let input: { transcript_path?: string; session_id?: string }
+    let sessionId = "unknown"
     try {
-      input = JSON.parse(stdin) as {
-        transcript_path?: string
-        session_id?: string
-      }
-    } catch (e) {
-      console.error(
-        `[recall remember] FATAL: invalid JSON on stdin (${Date.now() - startTime}ms): ${String(e)}\nstdin was: ${stdin.slice(0, 200)}`,
-      )
-      process.exit(1)
-      return
+      const input = JSON.parse(stdin) as { session_id?: string }
+      sessionId = input.session_id?.slice(0, 8) ?? "unknown"
+    } catch {
+      // Best-effort parse
     }
 
-    const transcriptPath = input.transcript_path
-    const sessionId = input.session_id
-
-    if (!transcriptPath || !sessionId) {
-      console.error(
-        `[recall remember] missing transcript_path or session_id in stdin (keys: ${Object.keys(input).join(", ")})`,
-      )
-      process.exit(0)
-    }
-
-    const projectDir =
-      process.env.CLAUDE_PROJECT_DIR || path.dirname(transcriptPath)
-    const memoryDir = path.join(projectDir, "memory", "sessions")
-
-    const result = await remember({
-      transcriptPath,
-      sessionId,
-      memoryDir,
-    })
+    // Summarize any unprocessed past days (not today — still in progress)
+    const results = await summarizeUnprocessedDays({ limit: 3, verbose: false })
     const elapsed = Date.now() - startTime
 
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2))
-    } else if (result.skipped) {
+    const summarized = results.filter((r) => !r.skipped)
+    if (summarized.length > 0) {
       console.error(
-        `[recall remember] skipped: ${result.reason} (${elapsed}ms) session=${sessionId.slice(0, 8)}`,
+        `[recall remember] summarized ${summarized.length} day(s): ${summarized.map((r) => r.date).join(", ")} (${elapsed}ms) session=${sessionId}`,
       )
     } else {
       console.error(
-        `[recall remember] saved ${result.lessonsCount ?? 0} lessons to ${result.memoryFile} (${elapsed}ms)`,
+        `[recall remember] no unprocessed days (${elapsed}ms) session=${sessionId}`,
       )
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(results, null, 2))
     }
   } catch (e) {
     const elapsed = Date.now() - startTime
