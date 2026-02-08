@@ -37,8 +37,8 @@ Produce a 3-8 line summary covering:
 - What was the goal/task?
 - What was done? (specific files, functions, packages)
 - What was the outcome? (bugs fixed, features added, decisions made)
-- Any mistakes, failed approaches, or wrong turns? (wrong commands, debugging dead ends, misconceptions about APIs, time wasted on bad approaches — be specific about what was tried and why it failed)
-- Any lessons learned or open questions?
+- Any mistakes, failed approaches, or wrong turns? (wrong commands, debugging dead ends, misconceptions about APIs, time wasted on bad approaches — be specific about what was tried and why it failed. If nothing went wrong, OMIT this line entirely — do NOT write "No missteps" or "None documented")
+- Any non-obvious lessons learned? (OMIT if nothing genuinely novel — routine outcomes don't count)
 
 Rules:
 - Be specific: include file names, function names, package names
