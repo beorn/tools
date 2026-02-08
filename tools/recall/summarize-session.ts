@@ -230,25 +230,39 @@ export async function summarizeSession(
 
 export async function summarizeSessionBatch(
   sessions: Array<{ id: string; title?: string | null; createdAt?: number }>,
-  opts?: { verbose?: boolean },
+  opts?: { verbose?: boolean; concurrency?: number },
 ): Promise<SessionSummary[]> {
   const log = opts?.verbose
     ? (msg: string) => console.error(`[summarize-session] ${msg}`)
     : () => {}
+  const concurrency = opts?.concurrency ?? 8
 
-  log(`processing ${sessions.length} sessions`)
+  log(`processing ${sessions.length} sessions (concurrency=${concurrency})`)
 
-  const results: SessionSummary[] = []
-  for (let i = 0; i < sessions.length; i++) {
-    const session = sessions[i]!
-    log(`[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)}`)
-    const result = await summarizeSession(session.id, {
-      title: session.title,
-      createdAt: session.createdAt,
-      verbose: opts?.verbose,
-    })
-    results.push(result)
+  // Run with bounded concurrency
+  const results = new Array<SessionSummary>(sessions.length)
+  let nextIdx = 0
+  let completed = 0
+
+  async function worker(): Promise<void> {
+    while (nextIdx < sessions.length) {
+      const idx = nextIdx++
+      const session = sessions[idx]!
+      log(`[${idx + 1}/${sessions.length}] ${session.id.slice(0, 8)}`)
+      results[idx] = await summarizeSession(session.id, {
+        title: session.title,
+        createdAt: session.createdAt,
+        verbose: opts?.verbose,
+      })
+      completed++
+    }
   }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, sessions.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
 
   const summarized = results.filter((r) => r.summary !== null).length
   const cached = results.filter((r) => r.cached).length
