@@ -25,7 +25,7 @@ import { cmdStatus } from "./recall/status"
 import { cmdSessions, cmdIndex } from "./recall/sessions"
 import { cmdFiles } from "./recall/files"
 import { cmdHook, cmdRemember } from "./recall/hooks"
-import { cmdSummarize } from "./recall/summarize-daily"
+import { cmdSummarize, cmdWeekly } from "./recall/summarize-daily"
 
 // ============================================================================
 // CLI
@@ -39,6 +39,7 @@ const SUBCOMMANDS = new Set([
   "hook",
   "remember",
   "summarize",
+  "weekly",
   "help",
   "--help",
   "-h",
@@ -156,6 +157,16 @@ program
   .option("-p, --project <glob>", "Project filter")
   .action(async (date: string | undefined, opts: { project?: string }) => {
     await cmdSummarize(date, { verbose: true, project: opts.project })
+  })
+
+// ── weekly ──────────────────────────────────────────────────────────
+program
+  .command("weekly [date]")
+  .description(
+    "Weekly summary from daily summaries (date = any day in the target week, default: last week)",
+  )
+  .action(async (date: string | undefined) => {
+    await cmdWeekly(date)
   })
 
 // ============================================================================

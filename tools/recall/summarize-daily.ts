@@ -1,10 +1,11 @@
 /**
- * Daily summary rollups from per-session summaries.
+ * Daily and weekly summary rollups from per-session summaries.
  *
- * Second pass of two-pass hierarchical summarization:
+ * Hierarchical summarization (3 tiers):
  * 1. summarize-session.ts produces cached per-session summaries
- * 2. This module rolls them up into daily summaries with additional context
- *    (beads activity, git commits)
+ * 2. Daily rollups synthesize sessions with beads activity, git commits,
+ *    prior-day mistakes, and MEMORY.md cross-reference
+ * 3. Weekly rollups synthesize daily summaries into themes and trends
  */
 
 import * as fs from "fs"
@@ -83,6 +84,7 @@ Rules:
 - Include specific file paths, function names, and package names when mentioned
 - Tag each bullet with [session-ref:SHORT_ID] where SHORT_ID is the first 8 chars of the session that produced it
 - If multiple sessions contribute to the same point, list all refs: [session-ref:AAA,BBB]
+- Tag each bullet with one topic: [ui], [testing], [infra], [storage], [tooling], [docs], or [design]
 - Skip routine operations (file reads, test runs, linting)
 - If truly nothing noteworthy happened, respond with just: NONE
 - Do NOT invent information not present in the session data`
@@ -424,6 +426,192 @@ export async function cmdSummarize(
       console.log(latest.summary)
     }
   }
+}
+
+// ============================================================================
+// Weekly rollup
+// ============================================================================
+
+const WEEKLY_SUMMARY_PROMPT = `You are summarizing a full week of software development from daily summaries. Your audience is the developer reviewing weekly progress and an AI search index.
+
+Produce a concise weekly summary with these sections (skip empty sections):
+
+## Themes
+What were the main areas of work this week? Group related daily work into 3-5 themes with a 1-2 sentence description each.
+
+## Key Accomplishments
+The most significant things completed this week: features shipped, bugs squashed, architecture improvements landed.
+
+## Recurring Problems
+Mistakes or issues that appeared on multiple days. State frequency and whether the root cause was addressed or still open.
+
+## Lessons Worth Keeping
+The 2-3 most valuable insights from the week — things that should be remembered long-term. Only genuinely novel or high-impact lessons.
+
+## Next Week
+Unresolved issues, open questions, and follow-up work carried forward.
+
+Rules:
+- Be concise: 3-5 bullets per section
+- Tag each bullet with the day(s) it came from: [day:YYYY-MM-DD] or [day:YYYY-MM-DD,YYYY-MM-DD]
+- Tag each bullet with one topic: [ui], [testing], [infra], [storage], [tooling], [docs], or [design]
+- Do NOT invent information not present in the daily summaries
+- If truly nothing noteworthy happened, respond with just: NONE`
+
+export interface WeeklySummaryResult {
+  weekStart: string
+  weekEnd: string
+  daysIncluded: number
+  summary: string | null
+  memoryFile: string | null
+  skipped: boolean
+  reason?: string
+}
+
+export async function summarizeWeek(
+  weekOf: string,
+  opts: { verbose?: boolean } = {},
+): Promise<WeeklySummaryResult> {
+  const log = opts.verbose
+    ? (msg: string) => console.error(`[weekly] ${msg}`)
+    : () => {}
+
+  // Parse the date and find the Monday of that week
+  const target = new Date(`${weekOf}T12:00:00`)
+  const dayOfWeek = target.getDay()
+  const monday = new Date(target)
+  monday.setDate(target.getDate() - ((dayOfWeek + 6) % 7))
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+
+  const weekStart = localDateStr(monday)
+  const weekEnd = localDateStr(sunday)
+  log(`week: ${weekStart} to ${weekEnd}`)
+
+  // Read daily summaries for this week
+  const memoryDir = getSessionMemoryDir()
+  const dailySummaries: string[] = []
+  const daysIncluded: string[] = []
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    const dayStr = localDateStr(d)
+    const filePath = path.join(memoryDir, `${dayStr}.md`)
+
+    try {
+      const content = fs.readFileSync(filePath, "utf8")
+      dailySummaries.push(content)
+      daysIncluded.push(dayStr)
+    } catch {
+      // No summary for this day
+    }
+  }
+
+  if (dailySummaries.length === 0) {
+    log(`no daily summaries found for week ${weekStart}`)
+    return {
+      weekStart,
+      weekEnd,
+      daysIncluded: 0,
+      summary: null,
+      memoryFile: null,
+      skipped: true,
+      reason: "no_daily_summaries",
+    }
+  }
+
+  log(
+    `found ${dailySummaries.length} daily summaries: ${daysIncluded.join(", ")}`,
+  )
+
+  // Build context
+  let context = `# Weekly Development Summary: ${weekStart} to ${weekEnd}\n\n`
+  context += `${dailySummaries.length} days with activity\n\n`
+  for (const content of dailySummaries) {
+    context += `${content}\n\n---\n\n`
+  }
+
+  if (context.length > 30000) {
+    context = context.slice(0, 30000) + "\n\n[...truncated]"
+  }
+
+  log(`LLM context: ${context.length} chars`)
+
+  const model = getCheapModel()
+  if (!model || !isProviderAvailable(model.provider)) {
+    log(`no LLM provider available`)
+    return {
+      weekStart,
+      weekEnd,
+      daysIncluded: dailySummaries.length,
+      summary: null,
+      memoryFile: null,
+      skipped: true,
+      reason: "no_llm_provider",
+    }
+  }
+
+  const llmStart = Date.now()
+  const result = await queryModel({
+    question: context,
+    model,
+    systemPrompt: WEEKLY_SUMMARY_PROMPT,
+  })
+  const synthesis = result.response.content
+  log(`LLM responded in ${Date.now() - llmStart}ms`)
+
+  if (!synthesis || /^NONE$/im.test(synthesis.trim())) {
+    log(`nothing noteworthy for week ${weekStart}`)
+    return {
+      weekStart,
+      weekEnd,
+      daysIncluded: dailySummaries.length,
+      summary: null,
+      memoryFile: null,
+      skipped: true,
+      reason: "nothing_noteworthy",
+    }
+  }
+
+  // Write weekly summary
+  fs.mkdirSync(memoryDir, { recursive: true })
+  const memoryFile = path.join(memoryDir, `week-${weekStart}.md`)
+  const header = `# Week of ${weekStart}\n\n${dailySummaries.length} days | ${daysIncluded.join(", ")}\n\n`
+  fs.writeFileSync(memoryFile, header + synthesis + "\n")
+
+  log(`wrote ${memoryFile}`)
+
+  return {
+    weekStart,
+    weekEnd,
+    daysIncluded: dailySummaries.length,
+    summary: synthesis,
+    memoryFile,
+    skipped: false,
+  }
+}
+
+export async function cmdWeekly(
+  weekOf?: string,
+  opts: { verbose?: boolean } = {},
+): Promise<void> {
+  // Default to last week (most recent complete week)
+  if (!weekOf) {
+    const lastWeek = new Date()
+    lastWeek.setDate(lastWeek.getDate() - 7)
+    weekOf = localDateStr(lastWeek)
+  }
+
+  const result = await summarizeWeek(weekOf, { verbose: true })
+
+  if (result.skipped) {
+    console.error(`Skipped week of ${result.weekStart}: ${result.reason}`)
+    return
+  }
+
+  console.log(result.summary)
+  console.error(`\nWrote: ${result.memoryFile}`)
 }
 
 // ============================================================================

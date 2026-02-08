@@ -45,7 +45,14 @@ Rules:
 - Each line should be a complete thought, 1-2 sentences
 - Skip routine operations (file reads, test runs, linting)
 - If truly nothing noteworthy, respond with just: NONE
-- Do NOT invent information not present in the session data`
+- Do NOT invent information not present in the session data
+
+Example output:
+Goal: Fix race condition causing missing TUI header on startup.
+Done: Added isReady state gate with 50ms mount delay in Board.tsx; updated useLayoutEffect to defer first render.
+Outcome: Header now renders consistently; verified with createBoardDriver test.
+[moderate] Tried adjusting getPathSegments and renderPath logic assuming a layout bug, but root cause was a timing race — the mount delay was the actual fix.
+Lesson: Short deterministic delays can stabilize race-prone UI init more reliably than chasing layout hypotheses.`
 
 const MIN_CONTENT_LENGTH = 100
 
