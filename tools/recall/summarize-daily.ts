@@ -500,7 +500,10 @@ export async function summarizeWeek(
     const filePath = path.join(memoryDir, `${dayStr}.md`)
 
     try {
-      const content = fs.readFileSync(filePath, "utf8")
+      let content = fs.readFileSync(filePath, "utf8")
+      // Strip the sessions index (everything after "---\n## Sessions")
+      // which can be 50%+ of the file and isn't useful for weekly synthesis
+      content = content.replace(/\n---\n## Sessions[\s\S]*$/, "")
       dailySummaries.push(content)
       daysIncluded.push(dayStr)
     } catch {
@@ -525,15 +528,18 @@ export async function summarizeWeek(
     `found ${dailySummaries.length} daily summaries: ${daysIncluded.join(", ")}`,
   )
 
-  // Build context
+  // Build context — budget each day equally to avoid skew
+  const WEEKLY_BUDGET = 28000 // leave room for header
+  const perDayBudget = Math.floor(WEEKLY_BUDGET / dailySummaries.length)
+
   let context = `# Weekly Development Summary: ${weekStart} to ${weekEnd}\n\n`
   context += `${dailySummaries.length} days with activity\n\n`
   for (const content of dailySummaries) {
-    context += `${content}\n\n---\n\n`
-  }
-
-  if (context.length > 30000) {
-    context = context.slice(0, 30000) + "\n\n[...truncated]"
+    if (content.length > perDayBudget) {
+      context += `${content.slice(0, perDayBudget)}\n[...day truncated]\n\n---\n\n`
+    } else {
+      context += `${content}\n\n---\n\n`
+    }
   }
 
   log(`LLM context: ${context.length} chars`)
