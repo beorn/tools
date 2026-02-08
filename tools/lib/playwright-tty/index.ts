@@ -1,29 +1,22 @@
 /**
- * Playwright TTY - Terminal testing with ttyd + Playwright
+ * TTY tools - Terminal testing with Bun PTY + xterm-headless
  *
  * @example
  * ```typescript
- * import { createTTY } from "@beorn/tools/playwright-tty"
+ * import { createTtyEngine } from "@beorn/tools/tty-engine"
  *
- * test("renders correctly", async ({ page }) => {
- *   await using ttyd = createTTY({ command: ["bun", "km", "view", "/path"] })
- *   await ttyd.ready
- *
- *   await page.goto(ttyd.url)
- *   await expect(page.locator("body")).toContainText("Hello")
+ * await using engine = createTtyEngine("test", {
+ *   command: ["bun", "km", "view", "/path"],
  * })
+ * await engine.waitForContent(5000)
+ * engine.press("j")
+ * console.log(engine.getText())
  * ```
  */
 
 export {
-  createTTY,
-  type TtydServer,
-  type TtydServerOptions,
-} from "./ttyd-server.js"
-export {
-  waitForContent,
-  waitForText,
-  waitForStable,
-  getTerminalText,
-} from "./wait-helpers.js"
+  createTtyEngine,
+  type TtyEngine,
+  type TtyEngineOptions,
+} from "../tty-engine/index.js"
 export * from "./types.js"

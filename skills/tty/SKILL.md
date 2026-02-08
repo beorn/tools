@@ -1,6 +1,6 @@
 # TTY Skill
 
-Interactive terminal app testing - MCP server with ttyd + Playwright.
+Interactive terminal app testing - MCP server with Bun PTY + xterm-headless.
 
 **Configure in your project's `.mcp.json`:**
 
@@ -22,25 +22,38 @@ Interactive terminal app testing - MCP server with ttyd + Playwright.
 - Verifying terminal rendering
 - Interactive debugging of terminal apps
 
+**Prefer headless tests** (`testEnv()`/`board.press()`) over TTY for testing logic. TTY is only for visual verification.
+
+## Architecture
+
+```
+MCP Server → TtyEngine (Bun PTY + @xterm/headless) → target process
+                └→ Playwright (lazy, screenshots only)
+```
+
+- **Bun PTY** spawns the target process with a real terminal
+- **@xterm/headless** emulates the terminal in-process (no browser needed for text/keys)
+- **Playwright** is only launched lazily for `screenshot` (renders HTML to PNG)
+- No ttyd, no port allocation, no external processes
+
 ## Tools
 
-| Tool                   | Description                                                     |
-| ---------------------- | --------------------------------------------------------------- |
-| `mcp__tty__start`      | Start ttyd server + connect Playwright browser                  |
-| `mcp__tty__reset`      | Restart TTY process, keep browser open (faster than stop+start) |
-| `mcp__tty__stop`       | Close browser + stop ttyd                                       |
-| `mcp__tty__press`      | Press keyboard key(s)                                           |
-| `mcp__tty__type`       | Type text into terminal                                         |
-| `mcp__tty__screenshot` | Capture screenshot (returns image or saves to file)             |
-| `mcp__tty__text`       | Get terminal text content                                       |
-| `mcp__tty__wait`       | Wait for text to appear or DOM stability                        |
-| `mcp__tty__list`       | List active sessions                                            |
+| Tool                   | Description                                       |
+| ---------------------- | ------------------------------------------------- |
+| `mcp__tty__start`      | Start PTY session with xterm-headless emulator    |
+| `mcp__tty__stop`       | Close PTY session and kill process                |
+| `mcp__tty__press`      | Press keyboard key(s)                             |
+| `mcp__tty__type`       | Type text into terminal                           |
+| `mcp__tty__screenshot` | Capture screenshot (launches browser for rendering) |
+| `mcp__tty__text`       | Get terminal text content                         |
+| `mcp__tty__wait`       | Wait for text to appear or terminal stability     |
+| `mcp__tty__list`       | List active sessions                              |
 
 ## Workflow
 
 ```
 1. mcp__tty__start({ command: ["bun", "km", "view", "/path"] })
-   -> { sessionId: "abc123", url: "http://127.0.0.1:7701" }
+   -> { sessionId: "abc123" }
 
 2. mcp__tty__wait({ sessionId: "abc123", for: "BOARD VIEW" })
    -> { success: true }
@@ -77,18 +90,11 @@ Use Playwright key formats for `mcp__tty__press`:
 {
   command: string[]              // Required: ["bun", "km", "view", "/path"]
   env?: Record<string, string>   // Optional: { DEBUG: "inkx:*" }
-  viewport?: { width, height }   // Optional: { width: 1000, height: 700 }
-  waitFor?: "content" | "stable" | string  // Optional: wait condition
-}
-```
-
-### reset
-
-```typescript
-{
-  sessionId: string              // Required
-  command?: string[]             // Optional: new command
-  env?: Record<string, string>   // Optional: new environment
+  cols?: number                  // Terminal columns (default: 120)
+  rows?: number                  // Terminal rows (default: 40)
+  cwd?: string                   // Working directory
+  waitFor?: "content" | "stable" | string  // Wait condition
+  timeout?: number               // Wait timeout in ms (default: 5000)
 }
 ```
 
@@ -107,9 +113,21 @@ Use Playwright key formats for `mcp__tty__press`:
 {
   sessionId: string              // Required
   for?: string                   // Wait for specific text
-  stable?: number                // Wait for DOM stability (ms)
+  stable?: number                // Wait for terminal stability (ms)
   timeout?: number               // Default: 30000ms
 }
+```
+
+## CLI Entry Point
+
+For one-shot operations without the MCP server:
+
+```bash
+# Text + screenshot
+bun tools/tty.ts capture --command "bun km view /path" --keys "j,j,Enter" --screenshot /tmp/out.png --text
+
+# Text-only (no Chromium needed)
+bun tools/tty.ts capture --command "bun km view /path" --wait-for "BOARD" --text
 ```
 
 ## Examples
@@ -156,67 +174,13 @@ mcp__tty__stop({ sessionId: session1 })
 mcp__tty__stop({ sessionId: session2 })
 ```
 
-### Reset Without Restart
-
-```
-# Start session
-mcp__tty__start({ command: ["bun", "km", "view", "/path1"] })
-
-# Later, switch to different path (faster than stop+start)
-mcp__tty__reset({ sessionId, command: ["bun", "km", "view", "/path2"] })
-```
-
-## Generating Playwright Test Files
-
-For repeatable tests, generate a `.playwright-test.ts` file:
-
-```typescript
-// example.playwright-test.ts
-import { test, expect } from "@playwright/test"
-import { createTTY } from "@beorn/tools/playwright-tty"
-
-test("board view renders correctly", async ({ page }) => {
-  await using ttyd = createTTY({
-    command: ["bun", "km", "view", "/tmp/test"],
-  })
-  await ttyd.ready
-
-  await page.goto(ttyd.url)
-  await page.setViewportSize({ width: 1000, height: 700 })
-
-  // Wait for content
-  await expect(page.locator("body")).toContainText("BOARD VIEW")
-
-  // Interact
-  await page.keyboard.press("j")
-  await page.keyboard.press("j")
-
-  // Verify
-  await expect(page.locator("body")).toContainText("Item 3")
-
-  // Screenshot
-  await expect(page).toHaveScreenshot("board-after-navigation.png")
-})
-```
-
-Run with: `bunx playwright test example.playwright-test.ts`
-
-## When to Use MCP vs Test Files
-
-| Scenario                   | Use MCP | Use Test File |
-| -------------------------- | ------- | ------------- |
-| Ad-hoc debugging           | Yes     |               |
-| Quick screenshot           | Yes     |               |
-| Repeatable regression test |         | Yes           |
-| Complex multi-step test    |         | Yes           |
-| CI integration             |         | Yes           |
-
 ## First-Time Setup
 
-On first `mcp__tty__start`, Chromium is automatically installed to a local cache:
+On first `mcp__tty__screenshot`, Chromium is automatically installed to a local cache:
 
 - Location: `vendor/beorn-tools/tools/.playwright-cache/`
 - One-time installation, reused for all future sessions
+- Text and key operations do NOT require Chromium
 
 ## Trigger Phrases
 

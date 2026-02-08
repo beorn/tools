@@ -1,15 +1,10 @@
 /**
- * Zod schemas for Playwright TTY MCP tools
+ * Zod schemas for TTY MCP tools
  */
 
 import { z } from "zod"
 
 // Common schemas
-export const ViewportSchema = z.object({
-  width: z.number().int().positive().default(1000),
-  height: z.number().int().positive().default(700),
-})
-
 export const SessionIdSchema = z.string().min(1)
 
 // Tool input schemas
@@ -17,17 +12,13 @@ export const SessionIdSchema = z.string().min(1)
 export const TtyStartInputSchema = z.object({
   command: z.array(z.string()).min(1),
   env: z.record(z.string(), z.string()).optional(),
-  viewport: ViewportSchema.optional(),
+  cols: z.number().int().positive().default(120),
+  rows: z.number().int().positive().default(40),
   waitFor: z
     .union([z.literal("content"), z.literal("stable"), z.string()])
     .optional(),
   timeout: z.number().int().positive().default(5000),
-})
-
-export const TtyResetInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  command: z.array(z.string()).min(1).optional(),
-  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
 })
 
 export const TtyListInputSchema = z.object({})
@@ -66,17 +57,11 @@ export const TtyWaitInputSchema = z.object({
 
 export interface TtyStartOutput {
   sessionId: string
-  url: string
-}
-
-export interface TtyResetOutput {
-  url: string
 }
 
 export interface TtyListOutput {
   sessions: Array<{
     id: string
-    url: string
     command: string[]
     createdAt: string
   }>
@@ -111,7 +96,6 @@ export interface TtyWaitOutput {
 
 // Type aliases for inputs
 export type TtyStartInput = z.infer<typeof TtyStartInputSchema>
-export type TtyResetInput = z.infer<typeof TtyResetInputSchema>
 export type TtyListInput = z.infer<typeof TtyListInputSchema>
 export type TtyStopInput = z.infer<typeof TtyStopInputSchema>
 export type TtyPressInput = z.infer<typeof TtyPressInputSchema>
@@ -119,4 +103,3 @@ export type TtyTypeInput = z.infer<typeof TtyTypeInputSchema>
 export type TtyScreenshotInput = z.infer<typeof TtyScreenshotInputSchema>
 export type TtyTextInput = z.infer<typeof TtyTextInputSchema>
 export type TtyWaitInput = z.infer<typeof TtyWaitInputSchema>
-export type Viewport = z.infer<typeof ViewportSchema>

@@ -11,7 +11,7 @@ Generic Claude Code tools - reusable across projects.
 | `refactor` | Batch rename, replace, API migration (run `--help` for guide) | `bun tools/refactor.ts` |
 | `llm`      | Multi-LLM research, consensus, deep research                  | `bun tools/llm.ts`      |
 | `recall`   | Session history search, LLM synthesis, file recovery          | `bun tools/recall.ts`   |
-| `tty`      | TTY testing MCP server (ttyd + Playwright)                    | MCP server              |
+| `tty`      | TTY testing MCP server (Bun PTY + xterm-headless)             | MCP server + CLI        |
 | `worktree` | Git worktree management with submodules                       | `bun tools/worktree.ts` |
 
 ### Refactor Tool Capabilities

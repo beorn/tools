@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Playwright TTY MCP Server
+ * TTY MCP Server
  *
  * Self-contained MCP server for interactive terminal testing.
- * Manages ttyd + Playwright browser sessions.
- *
- * On first use, Chromium is installed to a local cache directory.
+ * Uses Bun PTY + xterm-headless for terminal emulation.
+ * Browser is only launched lazily for screenshot rendering.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
@@ -20,42 +19,17 @@ import { PlaywrightTtyBackend } from "./lib/playwright-tty/server.js"
 const BROWSER_CACHE = join(dirname(import.meta.path), ".playwright-cache")
 process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSER_CACHE
 
-async function ensureTtydInstalled(): Promise<void> {
-  try {
-    const { exitCode } = await $`which ttyd`.quiet()
-    if (exitCode !== 0) throw new Error("not found")
-  } catch {
-    console.error(`
-ERROR: ttyd is not installed or not in PATH.
-
-ttyd is required for the TTY MCP server to work.
-
-Install with one of:
-  brew install ttyd        # macOS
-  nix-shell -p ttyd        # Nix
-  apt install ttyd         # Debian/Ubuntu
-
-Or visit: https://github.com/tsl0922/ttyd
-`)
-    process.exit(1)
-  }
-}
-
 async function ensureBrowserInstalled(): Promise<void> {
-  // Check if chromium is already installed
-  const chromiumPath = join(BROWSER_CACHE, "chromium-")
   const cacheExists = existsSync(BROWSER_CACHE)
 
   if (cacheExists) {
-    // Check for any chromium directory
     const { stdout } =
       await $`ls -d ${BROWSER_CACHE}/chromium-* 2>/dev/null || true`.quiet()
     if (stdout.toString().trim()) {
-      return // Browser already installed
+      return
     }
   }
 
-  // Install chromium to cache
   console.error("Installing Chromium browser (first-time setup)...")
   await $`bunx playwright install chromium`.env({
     ...process.env,
@@ -65,23 +39,21 @@ async function ensureBrowserInstalled(): Promise<void> {
 }
 
 async function main() {
-  // Ensure dependencies are available
-  await ensureTtydInstalled()
   await ensureBrowserInstalled()
 
   const backend = new PlaywrightTtyBackend()
 
   const server = new McpServer({
     name: "tty",
-    version: "1.0.0",
+    version: "2.0.0",
   })
 
-  // start - Start ttyd + open Playwright browser
+  // start - Start a terminal session with Bun PTY
   server.registerTool(
     "start",
     {
       description:
-        "Start a terminal session with ttyd and connect Playwright browser",
+        "Start a terminal session with a PTY and xterm-headless emulator",
       inputSchema: {
         command: z
           .array(z.string())
@@ -90,13 +62,11 @@ async function main() {
           .record(z.string(), z.string())
           .optional()
           .describe("Environment variables"),
-        viewport: z
-          .object({
-            width: z.number().default(1000),
-            height: z.number().default(700),
-          })
-          .optional()
-          .describe("Browser viewport size"),
+        cols: z
+          .number()
+          .default(120)
+          .describe("Terminal columns (default: 120)"),
+        rows: z.number().default(40).describe("Terminal rows (default: 40)"),
         waitFor: z
           .union([z.literal("content"), z.literal("stable"), z.string()])
           .optional()
@@ -105,35 +75,11 @@ async function main() {
           .number()
           .default(5000)
           .describe("Timeout in ms for waitFor condition (default: 5000)"),
+        cwd: z.string().optional().describe("Working directory"),
       },
     },
     async (args) => {
       const result = await backend.callTool("tty_start", args)
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-      }
-    },
-  )
-
-  // reset - Restart TTY, keep browser open
-  server.registerTool(
-    "reset",
-    {
-      description: "Restart the TTY process without closing the browser",
-      inputSchema: {
-        sessionId: z.string().describe("Session ID"),
-        command: z
-          .array(z.string())
-          .optional()
-          .describe("New command (optional)"),
-        env: z
-          .record(z.string(), z.string())
-          .optional()
-          .describe("New environment (optional)"),
-      },
-    },
-    async (args) => {
-      const result = await backend.callTool("tty_reset", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
@@ -155,11 +101,11 @@ async function main() {
     },
   )
 
-  // stop - Close browser + stop ttyd
+  // stop - Close a terminal session
   server.registerTool(
     "stop",
     {
-      description: "Stop a TTY session and close the browser",
+      description: "Stop a TTY session and kill the process",
       inputSchema: {
         sessionId: z.string().describe("Session ID to stop"),
       },
@@ -213,7 +159,8 @@ async function main() {
   server.registerTool(
     "screenshot",
     {
-      description: "Capture a screenshot of the terminal",
+      description:
+        "Capture a screenshot of the terminal (launches browser for rendering)",
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
         outputPath: z
@@ -230,7 +177,6 @@ async function main() {
       }
 
       if (result.data) {
-        // Return as image content for Claude to see
         return {
           content: [
             {
@@ -269,14 +215,14 @@ async function main() {
   server.registerTool(
     "wait",
     {
-      description: "Wait for specific text or DOM stability",
+      description: "Wait for specific text or terminal stability",
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
         for: z.string().optional().describe("Text to wait for"),
         stable: z
           .number()
           .optional()
-          .describe("Wait for DOM stability (milliseconds)"),
+          .describe("Wait for terminal stability (milliseconds)"),
         timeout: z.number().default(30000).describe("Timeout in milliseconds"),
       },
     },
