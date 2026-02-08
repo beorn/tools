@@ -615,6 +615,78 @@ export async function cmdWeekly(
 }
 
 // ============================================================================
+// Show existing summaries
+// ============================================================================
+
+export async function cmdShow(dateArg?: string): Promise<void> {
+  const memoryDir = getSessionMemoryDir()
+
+  if (!fs.existsSync(memoryDir)) {
+    console.error("No summaries found. Run `bun recall summarize` first.")
+    return
+  }
+
+  // "week" → show latest weekly summary
+  if (dateArg === "week") {
+    const weekFiles = fs
+      .readdirSync(memoryDir)
+      .filter((f) => f.startsWith("week-") && f.endsWith(".md"))
+      .sort()
+    if (weekFiles.length === 0) {
+      console.error("No weekly summaries found. Run `bun recall weekly` first.")
+      return
+    }
+    const latest = weekFiles[weekFiles.length - 1]!
+    console.log(fs.readFileSync(path.join(memoryDir, latest), "utf8"))
+    return
+  }
+
+  // Specific date → show that day
+  if (dateArg) {
+    const filePath = path.join(memoryDir, `${dateArg}.md`)
+    if (!fs.existsSync(filePath)) {
+      console.error(
+        `No summary for ${dateArg}. Run \`bun recall summarize ${dateArg}\` to generate.`,
+      )
+      return
+    }
+    console.log(fs.readFileSync(filePath, "utf8"))
+    return
+  }
+
+  // No arg → list available summaries
+  const files = fs
+    .readdirSync(memoryDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .reverse()
+
+  const dailies = files.filter((f) => !f.startsWith("week-"))
+  const weeklies = files.filter((f) => f.startsWith("week-"))
+
+  if (weeklies.length > 0) {
+    console.log("Weekly summaries:")
+    for (const f of weeklies) {
+      console.log(`  ${f.replace(".md", "")}`)
+    }
+    console.log()
+  }
+
+  console.log("Daily summaries:")
+  for (const f of dailies.slice(0, 14)) {
+    console.log(`  ${f.replace(".md", "")}`)
+  }
+  if (dailies.length > 14) {
+    console.log(`  ... and ${dailies.length - 14} more`)
+  }
+
+  console.log(
+    `\nUsage: bun recall show <date>     # e.g. bun recall show 2026-02-06`,
+  )
+  console.log(`       bun recall show week       # latest weekly summary`)
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
