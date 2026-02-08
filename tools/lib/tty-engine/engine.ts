@@ -121,7 +121,7 @@ export function createTtyEngine(
   const { command, env, cols = 120, rows = 40, cwd } = options
 
   // Set up xterm-headless
-  const term = new Terminal({ cols, rows })
+  const term = new Terminal({ cols, rows, allowProposedApi: true })
   const serialize = new SerializeAddon()
   term.loadAddon(serialize)
 

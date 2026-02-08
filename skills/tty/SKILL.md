@@ -38,16 +38,16 @@ MCP Server → TtyEngine (Bun PTY + @xterm/headless) → target process
 
 ## Tools
 
-| Tool                   | Description                                       |
-| ---------------------- | ------------------------------------------------- |
-| `mcp__tty__start`      | Start PTY session with xterm-headless emulator    |
-| `mcp__tty__stop`       | Close PTY session and kill process                |
-| `mcp__tty__press`      | Press keyboard key(s)                             |
-| `mcp__tty__type`       | Type text into terminal                           |
+| Tool                   | Description                                         |
+| ---------------------- | --------------------------------------------------- |
+| `mcp__tty__start`      | Start PTY session with xterm-headless emulator      |
+| `mcp__tty__stop`       | Close PTY session and kill process                  |
+| `mcp__tty__press`      | Press keyboard key(s)                               |
+| `mcp__tty__type`       | Type text into terminal                             |
 | `mcp__tty__screenshot` | Capture screenshot (launches browser for rendering) |
-| `mcp__tty__text`       | Get terminal text content                         |
-| `mcp__tty__wait`       | Wait for text to appear or terminal stability     |
-| `mcp__tty__list`       | List active sessions                              |
+| `mcp__tty__text`       | Get terminal text content                           |
+| `mcp__tty__wait`       | Wait for text to appear or terminal stability       |
+| `mcp__tty__list`       | List active sessions                                |
 
 ## Workflow
 
