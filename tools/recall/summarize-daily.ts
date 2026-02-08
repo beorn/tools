@@ -53,8 +53,11 @@ Decisions made and their rationale. Be specific — include file names, function
 ## Bugs Found
 Bugs discovered, their root causes, and fixes applied.
 
+## Mistakes & Dead Ends
+Wrong approaches tried, failed commands, debugging dead ends, misconceptions about APIs/libraries, time wasted. Be specific: what was attempted, why it failed, and what the correct approach turned out to be. These are the most valuable items for preventing repeat mistakes.
+
 ## Lessons Learned
-Approaches that failed, insights gained, patterns discovered. These should be genuinely novel — not obvious restatements.
+Insights gained, patterns discovered, non-obvious things that worked. These should be genuinely novel — not obvious restatements.
 
 ## Architecture Changes
 Structural changes, new patterns adopted, refactoring done.
