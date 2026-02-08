@@ -54,7 +54,7 @@ Decisions made and their rationale. Be specific — include file names, function
 Bugs discovered, their root causes, and fixes applied.
 
 ## Mistakes & Dead Ends
-Wrong approaches tried, failed commands, debugging dead ends, misconceptions about APIs/libraries, time wasted. Be specific: what was attempted, why it failed, and what the correct approach turned out to be. OMIT this section entirely if no real mistakes occurred — "no missteps" is useless filler.
+Wrong approaches tried, debugging dead ends, misconceptions. For each: what was tried, why it failed, what the fix was. Preserve any [minor]/[moderate]/[major] severity tags from session data. OMIT this section entirely if no real mistakes occurred.
 
 ## Lessons Learned
 Insights gained, patterns discovered, non-obvious things that worked. These should be genuinely novel — not obvious restatements. OMIT this section if nothing genuinely novel was learned.
@@ -64,6 +64,18 @@ Structural changes, new patterns adopted, refactoring done.
 
 ## Open Questions
 Unresolved issues, things to revisit, potential follow-up work.
+
+## Recurring Patterns
+Compare today's mistakes with the prior-days mistakes provided (if any). If ANY mistake repeats (same root cause, same tool/workflow):
+- State what recurs and how many times (e.g., "3rd occurrence in 4 days")
+- Give a concrete, actionable prevention (a specific check, script, or workflow change — not "be more careful")
+OMIT this section if no prior-days context was provided or no patterns detected.
+
+## Memory Updates
+Compare today's lessons with the current MEMORY.md provided (if any). Only flag items that would save 10+ minutes if remembered next time:
+- NEW: A lesson not already in MEMORY.md. Write a ready-to-paste entry (heading + 1-3 lines).
+- OUTDATED: Quote the specific MEMORY.md text that today's work contradicts, and explain why.
+Maximum 2 items. Quality over quantity. OMIT if no MEMORY.md was provided or no updates needed.
 
 Rules:
 - Be concise: 3-6 bullets per section maximum
@@ -209,16 +221,28 @@ export async function summarizeDay(
   let context = `# Daily Development Summary: ${date}\n\n`
   context += `${meaningfulSessions.length} sessions, ${totalMessages} messages across ${projects.length} project(s): ${projects.map(displayProject).join(", ")}\n\n`
 
-  for (const s of usableSummaries) {
-    const titlePart = s.title ? ` — ${s.title}` : ""
-    context += `### Session ${s.shortId} (${s.time})${titlePart}\n\n${s.summary}\n\n`
+  // Add cross-reference context first (survives truncation)
+  const priorMistakes = extractPriorMistakes(date, log)
+  if (priorMistakes) {
+    context += `${priorMistakes}\n\n`
+  }
+
+  const memoryMd = loadMemoryMd(log)
+  if (memoryMd) {
+    context += `${memoryMd}\n\n`
   }
 
   if (beadsContent) {
-    context += `\n${beadsContent}`
+    context += `${beadsContent}\n`
   }
   if (gitContent) {
-    context += `\n${gitContent}`
+    context += `${gitContent}\n`
+  }
+
+  // Session summaries last (largest, most expendable under truncation)
+  for (const s of usableSummaries) {
+    const titlePart = s.title ? ` — ${s.title}` : ""
+    context += `### Session ${s.shortId} (${s.time})${titlePart}\n\n${s.summary}\n\n`
   }
 
   // Truncate to ~30KB for LLM context
@@ -471,6 +495,68 @@ async function extractBeadsActivity(
     return null
   } finally {
     closeDb()
+  }
+}
+
+function extractPriorMistakes(
+  date: string,
+  log: (msg: string) => void,
+): string | null {
+  const memoryDir = getSessionMemoryDir()
+  if (!fs.existsSync(memoryDir)) return null
+
+  // Parse the target date and look back 3 days
+  const targetDate = new Date(`${date}T12:00:00`)
+  const priorMistakes: string[] = []
+
+  for (let i = 1; i <= 3; i++) {
+    const d = new Date(targetDate)
+    d.setDate(d.getDate() - i)
+    const dayStr = localDateStr(d)
+    const filePath = path.join(memoryDir, `${dayStr}.md`)
+
+    try {
+      const content = fs.readFileSync(filePath, "utf8")
+      // Extract "## Mistakes & Dead Ends" section
+      const match = content.match(
+        /## Mistakes & Dead Ends\n([\s\S]*?)(?=\n## |\n---|\n$)/,
+      )
+      if (match?.[1]?.trim()) {
+        priorMistakes.push(`**${dayStr}:**\n${match[1].trim()}`)
+      }
+    } catch {
+      // File doesn't exist — skip
+    }
+  }
+
+  if (priorMistakes.length === 0) return null
+
+  log(`found prior mistakes from ${priorMistakes.length} recent day(s)`)
+  return `### Prior Mistakes (recent days)\n\n${priorMistakes.join("\n\n")}`
+}
+
+function loadMemoryMd(log: (msg: string) => void): string | null {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+  const encodedPath = projectDir.replace(/\//g, "-")
+  const memoryPath = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodedPath,
+    "memory",
+    "MEMORY.md",
+  )
+
+  try {
+    let content = fs.readFileSync(memoryPath, "utf8")
+    // Truncate to ~4KB to fit within context budget
+    if (content.length > 4000) {
+      content = content.slice(0, 4000) + "\n\n[...truncated]"
+    }
+    log(`loaded MEMORY.md (${content.length} chars)`)
+    return `### Current MEMORY.md\n\n${content}`
+  } catch {
+    return null
   }
 }
 
