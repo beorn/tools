@@ -402,7 +402,7 @@ async function rawSearch(
     "claude_md",
   ])
   const hasOnlyProjectTypes =
-    contentTypes && contentTypes.every((t) => PROJECT_SOURCE_TYPES.has(t))
+    contentTypes?.every((t) => PROJECT_SOURCE_TYPES.has(t))
   const contentSinceTime = hasOnlyProjectTypes ? undefined : sinceTime
 
   let contentResults: {
