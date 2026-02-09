@@ -49,7 +49,7 @@ bun llm --deep -y --with-history "topic"
 
 ## Output
 
-By default, response is written to a file and JSON metadata is printed to stdout:
+Response is ALWAYS written to a file. JSON metadata goes to stdout (single line):
 
 ```json
 {
@@ -63,9 +63,11 @@ By default, response is written to a file and JSON metadata is printed to stdout
 }
 ```
 
-Read the file with `Read` tool. Stale files (>7 days) are auto-cleaned on next run.
+File path also printed on stderr: `Output written to: <path>`.
+Streaming tokens go to stderr ONLY if it's a TTY (interactive terminal).
+In background tasks, stderr is quiet — just the file path line. No truncation risk.
 
-Use `--output -` for classic streaming to stdout (JSON summary goes to stderr).
+Read the output file with `Read` tool. Stale files (>7 days) are auto-cleaned on next run.
 
 ## Agent Usage: Background & Async Patterns
 
@@ -92,8 +94,17 @@ Task(subagent_type="Bash", run_in_background=true,
 
 # Step 3: Block-wait for completion (up to 10 min)
 TaskOutput(task_id=<id>, block=true, timeout=600000)
-# stdout contains JSON with file path — Read it
+
+# Step 4: Find the output file
+# Look for "Output written to: /tmp/llm-*.txt" in the last lines.
+# If truncated (deep research streams thousands of tokens to stderr):
+#   ls -lt /tmp/llm-*.txt | head -1
+# Read the OUTPUT FILE — NOT the task output (which is just streaming tokens).
 ```
+
+**CRITICAL**: Background task output captures stderr (streaming tokens) + stdout (JSON).
+For deep research this can exceed 30KB, causing Claude Code to truncate it.
+The actual response is ALWAYS in the output file. Read the file, not the task output.
 
 **Anti-pattern** — do NOT do this:
 

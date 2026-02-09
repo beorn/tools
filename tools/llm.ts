@@ -7,8 +7,8 @@
  *   llm opinion "question"      Second opinion from GPT/Gemini (~$0.02)
  *   llm debate "question"       Multi-model consensus (~$1-3)
  *
- * Output: response written to /tmp/llm-*.txt, JSON metadata on stdout.
- * Use --output - for streaming to stdout (JSON summary on stderr).
+ * Output: response always written to /tmp/llm-*.txt, JSON metadata on stdout.
+ * Streaming tokens shown on stderr only when running in an interactive terminal (TTY).
  */
 
 import { ask, research } from "./lib/llm/research"
@@ -107,8 +107,7 @@ FLAGS
   --with-history         Include relevant context from session history
   --context <text>       Provide explicit context (prepended to topic)
   --context-file <path>  Read context from a file
-  --output <file>        Write response to specific file (default: auto /tmp/llm-result-*.txt)
-  --output -             Stream response to stdout instead of writing to file
+  --output <file>        Write response to specific file (default: auto /tmp/llm-*.txt)
 
 FEATURES
   • Auto-recovery: Checks for interrupted responses and recovers them
@@ -116,8 +115,8 @@ FEATURES
   • Cost confirmation for expensive queries (deep, debate)
   • Streams responses in real-time
   • Persistence: Saves progress to disk during streaming
-  • File output: Response written to file by default (path printed to stdout)
-  • Use --output - for classic streaming to stdout
+  • File output: Response ALWAYS written to file (path printed to stdout + stderr)
+  • Streaming tokens shown on stderr only in interactive terminals (TTY)
 
 PROVIDERS
   ${available.includes("openai" as any) ? "✓" : "○"} OpenAI      ${available.includes("openai" as any) ? "ready" : "set OPENAI_API_KEY"}
@@ -146,18 +145,28 @@ function hasFlag(name: string): boolean {
 }
 
 const outputArg = getArg("--output")
-const stdoutMode = outputArg === "-"
 const sessionTag = process.env.CLAUDE_SESSION_ID?.slice(0, 8) ?? "manual"
-const outputFile = stdoutMode
-  ? null
-  : (outputArg ??
-    `/tmp/llm-${sessionTag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.txt`)
+/**
+ * Response is ALWAYS written to a file. Never stream to stdout — it causes truncation
+ * when Claude Code captures background task output (stderr streaming tokens + stdout JSON
+ * exceed 30KB limit). The --output - mode was removed for this reason.
+ */
+const outputFile =
+  outputArg ??
+  `/tmp/llm-${sessionTag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.txt`
 
-/** Write token during streaming — stderr in file mode, stdout in --output - mode */
+/**
+ * Write token during streaming — stderr ONLY if interactive terminal (TTY).
+ *
+ * When running as a background task (e.g., Claude Code's run_in_background), stderr is not
+ * a TTY. Streaming thousands of tokens to a non-TTY stderr causes Claude Code to truncate
+ * the combined output (>30KB), potentially losing the file path JSON on stdout.
+ *
+ * DO NOT remove the TTY check — it prevents background task output truncation.
+ * Use --verbose to force streaming even without a TTY.
+ */
 function streamToken(token: string): void {
-  if (stdoutMode) {
-    process.stdout.write(token)
-  } else {
+  if (process.stderr.isTTY || hasFlag("--verbose")) {
     process.stderr.write(token)
   }
 }
@@ -185,18 +194,23 @@ function buildResultJson(
   return result
 }
 
-/** After response completes: write file + JSON to stdout, or content to stdout + JSON to stderr */
+/**
+ * After response completes: write to file, print file path on stderr, JSON metadata on stdout.
+ *
+ * File path on stderr: human-readable, always visible in last lines of output.
+ * JSON metadata on stdout: machine-parseable single line (file path, char count, cost, etc.)
+ * Streaming tokens are suppressed in non-TTY mode (see streamToken), so stderr only contains
+ * the file path line + any status messages — no truncation risk.
+ *
+ * DO NOT stream response content to stdout — only the JSON metadata line goes there.
+ */
 function finalizeOutput(content: string, meta?: OutputMeta): void {
-  if (outputFile) {
-    Bun.write(outputFile, content)
-    process.stderr.write("\n")
-    const result = buildResultJson(content, meta)
-    result.file = outputFile
-    console.log(JSON.stringify(result))
-  } else {
-    process.stdout.write("\n")
-    console.error(JSON.stringify(buildResultJson(content, meta)))
-  }
+  Bun.write(outputFile, content)
+  process.stderr.write("\n")
+  process.stderr.write(`Output written to: ${outputFile}\n`)
+  const result = buildResultJson(content, meta)
+  result.file = outputFile
+  console.log(JSON.stringify(result))
 }
 
 /** Compute cost, finalize output, and exit — shared by all single-model response modes */
@@ -687,8 +701,8 @@ async function main() {
       }
       const debateContent = parts.join("\n")
 
-      // In file mode, also print to stderr for progress visibility
-      if (!stdoutMode) {
+      // Print debate summary to stderr for progress visibility (if interactive)
+      if (process.stderr.isTTY) {
         console.error("\n" + debateContent)
       }
       finalizeOutput(debateContent, {
