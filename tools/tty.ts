@@ -59,7 +59,7 @@ program
         for (const key of keys) {
           engine.press(key)
           // Small delay between keys for rendering
-          await new Promise((r) => setTimeout(r, 50))
+          await new Promise((resolve) => setTimeout(resolve, 50))
         }
         // Wait for content to settle after key presses
         await engine.waitForStable(200, timeout)

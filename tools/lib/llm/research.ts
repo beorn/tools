@@ -77,7 +77,7 @@ export async function queryModel(options: QueryOptions): Promise<QueryResult> {
 
   try {
     if (stream && onToken) {
-      const result = await streamText({
+      const result = streamText({
         model: languageModel,
         messages,
         abortSignal,

@@ -235,14 +235,12 @@ async function main() {
   )
 
   // Handle shutdown
-  process.on("SIGINT", async () => {
-    await backend.shutdown()
-    process.exit(0)
+  process.on("SIGINT", () => {
+    void backend.shutdown().then(() => process.exit(0))
   })
 
-  process.on("SIGTERM", async () => {
-    await backend.shutdown()
-    process.exit(0)
+  process.on("SIGTERM", () => {
+    void backend.shutdown().then(() => process.exit(0))
   })
 
   // Connect to stdio transport

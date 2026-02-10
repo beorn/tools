@@ -186,7 +186,7 @@ export function createTtyEngine(
   ): Promise<void> {
     for (let i = 0; i < count; i++) {
       press(key)
-      await new Promise((r) => setTimeout(r, gapMs))
+      await new Promise((resolve) => setTimeout(resolve, gapMs))
     }
   }
 
@@ -194,7 +194,7 @@ export function createTtyEngine(
     const start = Date.now()
     while (Date.now() - start < timeout) {
       if (getText().includes(text)) return
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
     }
     throw new Error(`Timeout waiting for "${text}" after ${timeout}ms`)
   }
@@ -215,7 +215,7 @@ export function createTtyEngine(
         lastContent = content
         stableStart = Date.now()
       }
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
     }
     throw new Error(`Terminal did not stabilize within ${timeout}ms`)
   }
@@ -225,7 +225,7 @@ export function createTtyEngine(
     while (Date.now() - start < timeout) {
       const content = getText().trim()
       if (content.length > 0) return
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL))
     }
     throw new Error(`No terminal content after ${timeout}ms`)
   }
@@ -245,7 +245,7 @@ export function createTtyEngine(
       proc.kill()
       const exited = await Promise.race([
         proc.exited.then(() => true as const),
-        new Promise<false>((r) => setTimeout(() => r(false), 2000)),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 2000)),
       ])
       if (!exited) {
         proc.kill(9) // SIGKILL

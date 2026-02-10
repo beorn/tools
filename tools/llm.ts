@@ -205,7 +205,7 @@ function buildResultJson(
  * DO NOT stream response content to stdout — only the JSON metadata line goes there.
  */
 function finalizeOutput(content: string, meta?: OutputMeta): void {
-  Bun.write(outputFile, content)
+  void Bun.write(outputFile, content)
   process.stderr.write("\n")
   process.stderr.write(`Output written to: ${outputFile}\n`)
   const result = buildResultJson(content, meta)

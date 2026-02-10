@@ -49,7 +49,7 @@ function withTimeout<T>(
   let timer: ReturnType<typeof setTimeout>
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) => {
+    new Promise<never>((_resolve, reject) => {
       timer = setTimeout(
         () => reject(new Error(`${label} timed out after ${ms}ms`)),
         ms,
