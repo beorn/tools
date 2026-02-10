@@ -90,6 +90,8 @@ export interface TtyEngine {
   createdAt: Date
   press(key: string): void
   type(text: string): void
+  /** Simulate key auto-repeat: sends `count` presses with `gapMs` between each */
+  repeatKey(key: string, count: number, gapMs?: number): Promise<void>
   getText(): string
   getHTML(): string
   waitForText(text: string, timeout: number): Promise<void>
@@ -177,6 +179,17 @@ export function createTtyEngine(
     pty.write(text)
   }
 
+  async function repeatKey(
+    key: string,
+    count: number,
+    gapMs = 33,
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      press(key)
+      await new Promise((r) => setTimeout(r, gapMs))
+    }
+  }
+
   async function waitForText(text: string, timeout: number): Promise<void> {
     const start = Date.now()
     while (Date.now() - start < timeout) {
@@ -252,6 +265,7 @@ export function createTtyEngine(
     createdAt,
     press,
     type,
+    repeatKey,
     getText,
     getHTML,
     waitForText,
