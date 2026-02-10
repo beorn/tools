@@ -310,6 +310,7 @@ export interface IndexResult {
   projectMemory: number
   docs: number
   claudeMd: number
+  research: number
 }
 
 /**
@@ -516,6 +517,7 @@ export async function rebuildIndex(
     projectMemory: 0,
     docs: 0,
     claudeMd: 0,
+    research: 0,
   }
   if (options.projectRoot) {
     const projectPath = options.projectRoot
@@ -545,6 +547,7 @@ export async function rebuildIndex(
   )
   setIndexMeta(db, "total_docs", String(projectSourceResult.docs))
   setIndexMeta(db, "total_claude_md", String(projectSourceResult.claudeMd))
+  setIndexMeta(db, "total_research", String(projectSourceResult.research))
 
   return {
     files: totalFiles,
@@ -857,6 +860,62 @@ function indexClaudeMd(
 }
 
 /**
+ * Index LLM research outputs from ~/.claude/projects/<encoded>/memory/research/*.md
+ */
+function indexResearch(
+  db: Database,
+  projectRoot: string,
+  projectPath: string,
+): number {
+  const encodedPath = encodeProjectPath(projectRoot)
+  const researchDir = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodedPath,
+    "memory",
+    "research",
+  )
+  if (!fs.existsSync(researchDir)) return 0
+
+  let count = 0
+  for (const entry of fs.readdirSync(researchDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+
+    const filePath = path.join(researchDir, entry.name)
+    const stats = fs.statSync(filePath)
+    const sourceId = `llm-research:${entry.name}`
+    const metaKey = `mtime:llm_research:${sourceId}`
+
+    if (!hasChanged(db, metaKey, stats.mtime.getTime())) continue
+
+    try {
+      const content = fs.readFileSync(filePath, "utf8")
+      if (!content.trim()) continue
+
+      const title = extractMarkdownTitle(
+        content,
+        `LLM research: ${entry.name.replace(/\.md$/, "")}`,
+      )
+      upsertContent(
+        db,
+        "llm_research",
+        sourceId,
+        projectPath,
+        title,
+        content,
+        stats.mtime.getTime(),
+      )
+      recordMtime(db, metaKey, stats.mtime.getTime())
+      count++
+    } catch {
+      // Skip unreadable files
+    }
+  }
+  return count
+}
+
+/**
  * Index all project sources (beads, memory, docs, CLAUDE.md).
  * Uses mtime checks for incremental updates — fast when nothing changed.
  */
@@ -869,6 +928,7 @@ export function indexProjectSources(
   projectMemory: number
   docs: number
   claudeMd: number
+  research: number
 } {
   const projectPath = projectRoot
 
@@ -878,5 +938,6 @@ export function indexProjectSources(
     projectMemory: indexProjectMemory(db, projectRoot, projectPath),
     docs: indexDocs(db, projectRoot, projectPath),
     claudeMd: indexClaudeMd(db, projectRoot, projectPath),
+    research: indexResearch(db, projectRoot, projectPath),
   }
 }

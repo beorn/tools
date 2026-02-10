@@ -243,6 +243,7 @@ export async function recall(
         "project_memory",
         "doc",
         "claude_md",
+        "llm_research",
       ] as ContentType[],
     }
 
@@ -910,7 +911,12 @@ export async function reviewMemorySystem(
         })
         const contentResults = searchAll(db, q, {
           limit: 10,
-          types: ["bead", "session_memory", "doc"] as ContentType[],
+          types: [
+            "bead",
+            "session_memory",
+            "doc",
+            "llm_research",
+          ] as ContentType[],
           snippetTokens: 200,
         })
         closeDb()
@@ -1287,10 +1293,11 @@ function ensureProjectSourcesIndexed(): void {
       result.sessionMemory +
       result.projectMemory +
       result.docs +
-      result.claudeMd
+      result.claudeMd +
+      result.research
     if (total > 0) {
       log(
-        `indexed ${total} project sources (${Date.now() - startTime}ms): beads=${result.beads} memory=${result.sessionMemory} project=${result.projectMemory} docs=${result.docs} claude=${result.claudeMd}`,
+        `indexed ${total} project sources (${Date.now() - startTime}ms): beads=${result.beads} memory=${result.sessionMemory} project=${result.projectMemory} docs=${result.docs} claude=${result.claudeMd} research=${result.research}`,
       )
     }
     // Don't close db here — recall() will use it and close when done

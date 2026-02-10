@@ -42,7 +42,15 @@ import {
 initializePricing()
 
 // Clean up stale output files (>7 days old)
-import { readdirSync, statSync, unlinkSync } from "fs"
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs"
+import * as os from "os"
 try {
   const maxAge = 7 * 24 * 60 * 60 * 1000
   const now = Date.now()
@@ -195,6 +203,60 @@ function buildResultJson(
 }
 
 /**
+ * Archive LLM output to research dir for recall indexing.
+ * Best-effort — failures are silently ignored.
+ */
+function persistToResearch(content: string, meta?: OutputMeta): void {
+  if (!meta?.query) return
+  try {
+    const projectRoot = process.env.CLAUDE_PROJECT_DIR || process.cwd()
+    const encodedPath = projectRoot.replace(/\//g, "-")
+    const researchDir = `${os.homedir()}/.claude/projects/${encodedPath}/memory/research`
+
+    // Ensure directory exists
+    if (!existsSync(researchDir)) {
+      mkdirSync(researchDir, { recursive: true })
+    }
+
+    // Generate filename: YYYY-MM-DD-HHmmss-<slug>.md
+    const now = new Date()
+    const date = now
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace("T", "-")
+      .slice(0, 15)
+    const slug = meta.query
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 50)
+    const filename = `${date}-${slug}.md`
+
+    // Build YAML frontmatter
+    const frontmatter = [
+      "---",
+      `query: ${JSON.stringify(meta.query)}`,
+      meta.model ? `model: ${JSON.stringify(meta.model)}` : null,
+      meta.cost ? `cost: ${JSON.stringify(meta.cost)}` : null,
+      meta.tokens ? `tokens: ${meta.tokens}` : null,
+      meta.durationMs ? `duration_ms: ${meta.durationMs}` : null,
+      `timestamp: ${JSON.stringify(now.toISOString())}`,
+      sessionTag !== "manual"
+        ? `session_id: ${JSON.stringify(sessionTag)}`
+        : null,
+      "---",
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    const archiveContent = `${frontmatter}\n\n${content}`
+    writeFileSync(`${researchDir}/${filename}`, archiveContent)
+  } catch {
+    // Best-effort — don't fail the main output
+  }
+}
+
+/**
  * After response completes: write to file, print file path on stderr, JSON metadata on stdout.
  *
  * File path on stderr: human-readable, always visible in last lines of output.
@@ -206,6 +268,7 @@ function buildResultJson(
  */
 function finalizeOutput(content: string, meta?: OutputMeta): void {
   void Bun.write(outputFile, content)
+  persistToResearch(content, meta)
   process.stderr.write("\n")
   process.stderr.write(`Output written to: ${outputFile}\n`)
   const result = buildResultJson(content, meta)
