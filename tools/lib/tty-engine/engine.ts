@@ -64,6 +64,11 @@ function keyToAnsi(key: string): string {
     if (code >= 1 && code <= 26) return String.fromCharCode(code)
   }
 
+  // Ctrl+Enter -> \n (legacy terminal: \r = Enter, \n = Ctrl+Enter/Ctrl+J)
+  if (modifiers.includes("Control") && mainKey === "Enter") {
+    return "\n"
+  }
+
   // Alt+key -> ESC prefix
   if (
     (modifiers.includes("Alt") || modifiers.includes("Meta")) &&
