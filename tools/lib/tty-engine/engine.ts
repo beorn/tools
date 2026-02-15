@@ -145,7 +145,13 @@ export function createTtyEngine(
       cols,
       rows,
       data: (_terminal, data) => {
-        term.write(data)
+        try {
+          term.write(data)
+        } catch {
+          // Swallow xterm write errors (e.g., disposed terminal, malformed data).
+          // This callback runs synchronously in Bun's event loop — an unhandled
+          // throw here crashes the entire MCP server process.
+        }
       },
     },
   })

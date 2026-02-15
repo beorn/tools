@@ -38,6 +38,33 @@ async function ensureBrowserInstalled(): Promise<void> {
   console.error("Chromium installed successfully")
 }
 
+// Prevent unhandled errors from crashing the MCP server process.
+// The server should stay alive — individual tool calls return errors to the client.
+process.on("uncaughtException", (err) => {
+  console.error("[tty-mcp] uncaughtException:", err.message)
+})
+process.on("unhandledRejection", (err) => {
+  console.error(
+    "[tty-mcp] unhandledRejection:",
+    err instanceof Error ? err.message : err,
+  )
+})
+
+/** Wrap a tool handler so errors become MCP error responses, not process crashes */
+function safeTool<T>(
+  fn: (args: T) => Promise<{ content: Array<{ type: string; [k: string]: unknown }> }>,
+): (args: T) => Promise<{ content: Array<{ type: string; [k: string]: unknown }> }> {
+  return async (args: T) => {
+    try {
+      return await fn(args)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[tty-mcp] tool error: ${msg}`)
+      return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true }
+    }
+  }
+}
+
 async function main() {
   await ensureBrowserInstalled()
 
@@ -78,12 +105,12 @@ async function main() {
         cwd: z.string().optional().describe("Working directory"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_start", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // list - List active sessions
@@ -93,12 +120,12 @@ async function main() {
       description: "List all active TTY sessions",
       inputSchema: {},
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_list", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // stop - Close a terminal session
@@ -110,12 +137,12 @@ async function main() {
         sessionId: z.string().describe("Session ID to stop"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_stop", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // press - Press keyboard key(s)
@@ -129,12 +156,12 @@ async function main() {
         key: z.string().describe("Key to press (Playwright key format)"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_press", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // type - Type text
@@ -147,12 +174,12 @@ async function main() {
         text: z.string().describe("Text to type"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_type", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // screenshot - Capture screenshot
@@ -169,7 +196,7 @@ async function main() {
           .describe("File path to save (returns base64 if omitted)"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = (await backend.callTool("tty_screenshot", args)) as {
         path?: string
         data?: string
@@ -180,7 +207,7 @@ async function main() {
         return {
           content: [
             {
-              type: "image",
+              type: "image" as const,
               data: result.data,
               mimeType: result.mimeType,
             },
@@ -191,7 +218,7 @@ async function main() {
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // text - Get terminal text content
@@ -203,12 +230,12 @@ async function main() {
         sessionId: z.string().describe("Session ID"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_text", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // wait - Wait for text/stability
@@ -226,12 +253,12 @@ async function main() {
         timeout: z.number().default(30000).describe("Timeout in milliseconds"),
       },
     },
-    async (args) => {
+    safeTool(async (args) => {
       const result = await backend.callTool("tty_wait", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
-    },
+    }),
   )
 
   // Handle shutdown
