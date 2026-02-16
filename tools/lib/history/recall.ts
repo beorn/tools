@@ -16,6 +16,7 @@ import {
   searchAll,
   getAllSessionTitles,
   getIndexMeta,
+  getSessionContext,
   type MessageSearchOptions,
   type ContentSearchOptions,
 } from "./db"
@@ -153,6 +154,91 @@ Rules:
 - Do NOT invent information not present in the search results`
 
 // ============================================================================
+// Query expansion (static synonym map)
+// ============================================================================
+
+/** Static synonym map for common dev terms. Keys are normalized to lowercase. */
+const SYNONYMS: Record<string, string[]> = {
+  auth: ["authentication", "login", "signin", "sign-in", "oauth", "jwt"],
+  bug: ["error", "issue", "fix", "defect", "broken"],
+  test: ["spec", "vitest", "assertion", "expect", "describe"],
+  refactor: ["restructure", "reorganize", "cleanup", "clean-up"],
+  perf: ["performance", "speed", "latency", "benchmark", "slow", "fast"],
+  ui: ["interface", "component", "render", "display", "layout"],
+  tui: ["terminal", "ink", "inkx", "console"],
+  db: ["database", "sqlite", "sql", "query"],
+  dep: ["dependency", "package", "module", "import"],
+  config: ["configuration", "settings", "options", "preferences"],
+  err: ["error", "exception", "throw", "catch", "failure"],
+  log: ["logging", "debug", "trace", "console"],
+  nav: ["navigation", "navigate", "route", "routing"],
+  sync: ["synchronize", "synchronization", "bidirectional", "replicate"],
+  cmd: ["command", "keybinding", "shortcut", "hotkey"],
+  doc: ["documentation", "readme", "docs"],
+  lint: ["eslint", "prettier", "format", "formatting"],
+  ci: ["pipeline", "github-actions", "workflow", "continuous-integration"],
+  api: ["endpoint", "rest", "request", "response"],
+  crash: ["segfault", "panic", "abort", "fatal"],
+}
+
+/**
+ * Expand a query with synonyms.
+ * For each word that matches a synonym key, returns additional queries
+ * with synonyms substituted (one synonym per variant).
+ *
+ * FTS5 doesn't support grouped OR, so we generate variant queries.
+ * Example: "auth bug" → ["authentication bug", "login bug", "auth error", "auth issue"]
+ *
+ * Returns null if no synonyms match.
+ */
+export function expandQueryVariants(query: string): string[] | null {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+
+  // Find which words have synonyms
+  const expansions: { wordIdx: number; synonyms: string[] }[] = []
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!
+    if (word.startsWith("-") || word.startsWith('"')) continue
+    const cleaned = word.replace(/[?!.,;]+$/, "")
+    const syns = SYNONYMS[cleaned]
+    if (syns && syns.length > 0) {
+      expansions.push({ wordIdx: i, synonyms: syns.slice(0, 3) })
+    }
+  }
+
+  if (expansions.length === 0) return null
+
+  // Generate variant queries: substitute one synonym at a time
+  const variants: string[] = []
+  for (const { wordIdx, synonyms } of expansions) {
+    for (const syn of synonyms) {
+      const variant = [...words]
+      variant[wordIdx] = syn
+      variants.push(variant.join(" "))
+    }
+  }
+
+  return variants
+}
+
+// ============================================================================
+// Recency boost
+// ============================================================================
+
+/**
+ * Compute a combined score from FTS5 rank and recency.
+ * BM25 rank is negative (more negative = better match).
+ * Recency factor: 1 / (1 + days_ago / 7), half-life ~1 week.
+ * Combined: rank / recency_factor (dividing a negative number by a value <1 makes it more negative = better)
+ */
+export function boostedRank(rank: number, timestamp: number): number {
+  const daysAgo = (Date.now() - timestamp) / ONE_DAY_MS
+  const recencyFactor = 1 / (1 + daysAgo / 7)
+  // rank is negative (bm25), so multiplying by recencyFactor (0..1) makes recent items more negative = better
+  return rank * recencyFactor
+}
+
+// ============================================================================
 // Core recall function
 // ============================================================================
 
@@ -250,6 +336,74 @@ export async function recall(
     const projectContentResults = searchAll(db, query, projectContentOpts)
     const projectMs = Date.now() - projectStart
 
+    // Query expansion: search with synonym variants for broader recall
+    const SYNONYM_RANK_PENALTY = 5 // Penalize synonym matches to rank below exact matches
+    const queryVariants = expandQueryVariants(query)
+    let synonymMsgCount = 0
+    let synonymContentCount = 0
+
+    if (queryVariants) {
+      log(`query expansion: "${query}" → ${queryVariants.length} variants`)
+      // Collect IDs already found to avoid duplicates
+      const seenMsgIds = new Set(messageResults.results.map((r) => r.id))
+      const seenContentIds = new Set([
+        ...sessionContentResults.results.map((r) => r.id),
+        ...projectContentResults.results.map((r) => r.id),
+      ])
+
+      for (const variant of queryVariants.slice(0, 4)) {
+        try {
+          // Search messages with variant
+          const varMsgs = ftsSearchWithSnippet(db, variant, {
+            ...messageOpts,
+            limit: limit,
+          })
+          for (const r of varMsgs.results) {
+            if (!seenMsgIds.has(r.id)) {
+              seenMsgIds.add(r.id)
+              r.rank += SYNONYM_RANK_PENALTY
+              messageResults.results.push(r)
+              synonymMsgCount++
+            }
+          }
+
+          // Search session content with variant
+          const varSession = searchAll(db, variant, {
+            ...sessionContentOpts,
+            limit: limit,
+          })
+          for (const r of varSession.results) {
+            if (!seenContentIds.has(r.id)) {
+              seenContentIds.add(r.id)
+              r.rank += SYNONYM_RANK_PENALTY
+              sessionContentResults.results.push(r)
+              synonymContentCount++
+            }
+          }
+
+          // Search project content with variant
+          const varProject = searchAll(db, variant, {
+            ...projectContentOpts,
+            limit: limit,
+          })
+          for (const r of varProject.results) {
+            if (!seenContentIds.has(r.id)) {
+              seenContentIds.add(r.id)
+              r.rank += SYNONYM_RANK_PENALTY
+              projectContentResults.results.push(r)
+              synonymContentCount++
+            }
+          }
+        } catch {
+          // Skip variants that fail FTS5 parsing
+        }
+      }
+
+      if (synonymMsgCount > 0 || synonymContentCount > 0) {
+        log(`query expansion: added ${synonymMsgCount} messages + ${synonymContentCount} content from synonyms`)
+      }
+    }
+
     // Merge both content result sets
     const contentResults = {
       results: [
@@ -291,8 +445,10 @@ export async function recall(
       })
     }
 
-    // Sort by rank (bm25 — lower is better)
-    merged.sort((a, b) => a.rank - b.rank)
+    // Sort by recency-boosted rank (bm25 * recency_factor — lower is better)
+    merged.sort(
+      (a, b) => boostedRank(a.rank, a.timestamp) - boostedRank(b.rank, b.timestamp),
+    )
 
     // Dedup: keep best result per session
     const seen = new Set<string>()
@@ -310,6 +466,36 @@ export async function recall(
     log(
       `merged: ${merged.length} raw → ${deduped.length} deduped from ${uniqueSessions} sessions (${Date.now() - searchStart}ms total search)`,
     )
+
+    // Session proximity: expand top message results with neighboring context
+    const proximityStart = Date.now()
+    const TOP_N = Math.min(5, deduped.length)
+    let contextExpanded = 0
+    for (let i = 0; i < TOP_N; i++) {
+      const result = deduped[i]!
+      if (result.type !== "message") continue
+
+      const neighbors = getSessionContext(db, result.sessionId, result.timestamp, 5)
+      if (neighbors.length > 1) {
+        // Build expanded snippet from neighboring messages
+        const contextParts: string[] = []
+        for (const n of neighbors) {
+          if (!n.content) continue
+          const role = n.type === "user" ? "[User]" : n.type === "assistant" ? "[Assistant]" : `[${n.type}]`
+          const text = n.content.slice(0, 200)
+          contextParts.push(`${role} ${text}`)
+        }
+        if (contextParts.length > 0) {
+          const expandedSnippet = contextParts.join("\n---\n")
+          // Replace snippet with expanded context (keeping original at front)
+          result.snippet = expandedSnippet.slice(0, 1500)
+          contextExpanded++
+        }
+      }
+    }
+    if (contextExpanded > 0) {
+      log(`session proximity: expanded ${contextExpanded} results with neighboring context (${Date.now() - proximityStart}ms)`)
+    }
 
     // No results — return early
     if (deduped.length === 0) {

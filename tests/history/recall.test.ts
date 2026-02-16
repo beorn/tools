@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from "vitest"
 import * as fs from "fs"
-import { parseTimeToMs, setRecallLogging } from "../../tools/lib/history/recall"
+import { parseTimeToMs, setRecallLogging, boostedRank, expandQueryVariants } from "../../tools/lib/history/recall"
 import type { RecallResult } from "../../tools/lib/history/recall"
 import { toFts5Query, DB_PATH } from "../../tools/lib/history/db"
 
@@ -219,6 +219,85 @@ describe("toFts5Query", () => {
 })
 
 // ============================================================================
+// boostedRank
+// ============================================================================
+
+describe("boostedRank", () => {
+  test("recent results get better (more negative) boosted rank", () => {
+    const rank = -10
+    const now = Date.now()
+    const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000
+    const recentBoosted = boostedRank(rank, now)
+    const oldBoosted = boostedRank(rank, oneWeekAgo)
+    // More negative = better, so recent should be more negative
+    expect(recentBoosted).toBeLessThan(oldBoosted)
+  })
+
+  test("recency factor is ~0.5 at 1 week ago", () => {
+    const rank = -10
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const boosted = boostedRank(rank, oneWeekAgo)
+    // recency_factor = 1 / (1 + 7/7) = 0.5, so boosted = -10 * 0.5 = -5
+    expect(boosted).toBeCloseTo(-5, 0)
+  })
+
+  test("current timestamp gives full rank (no decay)", () => {
+    const rank = -10
+    const boosted = boostedRank(rank, Date.now())
+    // recency_factor = 1 / (1 + 0/7) = 1, so boosted = -10
+    expect(boosted).toBeCloseTo(-10, 0)
+  })
+})
+
+// ============================================================================
+// expandQueryVariants
+// ============================================================================
+
+describe("expandQueryVariants", () => {
+  test("returns null when no synonyms match", () => {
+    expect(expandQueryVariants("hello world")).toBeNull()
+  })
+
+  test("expands a single synonym-matched term", () => {
+    const variants = expandQueryVariants("auth")
+    expect(variants).not.toBeNull()
+    expect(variants!.length).toBeGreaterThan(0)
+    // Each variant should replace "auth" with a synonym
+    for (const v of variants!) {
+      expect(v).not.toBe("auth")
+    }
+  })
+
+  test("expands multiple synonym-matched terms", () => {
+    const variants = expandQueryVariants("auth bug")
+    expect(variants).not.toBeNull()
+    // Should have variants for "auth" synonyms + "bug" synonyms
+    expect(variants!.length).toBeGreaterThan(3)
+    // Should include variants like "authentication bug" and "auth error"
+    expect(variants!.some((v) => v.includes("authentication"))).toBe(true)
+    expect(variants!.some((v) => v.includes("error"))).toBe(true)
+  })
+
+  test("preserves non-synonym terms in variants", () => {
+    const variants = expandQueryVariants("auth handler")
+    expect(variants).not.toBeNull()
+    // All variants should keep "handler" intact
+    for (const v of variants!) {
+      expect(v).toContain("handler")
+    }
+  })
+
+  test("skips negation terms", () => {
+    const variants = expandQueryVariants("-auth bug")
+    expect(variants).not.toBeNull()
+    // Should only expand "bug", not "-auth"
+    for (const v of variants!) {
+      expect(v).toContain("-auth")
+    }
+  })
+})
+
+// ============================================================================
 // recall() integration tests (only run if the production DB exists)
 // ============================================================================
 
@@ -313,13 +392,15 @@ describe("recall integration", () => {
     expect(keys.length).toBe(uniqueKeys.size)
   })
 
-  test.skipIf(!dbExists)("results are sorted by rank", async () => {
+  test.skipIf(!dbExists)("results are sorted by recency-boosted rank", async () => {
     const recall = await getRecall()
     const result = await recall("test", { raw: true, limit: 10 })
     if (result.results.length > 1) {
       for (let i = 1; i < result.results.length; i++) {
-        expect(result.results[i]!.rank).toBeGreaterThanOrEqual(
-          result.results[i - 1]!.rank,
+        const prev = result.results[i - 1]!
+        const curr = result.results[i]!
+        expect(boostedRank(curr.rank, curr.timestamp)).toBeGreaterThanOrEqual(
+          boostedRank(prev.rank, prev.timestamp),
         )
       }
     }

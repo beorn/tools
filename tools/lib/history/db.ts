@@ -939,6 +939,42 @@ export function searchAll(
 }
 
 /**
+ * Get messages from the same session near a given timestamp.
+ * Returns messages within ±radius rows of the closest message to the timestamp.
+ */
+export function getSessionContext(
+  db: Database,
+  sessionId: string,
+  timestamp: number,
+  radius: number = 5,
+): MessageRecord[] {
+  // Find the message closest to the timestamp
+  const closest = db
+    .prepare(`
+    SELECT id FROM messages
+    WHERE session_id = ?
+    ORDER BY ABS(timestamp - ?)
+    LIMIT 1
+  `)
+    .get(sessionId, timestamp) as { id: number } | undefined
+
+  if (!closest) return []
+
+  // Get surrounding messages
+  return db
+    .prepare(`
+    SELECT * FROM messages
+    WHERE session_id = ? AND id >= ? AND id <= ?
+    ORDER BY id
+  `)
+    .all(
+      sessionId,
+      closest.id - radius,
+      closest.id + radius,
+    ) as MessageRecord[]
+}
+
+/**
  * Read all session entries from all sessions-index.json files
  */
 export function getAllSessionEntries(): SessionIndexEntry[] {
