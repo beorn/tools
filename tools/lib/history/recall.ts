@@ -1313,6 +1313,29 @@ function checkHookConfig(
     // Already reported above
   }
 
+  // Also check shell-based hooks (e.g., .claude/hooks/session-start.sh)
+  // that run recall.ts index/summarize as an alternative to JSON hooks
+  if (!recallHookConfigured || !rememberHookConfigured) {
+    const hooksDir = path.join(projectRoot, ".claude", "hooks")
+    try {
+      if (fs.existsSync(hooksDir)) {
+        for (const entry of fs.readdirSync(hooksDir)) {
+          const hookPath = path.join(hooksDir, entry)
+          try {
+            const content = fs.readFileSync(hookPath, "utf8")
+            if (content.includes("recall.ts index")) recallHookConfigured = true
+            if (content.includes("recall.ts summarize"))
+              rememberHookConfigured = true
+          } catch {
+            // Skip unreadable files
+          }
+        }
+      }
+    } catch {
+      // Skip if hooks dir doesn't exist
+    }
+  }
+
   if (userPromptSubmitConfigured && !recallHookConfigured) {
     recommendations.push(
       "UserPromptSubmit hook exists but doesn't call recall.ts hook",
@@ -1560,7 +1583,9 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
 
   const result = await recall(prompt, {
     limit: 3,
-    timeout: 25000,
+    raw: true, // No LLM synthesis — just fast FTS5 search (~200ms)
+    timeout: 2000,
+    snippetTokens: 80,
     json: true,
   })
 
@@ -1568,16 +1593,32 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
     return { skipped: true, reason: "no_results" }
   }
 
-  if (!result.synthesis) {
-    // Results exist but synthesis failed (LLM timeout or unavailable)
-    return { skipped: true, reason: "synthesis_failed" }
+  // Format raw snippets as compact context
+  // Clean each snippet: remove FTS5 markers, JSON tool calls, separator noise
+  const snippets: string[] = []
+  for (const r of result.results) {
+    let text = r.snippet.trim()
+    // Strip FTS5 highlight markers (both >>> and <<<)
+    text = text.replace(/>>>|<<</g, "")
+    // Strip JSON-like fragments (tool calls, parameters)
+    text = text.replace(/\{"[^"]*"[^}]*\}/g, "").replace(/\{[^}]{0,50}\}?/g, "").trim()
+    // Strip [Assistant]/[User] prefixes and --- separators
+    text = text.replace(/\[(?:Assistant|User)\]\s*/g, "").replace(/^-{3,}\n?/gm, "").trim()
+    // Collapse whitespace
+    text = text.replace(/\n{3,}/g, "\n\n").trim()
+    if (text.length < 20) continue // Skip near-empty results
+    const label = r.sessionTitle ?? r.sessionId.slice(0, 8)
+    snippets.push(`[${r.type}] ${label}: ${text.slice(0, 300)}`)
+  }
+  if (snippets.length === 0) {
+    return { skipped: true, reason: "no_useful_results" }
   }
 
   return {
     skipped: false,
     hookOutput: {
       hookSpecificOutput: {
-        additionalContext: `## Session Memory\n\n${result.synthesis}`,
+        additionalContext: `## Session Memory\n\n${snippets.join("\n")}`,
       },
     },
   }

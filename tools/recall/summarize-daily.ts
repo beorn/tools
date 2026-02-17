@@ -17,6 +17,7 @@ import { findSessionJsonl } from "./extract"
 import { getCheapModel } from "../lib/llm/types"
 import { queryModel } from "../lib/llm/research"
 import { isProviderAvailable } from "../lib/llm/providers"
+import { createRetroBeads } from "./summarize-beads"
 
 // ============================================================================
 // Types
@@ -29,6 +30,7 @@ export interface DailySummaryResult {
   memoryFile: string | null
   skipped: boolean
   reason?: string
+  beadsCreated?: number
 }
 
 interface SessionRecord {
@@ -58,7 +60,16 @@ Bugs discovered, their root causes, and fixes applied.
 Wrong approaches tried, debugging dead ends, misconceptions. For each: what was tried, why it failed, what the fix was. Preserve any [minor]/[moderate]/[major] severity tags from session data. OMIT this section entirely if no real mistakes occurred.
 
 ## Lessons Learned
-Insights gained, patterns discovered, non-obvious things that worked. These should be genuinely novel — not obvious restatements. OMIT this section if nothing genuinely novel was learned.
+Insights gained, patterns discovered, non-obvious things that worked. OMIT this section if nothing genuinely novel was learned.
+
+Each lesson must be:
+- FORWARD-LOOKING: A rule or check for future sessions, not a description of what was done today
+- SPECIFIC: Name the file, function, or pattern — not "centralizing things is good"
+- NOVEL: Not already obvious from CLAUDE.md, skill docs, or common engineering practice
+- ACTIONABLE: Phrased as "When X, do Y" or "Always Z before W"
+Bad: "Centralizing UI assets reduces duplication" (too generic)
+Bad: "Implemented fullscreen-ink" (past tense, already done)
+Good: "When editing TreeNode rendering, always test with HR nodes — they use content-based detection (HR_PATTERN) not node.type"
 
 ## Architecture Changes
 Structural changes, new patterns adopted, refactoring done.
@@ -74,9 +85,14 @@ OMIT this section if no prior-days context was provided or no patterns detected.
 
 ## Memory Updates
 Compare today's lessons with the current MEMORY.md provided (if any). Only flag items that would save 10+ minutes if remembered next time:
-- NEW: A lesson not already in MEMORY.md. Write a ready-to-paste entry (heading + 1-3 lines).
+- NEW: A lesson not already in MEMORY.md. Write a ready-to-paste entry (heading + 1-3 lines). Must be forward-looking ("When X, do Y"), not a description of today's work ("Added X to Y").
 - OUTDATED: Quote the specific MEMORY.md text that today's work contradicts, and explain why.
 Maximum 2 items. Quality over quantity. OMIT if no MEMORY.md was provided or no updates needed.
+
+NEW items must pass these filters:
+- Contains a specific file path, function name, or concrete pattern (not generic advice)
+- Is phrased as a future instruction, not a past-tense description
+- Would actually prevent a mistake or save time — not just "X is good practice"
 
 Rules:
 - Be concise: 3-6 bullets per section maximum
@@ -305,12 +321,25 @@ export async function summarizeDay(
 
   log(`wrote ${memoryFile}`)
 
+  // Create retro bead with actionable items
+  let beadsCreated: number | undefined
+  const beadResult = await createRetroBeads(synthesis, {
+    date,
+    summaryFile: memoryFile,
+    verbose: opts.verbose,
+  })
+  if (beadResult?.created) {
+    beadsCreated = beadResult.itemCount
+    log(`retro bead: ${beadResult.beadId} with ${beadResult.itemCount} items`)
+  }
+
   return {
     date,
     sessionsCount: rows.length,
     summary: synthesis,
     memoryFile,
     skipped: false,
+    beadsCreated,
   }
 }
 
@@ -397,6 +426,9 @@ export async function cmdSummarize(
 
     console.log(result.summary)
     console.error(`\nWrote: ${result.memoryFile}`)
+    if (result.beadsCreated) {
+      console.error(`Retro bead created (${result.beadsCreated} items)`)
+    }
   } else {
     const results = await summarizeUnprocessedDays({
       verbose: true,

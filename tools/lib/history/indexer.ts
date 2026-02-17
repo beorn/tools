@@ -19,7 +19,6 @@ import {
   upsertSession,
   insertMessage,
   insertWrite,
-  insertContent,
   upsertContent,
   getSessionByPath,
   clearTables,
@@ -206,11 +205,16 @@ export async function indexSessionFile(
 
       if (record.sessionId) sessionId = record.sessionId
 
-      const timestamp = record.timestamp
+      // Use actual record timestamp for session date tracking;
+      // fall back to Date.now() only for message insertion (not session bounds)
+      const hasRecordTimestamp = !!record.timestamp
+      const timestamp = hasRecordTimestamp
         ? new Date(record.timestamp).getTime()
         : Date.now()
-      if (firstTimestamp === null) firstTimestamp = timestamp
-      lastTimestamp = timestamp
+      if (hasRecordTimestamp) {
+        if (firstTimestamp === null) firstTimestamp = timestamp
+        lastTimestamp = timestamp
+      }
 
       // Skip if we've seen this UUID (incremental dedup)
       if (record.uuid) {
@@ -421,7 +425,7 @@ export async function rebuildIndex(
   const sessionEntries = getAllSessionEntries()
   for (const entry of sessionEntries) {
     if (entry.summary) {
-      insertContent(
+      upsertContent(
         db,
         "summary",
         entry.sessionId,
@@ -438,7 +442,7 @@ export async function rebuildIndex(
   let totalFirstPrompts = 0
   for (const entry of sessionEntries) {
     if (entry.firstPrompt) {
-      insertContent(
+      upsertContent(
         db,
         "first_prompt",
         entry.sessionId,
@@ -462,7 +466,7 @@ export async function rebuildIndex(
       const titleMatch = content.match(/^#\s+(.+)$/m)
       const title = titleMatch?.[1] ?? filename
 
-      insertContent(
+      upsertContent(
         db,
         "plan",
         filename,
@@ -494,7 +498,7 @@ export async function rebuildIndex(
         .join("\n")
 
       if (todoContent.trim()) {
-        insertContent(
+        upsertContent(
           db,
           "todo",
           filename,
