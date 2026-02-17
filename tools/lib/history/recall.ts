@@ -6,6 +6,7 @@
  */
 
 import * as fs from "fs"
+import * as os from "os"
 import * as path from "path"
 import {
   getDb,
@@ -1581,8 +1582,27 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
   // Index project sources if CLAUDE_PROJECT_DIR is set (fast mtime checks)
   ensureProjectSourcesIndexed()
 
+  // Session-level dedup: don't re-inject the same source session+type
+  // Results become eligible again after DEDUP_TTL_TURNS turns
+  const DEDUP_TTL_TURNS = 10
+  const claudeSessionId = process.env.CLAUDE_SESSION_ID
+  const seenFile = claudeSessionId
+    ? path.join(os.tmpdir(), `recall-hook-seen-${claudeSessionId}.json`)
+    : null
+  let seen: Record<string, number> = {} // key → turn number when last injected
+  let turnNumber = 0
+  if (seenFile) {
+    try {
+      const data = JSON.parse(fs.readFileSync(seenFile, "utf8"))
+      seen = data.seen ?? {}
+      turnNumber = (data.turn ?? 0) + 1
+    } catch {
+      // First call in session or corrupt file
+    }
+  }
+
   const result = await recall(prompt, {
-    limit: 3,
+    limit: 5, // Fetch extra to compensate for dedup filtering
     raw: true, // No LLM synthesis — just fast FTS5 search (~200ms)
     timeout: 2000,
     snippetTokens: 80,
@@ -1593,10 +1613,12 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
     return { skipped: true, reason: "no_results" }
   }
 
-  // Format raw snippets as compact context
-  // Clean each snippet: remove FTS5 markers, JSON tool calls, separator noise
+  // Filter out already-injected results, then format
   const snippets: string[] = []
+  const newKeys: string[] = []
   for (const r of result.results) {
+    const key = `${r.sessionId}:${r.type}`
+    if (key in seen && turnNumber - seen[key] < DEDUP_TTL_TURNS) continue
     let text = r.snippet.trim()
     // Strip FTS5 highlight markers (both >>> and <<<)
     text = text.replace(/>>>|<<</g, "")
@@ -1609,9 +1631,22 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
     if (text.length < 20) continue // Skip near-empty results
     const label = r.sessionTitle ?? r.sessionId.slice(0, 8)
     snippets.push(`[${r.type}] ${label}: ${text.slice(0, 300)}`)
+    newKeys.push(key)
+    if (snippets.length >= 3) break // Cap at 3 snippets
   }
+
+  // Persist seen keys + turn counter for future calls in this session
+  if (seenFile) {
+    for (const k of newKeys) seen[k] = turnNumber
+    try {
+      fs.writeFileSync(seenFile, JSON.stringify({ turn: turnNumber, seen }))
+    } catch {
+      // Non-fatal
+    }
+  }
+
   if (snippets.length === 0) {
-    return { skipped: true, reason: "no_useful_results" }
+    return { skipped: true, reason: "all_seen" }
   }
 
   return {
