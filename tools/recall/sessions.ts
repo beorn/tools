@@ -5,13 +5,7 @@
 import * as path from "path"
 import * as fs from "fs"
 import * as readline from "readline"
-import {
-  getDb,
-  closeDb,
-  PROJECTS_DIR,
-  getAllSessionTitles,
-  getSessionTitle,
-} from "../lib/history/db"
+import { getDb, closeDb, PROJECTS_DIR, getAllSessionTitles, getSessionTitle } from "../lib/history/db"
 import { rebuildIndex, findSessionFiles } from "../lib/history/indexer"
 import type { JsonlRecord } from "../lib/history/types"
 import {
@@ -31,15 +25,8 @@ import * as os from "os"
 // Index
 // ============================================================================
 
-export async function cmdIndex(opts: {
-  incremental?: boolean
-  projectRoot?: string
-}): Promise<void> {
-  console.log(
-    opts.incremental
-      ? "Updating session index..."
-      : "Building session index...",
-  )
+export async function cmdIndex(opts: { incremental?: boolean; projectRoot?: string }): Promise<void> {
+  console.log(opts.incremental ? "Updating session index..." : "Building session index...")
   console.log("(indexing sessions from the last 30 days)\n")
 
   const db = getDb()
@@ -51,18 +38,14 @@ export async function cmdIndex(opts: {
     onProgress: (progress) => {
       if (progress.filesProcessed - lastProgressUpdate >= 50) {
         lastProgressUpdate = progress.filesProcessed
-        process.stdout.write(
-          `\r${progress.filesProcessed} files, ${progress.messagesIndexed} messages...`,
-        )
+        process.stdout.write(`\r${progress.filesProcessed} files, ${progress.messagesIndexed} messages...`)
       }
     },
   })
   process.stdout.write("\r" + " ".repeat(60) + "\r")
 
   console.log(`\n\n\u2713 Indexed content:`)
-  console.log(
-    `  ${result.messages.toLocaleString()} messages from ${result.files} session files`,
-  )
+  console.log(`  ${result.messages.toLocaleString()} messages from ${result.files} session files`)
   if (result.writes > 0) {
     console.log(`  ${result.writes.toLocaleString()} file writes`)
   }
@@ -82,14 +65,10 @@ export async function cmdIndex(opts: {
     console.log(`  ${result.beads.toLocaleString()} beads (issues)`)
   }
   if (result.sessionMemory > 0) {
-    console.log(
-      `  ${result.sessionMemory.toLocaleString()} session memory files`,
-    )
+    console.log(`  ${result.sessionMemory.toLocaleString()} session memory files`)
   }
   if (result.projectMemory > 0) {
-    console.log(
-      `  ${result.projectMemory.toLocaleString()} project memory files`,
-    )
+    console.log(`  ${result.projectMemory.toLocaleString()} project memory files`)
   }
   if (result.docs > 0) {
     console.log(`  ${result.docs.toLocaleString()} documentation files`)
@@ -108,10 +87,7 @@ export async function cmdIndex(opts: {
 // List sessions
 // ============================================================================
 
-export async function cmdSessions(
-  id?: string,
-  opts?: { project?: string },
-): Promise<void> {
+export async function cmdSessions(id?: string, opts?: { project?: string }): Promise<void> {
   if (id) {
     await showSession(id)
     return
@@ -176,26 +152,19 @@ export async function cmdSessions(
     for (const s of recentSessions) {
       const title = sessionTitles.get(s.sessionId)
       const displayProject = displayProjectPath(s.project)
-      const date =
-        s.mtime.toLocaleDateString() + " " + s.mtime.toLocaleTimeString()
+      const date = s.mtime.toLocaleDateString() + " " + s.mtime.toLocaleTimeString()
       const size = formatBytes(s.size).padStart(8)
-      const nameDisplay = (title || displayProject)
-        .slice(0, 40)
-        .padEnd(maxNameLen)
+      const nameDisplay = (title || displayProject).slice(0, 40).padEnd(maxNameLen)
       console.log(`${nameDisplay}  ${s.sessionId}  ${size}  ${date}`)
     }
   }
 
   const recentTotalSize = recentSessions.reduce((sum, s) => sum + s.size, 0)
-  console.log(
-    `Showing ${recentSessions.length} sessions (${formatBytes(recentTotalSize)}) from the last 30 days`,
-  )
+  console.log(`Showing ${recentSessions.length} sessions (${formatBytes(recentTotalSize)}) from the last 30 days`)
 
   if (olderSessions.length > 0) {
     const olderTotalSize = olderSessions.reduce((sum, s) => sum + s.size, 0)
-    console.log(
-      `\nNot shown: ${olderSessions.length} sessions (${formatBytes(olderTotalSize)}) older than 30 days`,
-    )
+    console.log(`\nNot shown: ${olderSessions.length} sessions (${formatBytes(olderTotalSize)}) older than 30 days`)
   }
 }
 
@@ -208,10 +177,7 @@ async function showSession(sessionIdOrFile: string): Promise<void> {
 
   for await (const file of findSessionFiles()) {
     const basename = path.basename(file, ".jsonl")
-    if (
-      basename.startsWith(sessionIdOrFile) ||
-      file.includes(sessionIdOrFile)
-    ) {
+    if (basename.startsWith(sessionIdOrFile) || file.includes(sessionIdOrFile)) {
       sessionFile = file
       break
     }
@@ -269,9 +235,7 @@ async function showSession(sessionIdOrFile: string): Promise<void> {
   }
 
   const writes = db
-    .prepare(
-      "SELECT file_path, timestamp, content_size FROM writes WHERE session_id = ? ORDER BY timestamp",
-    )
+    .prepare("SELECT file_path, timestamp, content_size FROM writes WHERE session_id = ? ORDER BY timestamp")
     .all(sessionId) as {
     file_path: string
     timestamp: string

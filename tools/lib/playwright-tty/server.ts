@@ -41,19 +41,12 @@ const TOOL_TIMEOUTS: Record<string, number> = {
   tty_text: 5_000,
 }
 
-function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  label: string,
-): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
   return Promise.race([
     promise,
     new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`${label} timed out after ${ms}ms`)),
-        ms,
-      )
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
     }),
   ]).finally(() => clearTimeout(timer!))
 }
@@ -109,16 +102,12 @@ export class PlaywrightTtyBackend {
     const engine = this.engines.get(sessionId)
     if (!engine) {
       const active = Array.from(this.engines.keys()).join(", ") || "none"
-      throw new Error(
-        `Session not found: ${sessionId}. Active sessions: ${active}`,
-      )
+      throw new Error(`Session not found: ${sessionId}. Active sessions: ${active}`)
     }
     if (!engine.alive) {
       engine.close().catch(() => {})
       this.engines.delete(sessionId)
-      throw new Error(
-        `Session ${sessionId} is dead (process exited). It has been removed.`,
-      )
+      throw new Error(`Session ${sessionId} is dead (process exited). It has been removed.`)
     }
     return engine
   }

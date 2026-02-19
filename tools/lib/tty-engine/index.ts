@@ -1,5 +1,1 @@
-export {
-  createTtyEngine,
-  type TtyEngine,
-  type TtyEngineOptions,
-} from "./engine.js"
+export { createTtyEngine, type TtyEngine, type TtyEngineOptions } from "./engine.js"

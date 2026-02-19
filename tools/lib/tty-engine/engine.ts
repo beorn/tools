@@ -70,10 +70,7 @@ function keyToAnsi(key: string): string {
   }
 
   // Alt+key -> ESC prefix
-  if (
-    (modifiers.includes("Alt") || modifiers.includes("Meta")) &&
-    mainKey.length === 1
-  ) {
+  if ((modifiers.includes("Alt") || modifiers.includes("Meta")) && mainKey.length === 1) {
     return `\x1b${mainKey}`
   }
 
@@ -121,10 +118,7 @@ export interface TtyEngineOptions {
 
 const POLL_INTERVAL = 50
 
-export function createTtyEngine(
-  id: string,
-  options: TtyEngineOptions,
-): TtyEngine {
+export function createTtyEngine(id: string, options: TtyEngineOptions): TtyEngine {
   const { command, env, cols = 120, rows = 40, cwd } = options
 
   // Set up xterm-headless
@@ -190,11 +184,7 @@ export function createTtyEngine(
     pty.write(text)
   }
 
-  async function repeatKey(
-    key: string,
-    count: number,
-    gapMs = 33,
-  ): Promise<void> {
+  async function repeatKey(key: string, count: number, gapMs = 33): Promise<void> {
     for (let i = 0; i < count; i++) {
       press(key)
       await new Promise((resolve) => setTimeout(resolve, gapMs))
@@ -210,10 +200,7 @@ export function createTtyEngine(
     throw new Error(`Timeout waiting for "${text}" after ${timeout}ms`)
   }
 
-  async function waitForStable(
-    stableMs: number,
-    timeout: number,
-  ): Promise<void> {
+  async function waitForStable(stableMs: number, timeout: number): Promise<void> {
     const start = Date.now()
     let lastContent = ""
     let stableStart = Date.now()

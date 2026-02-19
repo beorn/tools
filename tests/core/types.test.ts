@@ -1,11 +1,5 @@
 import { describe, test, expect } from "vitest"
-import {
-  SymbolInfo,
-  Reference,
-  Edit,
-  Editset,
-  SymbolMatch,
-} from "../../tools/lib/core/types"
+import { SymbolInfo, Reference, Edit, Editset, SymbolMatch } from "../../tools/lib/core/types"
 
 describe("Zod schemas", () => {
   describe("SymbolInfo", () => {
@@ -34,16 +28,7 @@ describe("Zod schemas", () => {
     })
 
     test("accepts all valid kinds", () => {
-      const kinds = [
-        "variable",
-        "function",
-        "type",
-        "interface",
-        "property",
-        "class",
-        "method",
-        "parameter",
-      ]
+      const kinds = ["variable", "function", "type", "interface", "property", "class", "method", "parameter"]
       for (const kind of kinds) {
         const valid = {
           symbolKey: "src/foo.ts:1:1:foo",

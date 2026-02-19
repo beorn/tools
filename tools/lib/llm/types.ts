@@ -5,13 +5,7 @@
 import { z } from "zod"
 
 // Provider identifiers
-export const ProviderSchema = z.enum([
-  "openai",
-  "anthropic",
-  "google",
-  "xai",
-  "perplexity",
-])
+export const ProviderSchema = z.enum(["openai", "anthropic", "google", "xai", "perplexity"])
 export type Provider = z.infer<typeof ProviderSchema>
 
 // Model identifiers by provider
@@ -489,20 +483,14 @@ export function getModel(idOrName: string): Model | undefined {
 export function getModelsForLevel(level: ThinkingLevel): Model[] {
   switch (level) {
     case "quick":
-      return MODELS.filter(
-        (m) => m.costTier === "low" && !m.isDeepResearch,
-      ).slice(0, 1)
+      return MODELS.filter((m) => m.costTier === "low" && !m.isDeepResearch).slice(0, 1)
     case "standard":
-      return MODELS.filter(
-        (m) => m.costTier === "medium" && !m.isDeepResearch,
-      ).slice(0, 1)
+      return MODELS.filter((m) => m.costTier === "medium" && !m.isDeepResearch).slice(0, 1)
     case "research":
       return MODELS.filter((m) => m.isDeepResearch).slice(0, 1)
     case "consensus":
       // One model per provider (non-deep-research)
-      return MODELS.filter(
-        (m) => !m.isDeepResearch && m.costTier !== "low",
-      ).reduce((acc, m) => {
+      return MODELS.filter((m) => !m.isDeepResearch && m.costTier !== "low").reduce((acc, m) => {
         if (!acc.find((x) => x.provider === m.provider)) acc.push(m)
         return acc
       }, [] as Model[])
@@ -525,11 +513,7 @@ export function getDeepResearchModels(): Model[] {
  * Estimate cost for a query (USD)
  * Assumes ~500 input tokens and ~1000 output tokens for a typical query
  */
-export function estimateCost(
-  model: Model,
-  inputTokens = 500,
-  outputTokens = 1000,
-): number {
+export function estimateCost(model: Model, inputTokens = 500, outputTokens = 1000): number {
   const inputCost = (model.inputPricePerM ?? 0) * (inputTokens / 1_000_000)
   const outputCost = (model.outputPricePerM ?? 0) * (outputTokens / 1_000_000)
   return inputCost + outputCost
@@ -557,10 +541,7 @@ export function formatLatency(ms: number): string {
  * Get cheap model for question refinement
  */
 export function getCheapModel(): Model | undefined {
-  return (
-    MODELS.find((m) => m.costTier === "low" && m.provider === "openai") ||
-    MODELS.find((m) => m.costTier === "low")
-  )
+  return MODELS.find((m) => m.costTier === "low" && m.provider === "openai") || MODELS.find((m) => m.costTier === "low")
 }
 
 /**
@@ -571,8 +552,7 @@ export function getCheapModels(max = 2): Model[] {
   const seen = new Set<string>()
   const result: Model[] = []
   for (const m of MODELS) {
-    if (m.costTier !== "low" || m.isDeepResearch || seen.has(m.provider))
-      continue
+    if (m.costTier !== "low" || m.isDeepResearch || seen.has(m.provider)) continue
     seen.add(m.provider)
     result.push(m)
     if (result.length >= max) break
@@ -585,11 +565,7 @@ export function getCheapModels(max = 2): Model[] {
  */
 export function requiresConfirmation(model: Model, threshold = 0.1): boolean {
   const estimatedCost = estimateCost(model)
-  return (
-    estimatedCost > threshold ||
-    model.costTier === "very-high" ||
-    model.isDeepResearch
-  )
+  return estimatedCost > threshold || model.costTier === "very-high" || model.isDeepResearch
 }
 
 /**
@@ -597,34 +573,15 @@ export function requiresConfirmation(model: Model, threshold = 0.1): boolean {
  */
 export const BEST_MODELS = {
   // Default query - best general-purpose models
-  default: [
-    "gpt-5.2",
-    "gemini-3-pro-preview",
-    "claude-sonnet-4-5-20250514",
-    "grok-4",
-  ],
+  default: ["gpt-5.2", "gemini-3-pro-preview", "claude-sonnet-4-5-20250514", "grok-4"],
   // Deep research - models with web search/citations
-  deep: [
-    "o3-deep-research-2025-06-26",
-    "sonar-deep-research",
-    "o4-mini-deep-research-2025-06-26",
-  ],
+  deep: ["o3-deep-research-2025-06-26", "sonar-deep-research", "o4-mini-deep-research-2025-06-26"],
   // Second opinion - prefer different provider than default
   opinion: ["gemini-3-pro-preview", "gemini-2.5-pro", "gpt-5.2", "grok-4"],
   // Debate - one from each major provider
-  debate: [
-    "gpt-5.2",
-    "gemini-3-pro-preview",
-    "grok-4",
-    "claude-sonnet-4-5-20250514",
-  ],
+  debate: ["gpt-5.2", "gemini-3-pro-preview", "grok-4", "claude-sonnet-4-5-20250514"],
   // Quick/cheap - fast and cheap
-  quick: [
-    "gpt-5-nano",
-    "gemini-2.0-flash-lite",
-    "grok-3-fast",
-    "claude-3-5-haiku-latest",
-  ],
+  quick: ["gpt-5-nano", "gemini-2.0-flash-lite", "grok-3-fast", "claude-3-5-haiku-latest"],
 }
 
 export type ModelMode = keyof typeof BEST_MODELS

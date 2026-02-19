@@ -12,12 +12,7 @@
 
 import OpenAI from "openai"
 import type { Model, ModelResponse } from "./types"
-import {
-  getPartialPath,
-  writePartialHeader,
-  appendPartial,
-  completePartial,
-} from "./persistence"
+import { getPartialPath, writePartialHeader, appendPartial, completePartial } from "./persistence"
 
 let client: OpenAI | undefined
 
@@ -46,26 +41,15 @@ export interface DeepResearchOptions {
 /**
  * Query OpenAI deep research model using Responses API
  */
-export async function queryOpenAIDeepResearch(
-  options: DeepResearchOptions,
-): Promise<ModelResponse> {
-  const {
-    topic,
-    model,
-    stream = false,
-    onToken,
-    noPersist = false,
-    context,
-  } = options
+export async function queryOpenAIDeepResearch(options: DeepResearchOptions): Promise<ModelResponse> {
+  const { topic, model, stream = false, onToken, noPersist = false, context } = options
   // Default to background mode for streaming to enable recovery
   const background = options.background ?? stream
   const startTime = Date.now()
   const openai = getClient()
 
   // Build the research prompt with optional context
-  const contextSection = context
-    ? `## Background Context\n\n${context}\n\n---\n\n`
-    : ""
+  const contextSection = context ? `## Background Context\n\n${context}\n\n---\n\n` : ""
 
   const researchPrompt = `${contextSection}Research the following topic thoroughly. Provide comprehensive information with sources where possible.
 
@@ -117,10 +101,7 @@ Please provide:
         }
 
         // Track sequence number for potential resume
-        if (
-          "sequence_number" in event &&
-          typeof event.sequence_number === "number"
-        ) {
+        if ("sequence_number" in event && typeof event.sequence_number === "number") {
           lastSequence = event.sequence_number
         }
 
@@ -147,21 +128,15 @@ Please provide:
       // If stream ended without completing (connection dropped during deep research),
       // fall back to polling retrieveResponse() until the background response finishes
       if (!completed && !responseId && background) {
-        process.stderr.write(
-          "\n⚠️  Stream ended without yielding any events (no response ID received)\n",
-        )
+        process.stderr.write("\n⚠️  Stream ended without yielding any events (no response ID received)\n")
       }
       if (!completed && responseId && background) {
-        process.stderr.write(
-          "\n⏳ Stream disconnected, polling for background response...\n",
-        )
+        process.stderr.write("\n⏳ Stream disconnected, polling for background response...\n")
         const pollResult = await pollForCompletion(responseId, {
           intervalMs: 5_000,
           maxAttempts: 180, // 15 min max
           onProgress: (status, elapsed) => {
-            process.stderr.write(
-              `\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`,
-            )
+            process.stderr.write(`\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`)
           },
         })
 
@@ -246,8 +221,7 @@ Please provide:
           ? {
               promptTokens: usage.input_tokens || 0,
               completionTokens: usage.output_tokens || 0,
-              totalTokens:
-                (usage.input_tokens || 0) + (usage.output_tokens || 0),
+              totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
             }
           : undefined,
         durationMs: Date.now() - startTime,
@@ -260,23 +234,12 @@ Please provide:
     if (errorMessage.includes("verified")) {
       errorMessage =
         "Organization not verified. Visit https://platform.openai.com/settings/organization/general to verify."
-    } else if (
-      errorMessage.includes("rate_limit") ||
-      errorMessage.includes("429")
-    ) {
+    } else if (errorMessage.includes("rate_limit") || errorMessage.includes("429")) {
       errorMessage = "Rate limited. Wait a moment and try again."
-    } else if (
-      errorMessage.includes("insufficient_quota") ||
-      errorMessage.includes("billing")
-    ) {
-      errorMessage =
-        "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing"
-    } else if (
-      errorMessage.includes("invalid_api_key") ||
-      errorMessage.includes("401")
-    ) {
-      errorMessage =
-        "Invalid API key. Check OPENAI_API_KEY environment variable."
+    } else if (errorMessage.includes("insufficient_quota") || errorMessage.includes("billing")) {
+      errorMessage = "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing"
+    } else if (errorMessage.includes("invalid_api_key") || errorMessage.includes("401")) {
+      errorMessage = "Invalid API key. Check OPENAI_API_KEY environment variable."
     }
 
     process.stderr.write(`\n❌ Deep research error: ${errorMessage}\n`)
@@ -324,11 +287,7 @@ export async function pollForCompletion(
       return result
     }
 
-    if (
-      result.status === "failed" ||
-      result.status === "cancelled" ||
-      result.status === "expired"
-    ) {
+    if (result.status === "failed" || result.status === "cancelled" || result.status === "expired") {
       return { ...result, error: `Response ${result.status}` }
     }
 

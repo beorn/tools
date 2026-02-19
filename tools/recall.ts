@@ -66,10 +66,7 @@ program
   .argument("<query>", "Search query")
   .option("--raw", "Skip LLM synthesis, show raw results")
   .option("--json", "JSON output")
-  .option(
-    "-s, --since <time>",
-    "Time filter: 1h, 1d, 1w, today, yesterday (default: 30d)",
-  )
+  .option("-s, --since <time>", "Time filter: 1h, 1d, 1w, today, yesterday (default: 30d)")
   .option("-n, --limit <num>", "Max results (default: 10)")
   .option("--timeout <ms>", "LLM timeout in ms (default: 4000)")
   .option("-p, --project <glob>", "Project filter")
@@ -78,10 +75,7 @@ program
   .option("-r, --response", "Assistant messages only (implies --raw)")
   .option("-t, --tool <name>", "Tool filter: Write, Bash, etc. (implies --raw)")
   .option("--session <id>", "Specific session (implies --raw)")
-  .option(
-    "-i, --include <types>",
-    "Content types: p,m,s,t,f,b,e,d,c (implies --raw)",
-  )
+  .option("-i, --include <types>", "Content types: p,m,s,t,f,b,e,d,c (implies --raw)")
   .action(async (query: string, opts: SearchOptions) => {
     await cmdSearch(query, opts)
   })
@@ -91,10 +85,7 @@ program
   .command("index")
   .description("Build/rebuild FTS5 index")
   .option("--incremental", "Only index new sessions")
-  .option(
-    "--project-root <path>",
-    "Project root for indexing project sources (beads, docs, memory)",
-  )
+  .option("--project-root <path>", "Project root for indexing project sources (beads, docs, memory)")
   .action(async (opts: { incremental?: boolean; projectRoot?: string }) => {
     await cmdIndex(opts)
   })
@@ -123,14 +114,9 @@ program
   .description("List/search file writes or restore content")
   .option("--restore <file>", "Restore file content")
   .option("--date <date>", "Filter by date (e.g., 2026-02)")
-  .action(
-    async (
-      pattern: string | undefined,
-      opts: { restore?: string; date?: string },
-    ) => {
-      await cmdFiles(pattern, opts)
-    },
-  )
+  .action(async (pattern: string | undefined, opts: { restore?: string; date?: string }) => {
+    await cmdFiles(pattern, opts)
+  })
 
 // ── hook (internal) ─────────────────────────────────────────────────────
 program
@@ -152,9 +138,7 @@ program
 // ── summarize ─────────────────────────────────────────────────────────
 program
   .command("summarize [date]")
-  .description(
-    "Daily summary across all sessions (default: all unprocessed days)",
-  )
+  .description("Daily summary across all sessions (default: all unprocessed days)")
   .option("-p, --project <glob>", "Project filter")
   .action(async (date: string | undefined, opts: { project?: string }) => {
     await cmdSummarize(date, { verbose: true, project: opts.project })
@@ -163,9 +147,7 @@ program
 // ── show ────────────────────────────────────────────────────────────
 program
   .command("show [date]")
-  .description(
-    "Show existing summaries (default: list recent; YYYY-MM-DD: that day; 'week': latest weekly)",
-  )
+  .description("Show existing summaries (default: list recent; YYYY-MM-DD: that day; 'week': latest weekly)")
   .action(async (dateArg: string | undefined) => {
     await cmdShow(dateArg)
   })
@@ -173,9 +155,7 @@ program
 // ── weekly ──────────────────────────────────────────────────────────
 program
   .command("weekly [date]")
-  .description(
-    "Weekly summary from daily summaries (date = any day in the target week, default: last week)",
-  )
+  .description("Weekly summary from daily summaries (date = any day in the target week, default: last week)")
   .action(async (date: string | undefined) => {
     await cmdWeekly(date)
   })
@@ -184,9 +164,7 @@ program
 // Entry point
 // ============================================================================
 
-export async function main(
-  argv: string[] = process.argv.slice(2),
-): Promise<void> {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   // No args → show help (Step 0: fix exitOverride crash)
   if (argv.length === 0) {
     try {
@@ -221,9 +199,7 @@ export async function main(
 
 if (import.meta.main) {
   main().catch((e) => {
-    console.error(
-      `[recall] FATAL: ${e instanceof Error ? `${e.message}\n${e.stack}` : String(e)}`,
-    )
+    console.error(`[recall] FATAL: ${e instanceof Error ? `${e.message}\n${e.stack}` : String(e)}`)
     process.exit(1)
   })
 }

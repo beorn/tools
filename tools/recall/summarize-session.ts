@@ -63,14 +63,7 @@ const MIN_CONTENT_LENGTH = 100
 function getCacheDir(): string {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
   const encodedPath = projectDir.replace(/\//g, "-")
-  return path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-    "session-summaries",
-  )
+  return path.join(os.homedir(), ".claude", "projects", encodedPath, "memory", "session-summaries")
 }
 
 function getCachePath(shortId: string): string {
@@ -101,9 +94,7 @@ export async function summarizeSession(
   sessionId: string,
   opts?: { title?: string | null; createdAt?: number; verbose?: boolean },
 ): Promise<SessionSummary> {
-  const log = opts?.verbose
-    ? (msg: string) => console.error(`[summarize-session] ${msg}`)
-    : () => {}
+  const log = opts?.verbose ? (msg: string) => console.error(`[summarize-session] ${msg}`) : () => {}
 
   // Extract content first (needed for metadata even if cached)
   const extract = extractSessionContent(sessionId, {
@@ -155,9 +146,7 @@ export async function summarizeSession(
 
   // Skip content that's too short
   if (extract.content.length < MIN_CONTENT_LENGTH) {
-    log(
-      `${extract.shortId}: content too short (${extract.content.length} chars)`,
-    )
+    log(`${extract.shortId}: content too short (${extract.content.length} chars)`)
     return {
       id: extract.id,
       shortId: extract.shortId,
@@ -239,9 +228,7 @@ export async function summarizeSessionBatch(
   sessions: Array<{ id: string; title?: string | null; createdAt?: number }>,
   opts?: { verbose?: boolean; concurrency?: number },
 ): Promise<SessionSummary[]> {
-  const log = opts?.verbose
-    ? (msg: string) => console.error(`[summarize-session] ${msg}`)
-    : () => {}
+  const log = opts?.verbose ? (msg: string) => console.error(`[summarize-session] ${msg}`) : () => {}
   const concurrency = opts?.concurrency ?? 8
 
   log(`processing ${sessions.length} sessions (concurrency=${concurrency})`)
@@ -265,17 +252,12 @@ export async function summarizeSessionBatch(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, sessions.length) },
-    () => worker(),
-  )
+  const workers = Array.from({ length: Math.min(concurrency, sessions.length) }, () => worker())
   await Promise.all(workers)
 
   const summarized = results.filter((r) => r.summary !== null).length
   const cached = results.filter((r) => r.cached).length
-  log(
-    `done: ${summarized} summarized (${cached} from cache), ${results.length - summarized} skipped`,
-  )
+  log(`done: ${summarized} summarized (${cached} from cache), ${results.length - summarized} skipped`)
 
   return results
 }

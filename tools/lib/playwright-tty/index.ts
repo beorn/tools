@@ -14,9 +14,5 @@
  * ```
  */
 
-export {
-  createTtyEngine,
-  type TtyEngine,
-  type TtyEngineOptions,
-} from "../tty-engine/index.js"
+export { createTtyEngine, type TtyEngine, type TtyEngineOptions } from "../tty-engine/index.js"
 export * from "./types.js"

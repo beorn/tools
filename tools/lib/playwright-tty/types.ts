@@ -14,9 +14,7 @@ export const TtyStartInputSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   cols: z.number().int().positive().default(120),
   rows: z.number().int().positive().default(40),
-  waitFor: z
-    .union([z.literal("content"), z.literal("stable"), z.string()])
-    .optional(),
+  waitFor: z.union([z.literal("content"), z.literal("stable"), z.string()]).optional(),
   timeout: z.number().int().positive().default(5000),
   cwd: z.string().optional(),
 })

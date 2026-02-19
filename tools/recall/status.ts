@@ -74,12 +74,8 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
   }
 
   try {
-    const sessions =
-      (db.prepare("SELECT COUNT(*) as n FROM sessions").get() as { n: number })
-        .n ?? 0
-    const messages =
-      (db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number })
-        .n ?? 0
+    const sessions = (db.prepare("SELECT COUNT(*) as n FROM sessions").get() as { n: number }).n ?? 0
+    const messages = (db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number }).n ?? 0
     const totalWrites = (
       db.prepare("SELECT COUNT(*) as count FROM writes").get() as {
         count: number
@@ -94,16 +90,13 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
     }
 
     const lastRebuild = getIndexMeta(db, "last_rebuild") ?? null
-    const isStale = lastRebuild
-      ? Date.now() - new Date(lastRebuild).getTime() > ONE_HOUR_MS
-      : true
+    const isStale = lastRebuild ? Date.now() - new Date(lastRebuild).getTime() > ONE_HOUR_MS : true
 
     // Content table counts by type
-    const contentCounts = db
-      .prepare(
-        "SELECT content_type, COUNT(*) as n FROM content GROUP BY content_type",
-      )
-      .all() as { content_type: string; n: number }[]
+    const contentCounts = db.prepare("SELECT content_type, COUNT(*) as n FROM content GROUP BY content_type").all() as {
+      content_type: string
+      n: number
+    }[]
     const countByType = new Map(contentCounts.map((r) => [r.content_type, r.n]))
 
     console.log(`${BOLD}Index Health${RESET}`)
@@ -134,9 +127,7 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
       for (const s of active) {
         const project = displayProjectPath(s.project_path)
         const relTime = formatRelativeTime(s.last_activity)
-        console.log(
-          `  ${project} ${DIM}(${s.message_count} msgs, ${relTime})${RESET}`,
-        )
+        console.log(`  ${project} ${DIM}(${s.message_count} msgs, ${relTime})${RESET}`)
       }
       console.log()
     }
@@ -157,26 +148,17 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
 
     // ── Stats ─────────────────────────────────────────────────────────────
     const userMessages = (
-      db
-        .prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'user'")
-        .get() as {
+      db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'user'").get() as {
         count: number
       }
     ).count
     const assistantMessages = (
-      db
-        .prepare(
-          "SELECT COUNT(*) as count FROM messages WHERE type = 'assistant'",
-        )
-        .get() as {
+      db.prepare("SELECT COUNT(*) as count FROM messages WHERE type = 'assistant'").get() as {
         count: number
       }
     ).count
-    const uniqueFiles = (
-      db
-        .prepare("SELECT COUNT(DISTINCT file_path) as count FROM writes")
-        .get() as { count: number }
-    ).count
+    const uniqueFiles = (db.prepare("SELECT COUNT(DISTINCT file_path) as count FROM writes").get() as { count: number })
+      .count
 
     console.log(`${BOLD}Message Breakdown${RESET}`)
     console.log(
@@ -209,18 +191,10 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
   const hk = review.hookConfig
 
   console.log(`${BOLD}Hook Configuration${RESET}`)
-  console.log(
-    `  ${hk.userPromptSubmitConfigured ? CHECK : CROSS} UserPromptSubmit hook configured`,
-  )
-  console.log(
-    `  ${hk.sessionEndConfigured ? CHECK : CROSS} SessionEnd hook configured`,
-  )
-  console.log(
-    `  ${hk.recallHookConfigured ? CHECK : CROSS} recall.ts hook command`,
-  )
-  console.log(
-    `  ${hk.rememberHookConfigured ? CHECK : CROSS} recall.ts remember command`,
-  )
+  console.log(`  ${hk.userPromptSubmitConfigured ? CHECK : CROSS} UserPromptSubmit hook configured`)
+  console.log(`  ${hk.sessionEndConfigured ? CHECK : CROSS} SessionEnd hook configured`)
+  console.log(`  ${hk.recallHookConfigured ? CHECK : CROSS} recall.ts hook command`)
+  console.log(`  ${hk.rememberHookConfigured ? CHECK : CROSS} recall.ts remember command`)
   console.log(
     `  ${hk.sessionMemoryFiles > 0 ? CHECK : WARN} ${hk.sessionMemoryFiles} session memory file${hk.sessionMemoryFiles !== 1 ? "s" : ""}`,
   )
@@ -230,33 +204,23 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
   if (review.llmRaceBenchmark) {
     const bench = review.llmRaceBenchmark
     console.log(`${BOLD}LLM Race Benchmark${RESET}`)
-    console.log(
-      `  Models: ${bench.models.join(" vs ")}  (${bench.queries} queries, 10s timeout)`,
-    )
+    console.log(`  Models: ${bench.models.join(" vs ")}  (${bench.queries} queries, 10s timeout)`)
     console.log()
 
     // Per-query results table
     for (const r of bench.results) {
-      const winnerLabel = r.winner
-        ? `${GREEN}${r.winner}${RESET}`
-        : `${RED}TIMEOUT${RESET}`
+      const winnerLabel = r.winner ? `${GREEN}${r.winner}${RESET}` : `${RED}TIMEOUT${RESET}`
       const modelParts = r.perModel
         .map((m) => {
           const ms = `${(m.ms / 1000).toFixed(1)}s`
           const costStr = m.cost ? ` ${formatCost(m.cost)}` : ""
-          const tokStr = m.tokens
-            ? ` ${m.tokens.input}+${m.tokens.output}tok`
-            : ""
-          if (m.status === "ok")
-            return `${GREEN}${m.model}=${ms}${tokStr}${costStr}${RESET}`
-          if (m.status === "timeout")
-            return `${DIM}${m.model}=${ms}(timeout)${RESET}`
+          const tokStr = m.tokens ? ` ${m.tokens.input}+${m.tokens.output}tok` : ""
+          if (m.status === "ok") return `${GREEN}${m.model}=${ms}${tokStr}${costStr}${RESET}`
+          if (m.status === "timeout") return `${DIM}${m.model}=${ms}(timeout)${RESET}`
           return `${RED}${m.model}=${ms}(error)${RESET}`
         })
         .join("  ")
-      console.log(
-        `  "${r.query}" → ${winnerLabel}  search=${r.searchMs}ms  [${modelParts}]`,
-      )
+      console.log(`  "${r.query}" → ${winnerLabel}  search=${r.searchMs}ms  [${modelParts}]`)
     }
     console.log()
 
@@ -268,9 +232,7 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
       .join(", ")
 
     console.log(`  Wins: ${winEntries || "none"}`)
-    console.log(
-      `  Timeouts: ${s.timeoutCount}/${bench.queries} (${s.timeoutPct}%)`,
-    )
+    console.log(`  Timeouts: ${s.timeoutCount}/${bench.queries} (${s.timeoutPct}%)`)
     console.log(
       `  Latency: P50=${(s.p50Ms / 1000).toFixed(1)}s  P95=${(s.p95Ms / 1000).toFixed(1)}s  avg=${(s.avgLlmMs / 1000).toFixed(1)}s`,
     )
@@ -286,9 +248,7 @@ export async function cmdStatus(opts: { json?: boolean }): Promise<void> {
     console.log(`${BOLD}Recommendations${RESET}`)
     for (const rec of review.recommendations) {
       const marker =
-        rec.includes("good") ||
-        rec.includes("working") ||
-        rec.includes("winner")
+        rec.includes("good") || rec.includes("working") || rec.includes("winner")
           ? CHECK
           : rec.includes("stale") ||
               rec.includes("not found") ||

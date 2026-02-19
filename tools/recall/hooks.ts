@@ -40,24 +40,17 @@ export async function cmdHook(): Promise<void> {
     }
     const prompt = input.prompt
     if (!prompt) {
-      console.error(
-        `[recall hook] no prompt in stdin (${Date.now() - startTime}ms)`,
-      )
+      console.error(`[recall hook] no prompt in stdin (${Date.now() - startTime}ms)`)
       process.exit(0)
     }
     const result = await hookRecall(prompt)
     const elapsed = Date.now() - startTime
     if (result.skipped) {
-      console.error(
-        `[recall hook] skipped: ${result.reason} (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`,
-      )
+      console.error(`[recall hook] skipped: ${result.reason} (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`)
       process.exit(0)
     }
-    const synthLen =
-      result.hookOutput?.hookSpecificOutput.additionalContext.length ?? 0
-    console.error(
-      `[recall hook] OK: ${synthLen} chars synthesis (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`,
-    )
+    const synthLen = result.hookOutput?.hookSpecificOutput.additionalContext.length ?? 0
+    console.error(`[recall hook] OK: ${synthLen} chars synthesis (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`)
     console.log(JSON.stringify(result.hookOutput))
   } catch (e) {
     const elapsed = Date.now() - startTime
@@ -99,9 +92,7 @@ export async function cmdRemember(opts: { json?: boolean }): Promise<void> {
         `[recall remember] summarized ${summarized.length} day(s): ${summarized.map((r) => r.date).join(", ")} (${elapsed}ms) session=${sessionId}`,
       )
     } else {
-      console.error(
-        `[recall remember] no unprocessed days (${elapsed}ms) session=${sessionId}`,
-      )
+      console.error(`[recall remember] no unprocessed days (${elapsed}ms) session=${sessionId}`)
     }
 
     if (opts.json) {

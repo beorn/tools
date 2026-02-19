@@ -8,14 +8,7 @@ import { Database } from "bun:sqlite"
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs"
-import type {
-  SessionRecord,
-  MessageRecord,
-  WriteRecord,
-  SessionIndexEntry,
-  ContentType,
-  ContentRecord,
-} from "./types"
+import type { SessionRecord, MessageRecord, WriteRecord, SessionIndexEntry, ContentType, ContentRecord } from "./types"
 
 export const CLAUDE_DIR = path.join(os.homedir(), ".claude")
 export const DB_PATH = path.join(CLAUDE_DIR, "session-index.db")
@@ -223,41 +216,19 @@ export function upsertSession(
       updated_at = excluded.updated_at,
       message_count = excluded.message_count,
       title = COALESCE(excluded.title, sessions.title)
-  `).run(
-    id,
-    projectPath,
-    jsonlPath,
-    createdAt,
-    updatedAt,
-    messageCount,
-    title ?? null,
-  )
+  `).run(id, projectPath, jsonlPath, createdAt, updatedAt, messageCount, title ?? null)
 }
 
-export function updateSessionTitle(
-  db: Database,
-  id: string,
-  title: string | null,
-): void {
+export function updateSessionTitle(db: Database, id: string, title: string | null): void {
   db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(title, id)
 }
 
-export function getSession(
-  db: Database,
-  id: string,
-): SessionRecord | undefined {
-  return db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as
-    | SessionRecord
-    | undefined
+export function getSession(db: Database, id: string): SessionRecord | undefined {
+  return db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRecord | undefined
 }
 
-export function getSessionByPath(
-  db: Database,
-  jsonlPath: string,
-): SessionRecord | undefined {
-  return db
-    .prepare("SELECT * FROM sessions WHERE jsonl_path = ?")
-    .get(jsonlPath) as SessionRecord | undefined
+export function getSessionByPath(db: Database, jsonlPath: string): SessionRecord | undefined {
+  return db.prepare("SELECT * FROM sessions WHERE jsonl_path = ?").get(jsonlPath) as SessionRecord | undefined
 }
 
 // Message operations
@@ -281,9 +252,9 @@ export function insertMessage(
 }
 
 export function getMessageCount(db: Database, sessionId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) as count FROM messages WHERE session_id = ?")
-    .get(sessionId) as { count: number }
+  const row = db.prepare("SELECT COUNT(*) as count FROM messages WHERE session_id = ?").get(sessionId) as {
+    count: number
+  }
   return row.count
 }
 
@@ -302,16 +273,7 @@ export function insertWrite(
   db.prepare(`
     INSERT INTO writes (session_id, session_file, tool_use_id, timestamp, file_path, content_hash, content_size, content)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    sessionId,
-    sessionFile,
-    toolUseId,
-    timestamp,
-    filePath,
-    contentHash,
-    contentSize,
-    content,
-  )
+  `).run(sessionId, sessionFile, toolUseId, timestamp, filePath, contentHash, contentSize, content)
 }
 
 // FTS operations
@@ -352,9 +314,7 @@ export function ftsSearch(
   searchQuery += ` ORDER BY rank LIMIT ? OFFSET ?`
 
   const totalRow = db.prepare(countQuery).get(...params) as { total: number }
-  const results = db
-    .prepare(searchQuery)
-    .all(...params, limit, offset) as MessageRecord[]
+  const results = db.prepare(searchQuery).all(...params, limit, offset) as MessageRecord[]
 
   return { results, total: totalRow.total }
 }
@@ -453,9 +413,7 @@ export function ftsSearchWithSnippet(
   searchQuery += ` ORDER BY rank LIMIT ? OFFSET ?`
 
   const totalRow = db.prepare(countQuery).get(...params) as { total: number }
-  const results = db
-    .prepare(searchQuery)
-    .all(...params, limit, offset) as (MessageRecord & {
+  const results = db.prepare(searchQuery).all(...params, limit, offset) as (MessageRecord & {
     snippet: string
     project_path: string
     rank: number
@@ -577,23 +535,16 @@ export function findSimilarQueries(
 
 // Index metadata
 export function setIndexMeta(db: Database, key: string, value: string): void {
-  db.prepare(
-    "INSERT OR REPLACE INTO index_meta (key, value) VALUES (?, ?)",
-  ).run(key, value)
+  db.prepare("INSERT OR REPLACE INTO index_meta (key, value) VALUES (?, ?)").run(key, value)
 }
 
 export function getIndexMeta(db: Database, key: string): string | undefined {
-  const row = db
-    .prepare("SELECT value FROM index_meta WHERE key = ?")
-    .get(key) as { value: string } | undefined
+  const row = db.prepare("SELECT value FROM index_meta WHERE key = ?").get(key) as { value: string } | undefined
   return row?.value
 }
 
 // Clear tables for rebuild
-export function clearTables(
-  db: Database,
-  tables: ("writes" | "sessions" | "messages")[],
-): void {
+export function clearTables(db: Database, tables: ("writes" | "sessions" | "messages")[]): void {
   for (const table of tables) {
     db.prepare(`DELETE FROM ${table}`).run()
   }
@@ -666,10 +617,7 @@ interface SessionsIndexFile {
 }
 
 // Cache for sessions-index.json file mtimes and content
-const sessionsIndexCache = new Map<
-  string,
-  { mtime: number; titles: Map<string, string> }
->()
+const sessionsIndexCache = new Map<string, { mtime: number; titles: Map<string, string> }>()
 
 /**
  * Find all sessions-index.json files in the projects directory
@@ -681,11 +629,7 @@ export function findSessionsIndexFiles(): string[] {
   try {
     for (const entry of fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        const indexPath = path.join(
-          PROJECTS_DIR,
-          entry.name,
-          "sessions-index.json",
-        )
+        const indexPath = path.join(PROJECTS_DIR, entry.name, "sessions-index.json")
         if (fs.existsSync(indexPath)) {
           files.push(indexPath)
         }
@@ -778,10 +722,7 @@ export function refreshSessionTitles(db: Database): number {
 /**
  * Get session title (from cache, falls back to DB)
  */
-export function getSessionTitle(
-  db: Database,
-  sessionId: string,
-): string | null {
+export function getSessionTitle(db: Database, sessionId: string): string | null {
   // First check the live sessions-index.json files (cached)
   const titles = getAllSessionTitles()
   const liveTitle = titles.get(sessionId)
@@ -852,10 +793,7 @@ export function clearContent(db: Database): void {
 /**
  * Clear content by type (for selective rebuild)
  */
-export function clearContentByType(
-  db: Database,
-  contentType: ContentType,
-): void {
+export function clearContentByType(db: Database, contentType: ContentType): void {
   db.prepare("DELETE FROM content WHERE content_type = ?").run(contentType)
 }
 
@@ -879,14 +817,7 @@ export function searchAll(
   results: (ContentRecord & { snippet: string; rank: number })[]
   total: number
 } {
-  const {
-    limit = 50,
-    offset = 0,
-    types,
-    projectFilter,
-    sinceTime,
-    snippetTokens = 64,
-  } = options
+  const { limit = 50, offset = 0, types, projectFilter, sinceTime, snippetTokens = 64 } = options
   const ftsQuery = toFts5Query(query)
 
   const params: (string | number)[] = [ftsQuery]
@@ -928,9 +859,7 @@ export function searchAll(
   `
 
   const totalRow = db.prepare(countQuery).get(...params) as { total: number }
-  const results = db
-    .prepare(searchQuery)
-    .all(...params, limit, offset) as (ContentRecord & {
+  const results = db.prepare(searchQuery).all(...params, limit, offset) as (ContentRecord & {
     snippet: string
     rank: number
   })[]
@@ -967,11 +896,7 @@ export function getSessionContext(
     WHERE session_id = ? AND id >= ? AND id <= ?
     ORDER BY id
   `)
-    .all(
-      sessionId,
-      closest.id - radius,
-      closest.id + radius,
-    ) as MessageRecord[]
+    .all(sessionId, closest.id - radius, closest.id + radius) as MessageRecord[]
 }
 
 /**

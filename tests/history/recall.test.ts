@@ -142,9 +142,7 @@ describe("toFts5Query", () => {
   })
 
   test("mixed query: words, negation, and quoted phrases", () => {
-    expect(toFts5Query('hello -bad "exact phrase"')).toBe(
-      '"hello" NOT "bad" "exact phrase"',
-    )
+    expect(toFts5Query('hello -bad "exact phrase"')).toBe('"hello" NOT "bad" "exact phrase"')
   })
 
   test("dots are quoted", () => {
@@ -176,9 +174,7 @@ describe("toFts5Query", () => {
   })
 
   test("multiple quoted phrases", () => {
-    expect(toFts5Query('"inline edit" "bug fix"')).toBe(
-      '"inline edit" "bug fix"',
-    )
+    expect(toFts5Query('"inline edit" "bug fix"')).toBe('"inline edit" "bug fix"')
   })
 
   test("word followed by quoted phrase", () => {
@@ -198,9 +194,7 @@ describe("toFts5Query", () => {
   })
 
   test("natural language question works", () => {
-    expect(toFts5Query("how does inline edit work?")).toBe(
-      '"how" "does" "inline" "edit" "work"',
-    )
+    expect(toFts5Query("how does inline edit work?")).toBe('"how" "does" "inline" "edit" "work"')
   })
 
   test("single quotes are safely quoted", () => {
@@ -208,9 +202,7 @@ describe("toFts5Query", () => {
   })
 
   test("angle brackets are safely quoted", () => {
-    expect(toFts5Query("fix <error> handling")).toBe(
-      '"fix" "<error>" "handling"',
-    )
+    expect(toFts5Query("fix <error> handling")).toBe('"fix" "<error>" "handling"')
   })
 
   test("hyphens in tokens are safely quoted", () => {
@@ -305,9 +297,7 @@ describe("recall integration", () => {
   const dbExists = fs.existsSync(DB_PATH)
 
   // Dynamic import to avoid module-level side effects when DB doesn't exist
-  async function getRecall(): Promise<
-    (query: string, options?: Record<string, unknown>) => Promise<RecallResult>
-  > {
+  async function getRecall(): Promise<(query: string, options?: Record<string, unknown>) => Promise<RecallResult>> {
     const mod = await import("../../tools/lib/history/recall")
     return mod.recall
   }
@@ -337,22 +327,17 @@ describe("recall integration", () => {
     expect(result.results.length).toBeLessThanOrEqual(2)
   })
 
-  test.skipIf(!dbExists)(
-    "returns fewer results for narrow time filter",
-    async () => {
-      const recall = await getRecall()
-      // Compare 30d (default) vs 1h — narrower window should have <= results
-      const wideResult = await recall("test", { raw: true, limit: 20 })
-      const narrowResult = await recall("test", {
-        raw: true,
-        limit: 20,
-        since: "1h",
-      })
-      expect(narrowResult.results.length).toBeLessThanOrEqual(
-        wideResult.results.length,
-      )
-    },
-  )
+  test.skipIf(!dbExists)("returns fewer results for narrow time filter", async () => {
+    const recall = await getRecall()
+    // Compare 30d (default) vs 1h — narrower window should have <= results
+    const wideResult = await recall("test", { raw: true, limit: 20 })
+    const narrowResult = await recall("test", {
+      raw: true,
+      limit: 20,
+      since: "1h",
+    })
+    expect(narrowResult.results.length).toBeLessThanOrEqual(wideResult.results.length)
+  })
 
   test.skipIf(!dbExists)("returns empty when since is invalid", async () => {
     const recall = await getRecall()
@@ -377,9 +362,7 @@ describe("recall integration", () => {
       expect(typeof item.rank).toBe("number")
       expect(typeof item.snippet).toBe("string")
       expect(typeof item.sessionId).toBe("string")
-      expect(["message", "plan", "summary", "todo", "first_prompt"]).toContain(
-        item.type,
-      )
+      expect(["message", "plan", "summary", "todo", "first_prompt"]).toContain(item.type)
     }
   })
 
@@ -399,9 +382,7 @@ describe("recall integration", () => {
       for (let i = 1; i < result.results.length; i++) {
         const prev = result.results[i - 1]!
         const curr = result.results[i]!
-        expect(boostedRank(curr.rank, curr.timestamp)).toBeGreaterThanOrEqual(
-          boostedRank(prev.rank, prev.timestamp),
-        )
+        expect(boostedRank(curr.rank, curr.timestamp)).toBeGreaterThanOrEqual(boostedRank(prev.rank, prev.timestamp))
       }
     }
   })

@@ -40,9 +40,7 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
   }
 
   // compilerOptions paths
-  const compilerOptions = config.compilerOptions as
-    | Record<string, unknown>
-    | undefined
+  const compilerOptions = config.compilerOptions as Record<string, unknown> | undefined
   if (compilerOptions) {
     // baseUrl
     if (typeof compilerOptions.baseUrl === "string") {
@@ -72,9 +70,7 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
 
     // paths mapping
     if (compilerOptions.paths && typeof compilerOptions.paths === "object") {
-      for (const [alias, targets] of Object.entries(
-        compilerOptions.paths as Record<string, unknown>,
-      )) {
+      for (const [alias, targets] of Object.entries(compilerOptions.paths as Record<string, unknown>)) {
         if (Array.isArray(targets)) {
           for (const target of targets) {
             if (typeof target === "string") {
@@ -132,12 +128,7 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
   // references (project references)
   if (Array.isArray(config.references)) {
     for (const ref of config.references) {
-      if (
-        typeof ref === "object" &&
-        ref &&
-        "path" in ref &&
-        typeof ref.path === "string"
-      ) {
+      if (typeof ref === "object" && ref && "path" in ref && typeof ref.path === "string") {
         const pathRef = findStringInJson(content, ref.path)
         if (pathRef) {
           refs.push({ field: "references[].path", path: ref.path, ...pathRef })
@@ -213,10 +204,7 @@ function stripJsonComments(content: string): string {
 /**
  * Find a string value in JSON content and return its position
  */
-function findStringInJson(
-  content: string,
-  value: string,
-): { start: number; end: number } | null {
+function findStringInJson(content: string, value: string): { start: number; end: number } | null {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const pattern = new RegExp(`"${escaped}"`, "g")
 
@@ -234,10 +222,7 @@ function findStringInJson(
 /**
  * Check if a tsconfig path pattern matches a file
  */
-export function tsconfigPathMatchesFile(
-  tsconfigPath: string,
-  filePath: string,
-): boolean {
+export function tsconfigPathMatchesFile(tsconfigPath: string, filePath: string): boolean {
   // Handle glob patterns
   if (tsconfigPath.includes("*")) {
     // Convert glob to regex
@@ -255,20 +240,13 @@ export function tsconfigPathMatchesFile(
   const normalized1 = tsconfigPath.replace(/^\.\//, "").replace(/\\/g, "/")
   const normalized2 = filePath.replace(/^\.\//, "").replace(/\\/g, "/")
 
-  return (
-    normalized1 === normalized2 ||
-    normalized1 === normalized2.replace(/\.(ts|tsx|js|jsx)$/, "")
-  )
+  return normalized1 === normalized2 || normalized1 === normalized2.replace(/\.(ts|tsx|js|jsx)$/, "")
 }
 
 /**
  * Generate replacement path for tsconfig
  */
-export function generateTsConfigReplacementPath(
-  originalPath: string,
-  oldFile: string,
-  newFile: string,
-): string {
+export function generateTsConfigReplacementPath(originalPath: string, oldFile: string, newFile: string): string {
   // For glob patterns, we need to update the base directory if it changed
   if (originalPath.includes("*")) {
     const oldDir = oldFile.split("/").slice(0, -1).join("/")

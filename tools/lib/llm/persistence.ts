@@ -5,15 +5,7 @@
  * if the process is interrupted. Supports recovery via OpenAI response ID.
  */
 
-import {
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  readdirSync,
-  unlinkSync,
-  appendFileSync,
-} from "fs"
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, appendFileSync } from "fs"
 import { join } from "path"
 
 const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "beorn-tools")
@@ -61,10 +53,7 @@ export function getPartialPath(responseId: string): string {
 /**
  * Write initial metadata to partial file
  */
-export function writePartialHeader(
-  path: string,
-  metadata: PartialMetadata,
-): void {
+export function writePartialHeader(path: string, metadata: PartialMetadata): void {
   const header = `---
 response_id: ${metadata.responseId}
 model: ${metadata.model}
@@ -87,10 +76,7 @@ export function appendPartial(path: string, content: string): void {
 /**
  * Update metadata in partial file (e.g., sequence number, completion)
  */
-export function updatePartialMetadata(
-  path: string,
-  updates: Partial<PartialMetadata>,
-): void {
+export function updatePartialMetadata(path: string, updates: Partial<PartialMetadata>): void {
   if (!existsSync(path)) return
 
   const content = readFileSync(path, "utf-8")
@@ -183,9 +169,7 @@ export function parsePartialFile(path: string): PartialFile | null {
       modelId: metadata["model_id"] || "",
       topic: metadata["topic"] || "",
       startedAt: metadata["started_at"] || "",
-      lastSequence: metadata["last_sequence"]
-        ? parseInt(metadata["last_sequence"], 10)
-        : undefined,
+      lastSequence: metadata["last_sequence"] ? parseInt(metadata["last_sequence"], 10) : undefined,
       completedAt: metadata["completed_at"],
       usage: metadata["usage_total"]
         ? {
@@ -202,9 +186,7 @@ export function parsePartialFile(path: string): PartialFile | null {
 /**
  * List all partial files (incomplete responses)
  */
-export function listPartials(
-  options: { includeCompleted?: boolean } = {},
-): PartialFile[] {
+export function listPartials(options: { includeCompleted?: boolean } = {}): PartialFile[] {
   ensureDir()
 
   const files = readdirSync(PARTIALS_DIR).filter((f) => f.endsWith(".md"))
@@ -235,9 +217,7 @@ export function listPartials(
 /**
  * Find partial by response ID
  */
-export function findPartialByResponseId(
-  responseId: string,
-): PartialFile | null {
+export function findPartialByResponseId(responseId: string): PartialFile | null {
   const partials = listPartials({ includeCompleted: true })
   return partials.find((p) => p.metadata.responseId === responseId) || null
 }
@@ -245,9 +225,7 @@ export function findPartialByResponseId(
 /**
  * Clean up old partial files (older than maxAge)
  */
-export function cleanupPartials(
-  maxAgeMs: number = 7 * 24 * 60 * 60 * 1000,
-): number {
+export function cleanupPartials(maxAgeMs: number = 7 * 24 * 60 * 60 * 1000): number {
   ensureDir()
 
   const files = readdirSync(PARTIALS_DIR).filter((f) => f.endsWith(".md"))

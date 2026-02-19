@@ -1,10 +1,5 @@
 import { Project, Node, SourceFile, Identifier } from "ts-morph"
-import type {
-  SymbolInfo,
-  SymbolMatch,
-  Reference,
-  RefKind,
-} from "../../core/types"
+import type { SymbolInfo, SymbolMatch, Reference, RefKind } from "../../core/types"
 import { computeChecksum, computeRefId } from "../../core/apply"
 
 // Default context lines before/after match
@@ -13,29 +8,18 @@ const DEFAULT_CONTEXT_LINES = 2
 /**
  * Get symbol info at a specific location
  */
-export function getSymbolAt(
-  project: Project,
-  filePath: string,
-  line: number,
-  column: number,
-): SymbolInfo | null {
+export function getSymbolAt(project: Project, filePath: string, line: number, column: number): SymbolInfo | null {
   const sourceFile = project.getSourceFile(filePath)
   if (!sourceFile) return null
 
-  const pos = sourceFile.compilerNode.getPositionOfLineAndCharacter(
-    line - 1,
-    column - 1,
-  )
+  const pos = sourceFile.compilerNode.getPositionOfLineAndCharacter(line - 1, column - 1)
   const node = findIdentifierAt(sourceFile, pos)
   if (!node) return null
 
   const name = node.getText()
   const kind = getSymbolKind(node)
   const startLine = node.getStartLineNumber()
-  const startCol =
-    node.getStart() -
-    sourceFile.compilerNode.getPositionOfLineAndCharacter(startLine - 1, 0) +
-    1
+  const startCol = node.getStart() - sourceFile.compilerNode.getPositionOfLineAndCharacter(startLine - 1, 0) + 1
 
   return {
     symbolKey: `${filePath}:${startLine}:${startCol}:${name}`,
@@ -50,11 +34,7 @@ export function getSymbolAt(
 /**
  * Find all references to a symbol
  */
-export function getReferences(
-  project: Project,
-  symbolKey: string,
-  contextLines = DEFAULT_CONTEXT_LINES,
-): Reference[] {
+export function getReferences(project: Project, symbolKey: string, contextLines = DEFAULT_CONTEXT_LINES): Reference[] {
   const [filePath, lineStr, colStr, name] = symbolKey.split(":")
   const line = parseInt(lineStr!, 10)
   const column = parseInt(colStr!, 10)
@@ -62,10 +42,7 @@ export function getReferences(
   const sourceFile = project.getSourceFile(filePath!)
   if (!sourceFile) return []
 
-  const pos = sourceFile.compilerNode.getPositionOfLineAndCharacter(
-    line - 1,
-    column - 1,
-  )
+  const pos = sourceFile.compilerNode.getPositionOfLineAndCharacter(line - 1, column - 1)
   const node = findIdentifierAt(sourceFile, pos)
   if (!node) return []
 
@@ -77,15 +54,9 @@ export function getReferences(
     const refFilePath = refFile.getFilePath().replace(process.cwd() + "/", "")
     const startLine = ref.getStartLineNumber()
     const endLine = ref.getEndLineNumber()
-    const lineStart = refFile.compilerNode.getPositionOfLineAndCharacter(
-      startLine - 1,
-      0,
-    )
+    const lineStart = refFile.compilerNode.getPositionOfLineAndCharacter(startLine - 1, 0)
     const startCol = ref.getStart() - lineStart + 1
-    const endCol =
-      ref.getEnd() -
-      refFile.compilerNode.getPositionOfLineAndCharacter(endLine - 1, 0) +
-      1
+    const endCol = ref.getEnd() - refFile.compilerNode.getPositionOfLineAndCharacter(endLine - 1, 0) + 1
 
     // Get all lines for context
     const allLines = refFile.getFullText().split("\n")
@@ -102,13 +73,7 @@ export function getReferences(
     const checksum = computeChecksum(refFile.getFullText())
 
     // Stable refId
-    const refId = computeRefId(
-      refFilePath,
-      startLine,
-      startCol,
-      endLine,
-      endCol,
-    )
+    const refId = computeRefId(refFilePath, startLine, startCol, endLine, endCol)
 
     references.push({
       refId,
@@ -186,10 +151,7 @@ export function findSymbols(project: Project, pattern: RegExp): SymbolMatch[] {
           if (pattern.test(name)) {
             addMatch(nameNode, "variable")
           }
-        } else if (
-          Node.isObjectBindingPattern(nameNode) ||
-          Node.isArrayBindingPattern(nameNode)
-        ) {
+        } else if (Node.isObjectBindingPattern(nameNode) || Node.isArrayBindingPattern(nameNode)) {
           addBindingPatternMatches(nameNode)
         }
       }
@@ -201,10 +163,7 @@ export function findSymbols(project: Project, pattern: RegExp): SymbolMatch[] {
           if (pattern.test(name)) {
             addMatch(nameNode, "parameter")
           }
-        } else if (
-          Node.isObjectBindingPattern(nameNode) ||
-          Node.isArrayBindingPattern(nameNode)
-        ) {
+        } else if (Node.isObjectBindingPattern(nameNode) || Node.isArrayBindingPattern(nameNode)) {
           addBindingPatternMatches(nameNode)
         }
       }
@@ -256,10 +215,7 @@ export function findSymbols(project: Project, pattern: RegExp): SymbolMatch[] {
     const startLine = node.getStartLineNumber()
     const sf = node.getSourceFile()
     const fp = sf.getFilePath().replace(process.cwd() + "/", "")
-    const lineStart = sf.compilerNode.getPositionOfLineAndCharacter(
-      startLine - 1,
-      0,
-    )
+    const lineStart = sf.compilerNode.getPositionOfLineAndCharacter(startLine - 1, 0)
     const startCol = node.getStart() - lineStart + 1
 
     const key = `${fp}:${startLine}:${startCol}:${name}`
@@ -283,11 +239,7 @@ export function findSymbols(project: Project, pattern: RegExp): SymbolMatch[] {
 /**
  * Case-preserving replacement for terminology migrations
  */
-export function computeNewName(
-  oldName: string,
-  pattern: RegExp,
-  replacement: string,
-): string {
+export function computeNewName(oldName: string, pattern: RegExp, replacement: string): string {
   return oldName.replace(pattern, (match) => {
     // SCREAMING_CASE: entire match is uppercase
     if (match === match.toUpperCase() && match.length > 1) {
@@ -304,10 +256,7 @@ export function computeNewName(
 
 // Helper functions
 
-function findIdentifierAt(
-  sourceFile: SourceFile,
-  pos: number,
-): Identifier | null {
+function findIdentifierAt(sourceFile: SourceFile, pos: number): Identifier | null {
   let result: Identifier | null = null
 
   sourceFile.forEachDescendant((node) => {
@@ -323,15 +272,7 @@ function findIdentifierAt(
 
 function getSymbolKind(
   node: Node,
-):
-  | "variable"
-  | "function"
-  | "type"
-  | "interface"
-  | "property"
-  | "class"
-  | "method"
-  | "parameter" {
+): "variable" | "function" | "type" | "interface" | "property" | "class" | "method" | "parameter" {
   const parent = node.getParent()
   if (!parent) return "variable"
 
@@ -351,11 +292,7 @@ function getSymbolKind(
 /**
  * Build context lines with ► marker on match line
  */
-function buildContext(
-  allLines: string[],
-  matchLine: number,
-  contextLines: number,
-): string[] {
+function buildContext(allLines: string[], matchLine: number, contextLines: number): string[] {
   const startLine = Math.max(0, matchLine - 1 - contextLines)
   const endLine = Math.min(allLines.length, matchLine + contextLines)
 
@@ -380,10 +317,7 @@ function getRefKind(node: Node): RefKind {
 
   // Call expressions: foo(), obj.foo()
   if (Node.isCallExpression(parent)) return "call"
-  if (
-    Node.isPropertyAccessExpression(parent) &&
-    Node.isCallExpression(parent.getParent())
-  ) {
+  if (Node.isPropertyAccessExpression(parent) && Node.isCallExpression(parent.getParent())) {
     return "call"
   }
 
@@ -418,10 +352,7 @@ function getEnclosingScope(node: Node): string | null {
     // Arrow function / function expression in variable: const foo = () => {}
     if (Node.isVariableDeclaration(current)) {
       const init = current.getInitializer()
-      if (
-        init &&
-        (Node.isArrowFunction(init) || Node.isFunctionExpression(init))
-      ) {
+      if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
         return current.getName()
       }
     }

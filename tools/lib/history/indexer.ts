@@ -141,11 +141,7 @@ export function extractToolInfo(record: JsonlRecord): {
 
   if (record.type === "assistant" && record.message?.content) {
     for (const item of record.message.content) {
-      if (
-        item &&
-        typeof item === "object" &&
-        (item as ToolUse).type === "tool_use"
-      ) {
+      if (item && typeof item === "object" && (item as ToolUse).type === "tool_use") {
         const toolUse = item as ToolUse
         toolName = toolUse.name
         if (toolUse.input?.file_path) {
@@ -208,9 +204,7 @@ export async function indexSessionFile(
       // Use actual record timestamp for session date tracking;
       // fall back to Date.now() only for message insertion (not session bounds)
       const hasRecordTimestamp = !!record.timestamp
-      const timestamp = hasRecordTimestamp
-        ? new Date(record.timestamp).getTime()
-        : Date.now()
+      const timestamp = hasRecordTimestamp ? new Date(record.timestamp).getTime() : Date.now()
       if (hasRecordTimestamp) {
         if (firstTimestamp === null) firstTimestamp = timestamp
         lastTimestamp = timestamp
@@ -227,25 +221,12 @@ export async function indexSessionFile(
       const { toolName, filePaths } = extractToolInfo(record)
 
       if (textContent || toolName) {
-        insertMessage(
-          db,
-          record.uuid || null,
-          sessionId,
-          record.type,
-          textContent,
-          toolName,
-          filePaths,
-          timestamp,
-        )
+        insertMessage(db, record.uuid || null, sessionId, record.type, textContent, toolName, filePaths, timestamp)
         messageCount++
       }
 
       // Also index writes for backwards compatibility
-      if (
-        !options.messagesOnly &&
-        record.type === "assistant" &&
-        record.message?.content
-      ) {
+      if (!options.messagesOnly && record.type === "assistant" && record.message?.content) {
         for (const item of record.message.content) {
           if (
             item &&
@@ -287,15 +268,7 @@ export async function indexSessionFile(
   }
 
   // Update session metadata
-  upsertSession(
-    db,
-    sessionId,
-    projectPath,
-    relativePath,
-    firstTimestamp || mtime,
-    lastTimestamp || mtime,
-    messageCount,
-  )
+  upsertSession(db, sessionId, projectPath, relativePath, firstTimestamp || mtime, lastTimestamp || mtime, messageCount)
 
   return { messages: messageCount, writes: writeCount }
 }
@@ -340,19 +313,13 @@ export function pruneOldSessions(
   // Batch delete for efficiency
   const placeholders = sessionIds.map(() => "?").join(",")
 
-  const messagesResult = db
-    .prepare(`DELETE FROM messages WHERE session_id IN (${placeholders})`)
-    .run(...sessionIds)
+  const messagesResult = db.prepare(`DELETE FROM messages WHERE session_id IN (${placeholders})`).run(...sessionIds)
   const messagesDeleted = messagesResult.changes
 
-  const writesResult = db
-    .prepare(`DELETE FROM writes WHERE session_id IN (${placeholders})`)
-    .run(...sessionIds)
+  const writesResult = db.prepare(`DELETE FROM writes WHERE session_id IN (${placeholders})`).run(...sessionIds)
   const writesDeleted = writesResult.changes
 
-  db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(
-    ...sessionIds,
-  )
+  db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...sessionIds)
 
   // Rebuild FTS index to remove deleted data
   db.prepare("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')").run()
@@ -364,21 +331,13 @@ export function pruneOldSessions(
   }
 }
 
-export async function rebuildIndex(
-  db: Database,
-  options: IndexOptions = {},
-): Promise<IndexResult> {
+export async function rebuildIndex(db: Database, options: IndexOptions = {}): Promise<IndexResult> {
   const startTime = Date.now()
   const cutoffTime = Date.now() - THIRTY_DAYS_MS
 
   // Clear existing data unless incremental
   if (!options.incremental) {
-    clearTables(
-      db,
-      options.messagesOnly
-        ? ["sessions", "messages"]
-        : ["writes", "sessions", "messages"],
-    )
+    clearTables(db, options.messagesOnly ? ["sessions", "messages"] : ["writes", "sessions", "messages"])
     clearContent(db)
   } else {
     // In incremental mode, prune sessions older than 30 days
@@ -412,11 +371,7 @@ export async function rebuildIndex(
       currentFile: relativePath,
     })
 
-    const { messages, writes } = await indexSessionFile(
-      db,
-      sessionFile,
-      options,
-    )
+    const { messages, writes } = await indexSessionFile(db, sessionFile, options)
     totalMessages += messages
     totalWrites += writes
   }
@@ -491,10 +446,7 @@ export async function rebuildIndex(
 
       // Combine all todos into searchable content
       const todoContent = todos
-        .map(
-          (t) =>
-            `[${t.status}] ${t.content}${t.activeForm ? ` (${t.activeForm})` : ""}`,
-        )
+        .map((t) => `[${t.status}] ${t.content}${t.activeForm ? ` (${t.activeForm})` : ""}`)
         .join("\n")
 
       if (todoContent.trim()) {
@@ -539,16 +491,8 @@ export async function rebuildIndex(
   setIndexMeta(db, "total_summaries", String(totalSummaries))
   setIndexMeta(db, "total_first_prompts", String(totalFirstPrompts))
   setIndexMeta(db, "total_beads", String(projectSourceResult.beads))
-  setIndexMeta(
-    db,
-    "total_session_memory",
-    String(projectSourceResult.sessionMemory),
-  )
-  setIndexMeta(
-    db,
-    "total_project_memory",
-    String(projectSourceResult.projectMemory),
-  )
+  setIndexMeta(db, "total_session_memory", String(projectSourceResult.sessionMemory))
+  setIndexMeta(db, "total_project_memory", String(projectSourceResult.projectMemory))
   setIndexMeta(db, "total_docs", String(projectSourceResult.docs))
   setIndexMeta(db, "total_claude_md", String(projectSourceResult.claudeMd))
   setIndexMeta(db, "total_research", String(projectSourceResult.research))
@@ -574,11 +518,7 @@ export async function rebuildIndex(
  * Check if a source file has changed since last indexing.
  * Uses index_meta with a key like "mtime:<type>:<sourceId>".
  */
-function hasChanged(
-  db: Database,
-  metaKey: string,
-  currentMtime: number,
-): boolean {
+function hasChanged(db: Database, metaKey: string, currentMtime: number): boolean {
   const stored = getIndexMeta(db, metaKey)
   return !stored || parseInt(stored, 10) < currentMtime
 }
@@ -597,11 +537,7 @@ function encodeProjectPath(projectRoot: string): string {
 /**
  * Index beads from .beads/issues.jsonl
  */
-function indexBeads(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexBeads(db: Database, projectRoot: string, projectPath: string): number {
   const issuesPath = path.join(projectRoot, ".beads", "issues.jsonl")
   if (!fs.existsSync(issuesPath)) return 0
 
@@ -623,15 +559,7 @@ function indexBeads(
           ? new Date(bead.created_at).getTime()
           : Date.now()
 
-      upsertContent(
-        db,
-        "bead",
-        bead.id,
-        projectPath,
-        title,
-        beadContent,
-        timestamp,
-      )
+      upsertContent(db, "bead", bead.id, projectPath, title, beadContent, timestamp)
       count++
     } catch {
       // Skip malformed lines
@@ -646,20 +574,9 @@ function indexBeads(
  * Index session memory files from ~/.claude/projects/<encoded>/memory/sessions/*.md
  * (Falls back to <projectRoot>/memory/sessions/ for legacy files)
  */
-function indexSessionMemory(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexSessionMemory(db: Database, projectRoot: string, projectPath: string): number {
   const encodedPath = encodeProjectPath(projectRoot)
-  const primaryDir = path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-    "sessions",
-  )
+  const primaryDir = path.join(os.homedir(), ".claude", "projects", encodedPath, "memory", "sessions")
   const legacyDir = path.join(projectRoot, "memory", "sessions")
   const memoryDir = fs.existsSync(primaryDir) ? primaryDir : legacyDir
   if (!fs.existsSync(memoryDir)) return 0
@@ -680,15 +597,7 @@ function indexSessionMemory(
       if (!content.trim()) continue
 
       const title = `Session memory: ${entry.name.replace(/\.md$/, "")}`
-      upsertContent(
-        db,
-        "session_memory",
-        sourceId,
-        projectPath,
-        title,
-        content,
-        stats.mtime.getTime(),
-      )
+      upsertContent(db, "session_memory", sourceId, projectPath, title, content, stats.mtime.getTime())
       recordMtime(db, metaKey, stats.mtime.getTime())
       count++
     } catch {
@@ -701,19 +610,9 @@ function indexSessionMemory(
 /**
  * Index project memory files from ~/.claude/projects/<encoded>/memory/*.md
  */
-function indexProjectMemory(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexProjectMemory(db: Database, projectRoot: string, projectPath: string): number {
   const encodedPath = encodeProjectPath(projectRoot)
-  const memoryDir = path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-  )
+  const memoryDir = path.join(os.homedir(), ".claude", "projects", encodedPath, "memory")
   if (!fs.existsSync(memoryDir)) return 0
 
   let count = 0
@@ -731,19 +630,8 @@ function indexProjectMemory(
       const content = fs.readFileSync(filePath, "utf8")
       if (!content.trim()) continue
 
-      const title = extractMarkdownTitle(
-        content,
-        `Project memory: ${entry.name.replace(/\.md$/, "")}`,
-      )
-      upsertContent(
-        db,
-        "project_memory",
-        sourceId,
-        projectPath,
-        title,
-        content,
-        stats.mtime.getTime(),
-      )
+      const title = extractMarkdownTitle(content, `Project memory: ${entry.name.replace(/\.md$/, "")}`)
+      upsertContent(db, "project_memory", sourceId, projectPath, title, content, stats.mtime.getTime())
       recordMtime(db, metaKey, stats.mtime.getTime())
       count++
     } catch {
@@ -756,11 +644,7 @@ function indexProjectMemory(
 /**
  * Index documentation files from docs/ and docs/lessons/
  */
-function indexDocs(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexDocs(db: Database, projectRoot: string, projectPath: string): number {
   const docsDir = path.join(projectRoot, "docs")
   if (!fs.existsSync(docsDir)) return 0
 
@@ -787,15 +671,7 @@ function indexDocs(
         if (!content.trim()) continue
 
         const title = extractMarkdownTitle(content, relPath)
-        upsertContent(
-          db,
-          "doc",
-          sourceId,
-          projectPath,
-          title,
-          content,
-          stats.mtime.getTime(),
-        )
+        upsertContent(db, "doc", sourceId, projectPath, title, content, stats.mtime.getTime())
         recordMtime(db, metaKey, stats.mtime.getTime())
         count++
       } catch {
@@ -811,11 +687,7 @@ function indexDocs(
 /**
  * Index CLAUDE.md files (root + vendor/*)
  */
-function indexClaudeMd(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexClaudeMd(db: Database, projectRoot: string, projectPath: string): number {
   let count = 0
 
   const candidates: string[] = [path.join(projectRoot, "CLAUDE.md")]
@@ -845,15 +717,7 @@ function indexClaudeMd(
       if (!content.trim()) continue
 
       const title = extractMarkdownTitle(content, relPath)
-      upsertContent(
-        db,
-        "claude_md",
-        sourceId,
-        projectPath,
-        title,
-        content,
-        stats.mtime.getTime(),
-      )
+      upsertContent(db, "claude_md", sourceId, projectPath, title, content, stats.mtime.getTime())
       recordMtime(db, metaKey, stats.mtime.getTime())
       count++
     } catch {
@@ -866,20 +730,9 @@ function indexClaudeMd(
 /**
  * Index LLM research outputs from ~/.claude/projects/<encoded>/memory/research/*.md
  */
-function indexResearch(
-  db: Database,
-  projectRoot: string,
-  projectPath: string,
-): number {
+function indexResearch(db: Database, projectRoot: string, projectPath: string): number {
   const encodedPath = encodeProjectPath(projectRoot)
-  const researchDir = path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-    "research",
-  )
+  const researchDir = path.join(os.homedir(), ".claude", "projects", encodedPath, "memory", "research")
   if (!fs.existsSync(researchDir)) return 0
 
   let count = 0
@@ -897,19 +750,8 @@ function indexResearch(
       const content = fs.readFileSync(filePath, "utf8")
       if (!content.trim()) continue
 
-      const title = extractMarkdownTitle(
-        content,
-        `LLM research: ${entry.name.replace(/\.md$/, "")}`,
-      )
-      upsertContent(
-        db,
-        "llm_research",
-        sourceId,
-        projectPath,
-        title,
-        content,
-        stats.mtime.getTime(),
-      )
+      const title = extractMarkdownTitle(content, `LLM research: ${entry.name.replace(/\.md$/, "")}`)
+      upsertContent(db, "llm_research", sourceId, projectPath, title, content, stats.mtime.getTime())
       recordMtime(db, metaKey, stats.mtime.getTime())
       count++
     } catch {

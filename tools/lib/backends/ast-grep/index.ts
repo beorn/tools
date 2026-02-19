@@ -14,18 +14,7 @@ export const AstGrepBackend: RefactorBackend = {
   name: "ast-grep",
   // Lower priority than ts-morph for JS/TS (ts-morph handles symbols better)
   // Higher priority for other languages where it's the only option
-  extensions: [
-    ".go",
-    ".rs",
-    ".py",
-    ".rb",
-    ".c",
-    ".cpp",
-    ".java",
-    ".json",
-    ".yaml",
-    ".yml",
-  ],
+  extensions: [".go", ".rs", ".py", ".rb", ".c", ".cpp", ".java", ".json", ".yaml", ".yml"],
   priority: 50,
 
   findPatterns(pattern, glob) {

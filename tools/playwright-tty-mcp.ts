@@ -23,8 +23,7 @@ async function ensureBrowserInstalled(): Promise<void> {
   const cacheExists = existsSync(BROWSER_CACHE)
 
   if (cacheExists) {
-    const { stdout } =
-      await $`ls -d ${BROWSER_CACHE}/chromium-* 2>/dev/null || true`.quiet()
+    const { stdout } = await $`ls -d ${BROWSER_CACHE}/chromium-* 2>/dev/null || true`.quiet()
     if (stdout.toString().trim()) {
       return
     }
@@ -44,10 +43,7 @@ process.on("uncaughtException", (err) => {
   console.error("[tty-mcp] uncaughtException:", err.message)
 })
 process.on("unhandledRejection", (err) => {
-  console.error(
-    "[tty-mcp] unhandledRejection:",
-    err instanceof Error ? err.message : err,
-  )
+  console.error("[tty-mcp] unhandledRejection:", err instanceof Error ? err.message : err)
 })
 
 /** Wrap a tool handler so errors become MCP error responses, not process crashes */
@@ -79,29 +75,17 @@ async function main() {
   server.registerTool(
     "start",
     {
-      description:
-        "Start a terminal session with a PTY and xterm-headless emulator",
+      description: "Start a terminal session with a PTY and xterm-headless emulator",
       inputSchema: {
-        command: z
-          .array(z.string())
-          .describe("Command to run (e.g. ['bun', 'km', 'view', '/path'])"),
-        env: z
-          .record(z.string(), z.string())
-          .optional()
-          .describe("Environment variables"),
-        cols: z
-          .number()
-          .default(120)
-          .describe("Terminal columns (default: 120)"),
+        command: z.array(z.string()).describe("Command to run (e.g. ['bun', 'km', 'view', '/path'])"),
+        env: z.record(z.string(), z.string()).optional().describe("Environment variables"),
+        cols: z.number().default(120).describe("Terminal columns (default: 120)"),
         rows: z.number().default(40).describe("Terminal rows (default: 40)"),
         waitFor: z
           .union([z.literal("content"), z.literal("stable"), z.string()])
           .optional()
           .describe("Wait condition: 'content', 'stable', or specific text"),
-        timeout: z
-          .number()
-          .default(5000)
-          .describe("Timeout in ms for waitFor condition (default: 5000)"),
+        timeout: z.number().default(5000).describe("Timeout in ms for waitFor condition (default: 5000)"),
         cwd: z.string().optional().describe("Working directory"),
       },
     },
@@ -149,8 +133,7 @@ async function main() {
   server.registerTool(
     "press",
     {
-      description:
-        "Press a keyboard key (e.g. 'Enter', 'ArrowDown', 'Control+c', 'j')",
+      description: "Press a keyboard key (e.g. 'Enter', 'ArrowDown', 'Control+c', 'j')",
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
         key: z.string().describe("Key to press (Playwright key format)"),
@@ -186,14 +169,10 @@ async function main() {
   server.registerTool(
     "screenshot",
     {
-      description:
-        "Capture a screenshot of the terminal (launches browser for rendering)",
+      description: "Capture a screenshot of the terminal (launches browser for rendering)",
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
-        outputPath: z
-          .string()
-          .optional()
-          .describe("File path to save (returns base64 if omitted)"),
+        outputPath: z.string().optional().describe("File path to save (returns base64 if omitted)"),
       },
     },
     safeTool(async (args) => {
@@ -246,10 +225,7 @@ async function main() {
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
         for: z.string().optional().describe("Text to wait for"),
-        stable: z
-          .number()
-          .optional()
-          .describe("Wait for terminal stability (milliseconds)"),
+        stable: z.number().optional().describe("Wait for terminal stability (milliseconds)"),
         timeout: z.number().default(30000).describe("Timeout in milliseconds"),
       },
     },

@@ -5,11 +5,7 @@ import { tmpdir } from "os"
 import { execSync } from "child_process"
 
 // Import to trigger registration
-import {
-  RipgrepBackend,
-  findPatterns,
-  createPatternReplaceProposal,
-} from "../../tools/lib/backends/ripgrep"
+import { RipgrepBackend, findPatterns, createPatternReplaceProposal } from "../../tools/lib/backends/ripgrep"
 import { getBackendByName, getBackends } from "../../tools/lib/backend"
 
 describe("ripgrep backend", () => {
@@ -40,9 +36,7 @@ describe("ripgrep backend", () => {
     })
 
     test("implements createPatternReplaceProposal", () => {
-      expect(typeof RipgrepBackend.createPatternReplaceProposal).toBe(
-        "function",
-      )
+      expect(typeof RipgrepBackend.createPatternReplaceProposal).toBe("function")
     })
   })
 
@@ -52,10 +46,7 @@ describe("ripgrep backend", () => {
     beforeAll(() => {
       tempDir = mkdtempSync(join(tmpdir(), "ripgrep-test-"))
       // Create test files
-      writeFileSync(
-        join(tempDir, "test.md"),
-        "# Hello World\n\nThis is a widget example.\n",
-      )
+      writeFileSync(join(tempDir, "test.md"), "# Hello World\n\nThis is a widget example.\n")
       writeFileSync(join(tempDir, "test2.txt"), "Another widget here.\n")
     })
 
@@ -109,10 +100,7 @@ describe("ripgrep backend", () => {
 
     beforeAll(() => {
       tempDir = mkdtempSync(join(tmpdir(), "ripgrep-replace-test-"))
-      writeFileSync(
-        join(tempDir, "doc.md"),
-        "The widget is great.\nWidgets are useful.\n",
-      )
+      writeFileSync(join(tempDir, "doc.md"), "The widget is great.\nWidgets are useful.\n")
     })
 
     afterAll(() => {
@@ -178,10 +166,7 @@ describe("ripgrep backend", () => {
     beforeAll(() => {
       tempDir = mkdtempSync(join(tmpdir(), "ripgrep-utf8-test-"))
       // Create test file with UTF-8 multi-byte characters
-      writeFileSync(
-        join(tempDir, "utf8.md"),
-        "# Default/Preferred Vault\n\nThe vault → repo migration is important.\n",
-      )
+      writeFileSync(join(tempDir, "utf8.md"), "# Default/Preferred Vault\n\nThe vault → repo migration is important.\n")
     })
 
     afterAll(() => {

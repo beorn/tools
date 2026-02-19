@@ -19,19 +19,14 @@
 import { Command } from "commander"
 import { createTtyEngine } from "./lib/tty-engine/index.js"
 
-const program = new Command()
-  .name("tty")
-  .description("One-shot terminal capture operations")
+const program = new Command().name("tty").description("One-shot terminal capture operations")
 
 program
   .command("capture")
   .description("Start a process, interact, and capture output")
   .requiredOption("--command <cmd>", "Command to run")
   .option("--keys <keys>", "Comma-separated key names to press")
-  .option(
-    "--wait-for <text>",
-    "Wait for text before pressing keys (default: any content)",
-  )
+  .option("--wait-for <text>", "Wait for text before pressing keys (default: any content)")
   .option("--screenshot <path>", "Save screenshot to path")
   .option("--text", "Print terminal text to stdout")
   .option("--cols <n>", "Terminal columns", "120")

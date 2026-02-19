@@ -807,11 +807,7 @@ The `ctx` field shows surrounding lines with the match marked:
 
 ```json
 {
-  "ctx": [
-    "  // Create a new widget for the user",
-    "► const vault = createVault(config)",
-    "  return widget"
-  ]
+  "ctx": ["  // Create a new widget for the user", "► const vault = createVault(config)", "  return widget"]
 }
 ```
 
@@ -1008,11 +1004,7 @@ When an LLM reviews an editset, it sees enriched context for each reference:
       "range": [45, 12, 45, 17],
       "kind": "call",
       "scope": "initStorage",
-      "ctx": [
-        "  function initStorage() {",
-        "► const root = createVault(config);",
-        "  return root;"
-      ],
+      "ctx": ["  function initStorage() {", "► const root = createVault(config);", "  return root;"],
       "replace": "repo",
       "preview": "const root = createWidget(config);",
       "checksum": "abc123...",

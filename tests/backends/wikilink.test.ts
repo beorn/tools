@@ -47,9 +47,7 @@ describe("wikilink backend", () => {
     })
 
     test("implements createPatternReplaceProposal", () => {
-      expect(typeof WikilinkBackend.createPatternReplaceProposal).toBe(
-        "function",
-      )
+      expect(typeof WikilinkBackend.createPatternReplaceProposal).toBe("function")
     })
   })
 
@@ -171,9 +169,7 @@ describe("wikilink backend", () => {
 
     test("preserves heading and alias", () => {
       const link = parseWikiLinks("[[old-note#section|display]]")[0]!
-      expect(generateReplacement(link, "new-note")).toBe(
-        "[[new-note#section|display]]",
-      )
+      expect(generateReplacement(link, "new-note")).toBe("[[new-note#section|display]]")
     })
 
     test("generates embed", () => {
@@ -199,9 +195,7 @@ describe("wikilink backend", () => {
       try {
         execSync("which rg", { stdio: "pipe" })
       } catch {
-        console.log(
-          "Skipping findLinksToFile tests: ripgrep (rg) not installed",
-        )
+        console.log("Skipping findLinksToFile tests: ripgrep (rg) not installed")
         return
       }
 
@@ -224,10 +218,7 @@ And embed ![[target-note]].
 `,
       )
 
-      writeFileSync(
-        join(tempDir, "target-note.md"),
-        "# Target\nThis is the target.",
-      )
+      writeFileSync(join(tempDir, "target-note.md"), "# Target\nThis is the target.")
 
       writeFileSync(join(tempDir, "no-links.md"), "# No Links\nJust text here.")
     })
@@ -263,9 +254,7 @@ And embed ![[target-note]].
       try {
         execSync("which rg", { stdio: "pipe" })
       } catch {
-        console.log(
-          "Skipping createFileRenameEditset tests: ripgrep (rg) not installed",
-        )
+        console.log("Skipping createFileRenameEditset tests: ripgrep (rg) not installed")
         return
       }
 
@@ -339,9 +328,7 @@ With heading: [[old-name#intro]]
       try {
         execSync("which rg", { stdio: "pipe" })
       } catch {
-        console.log(
-          "Skipping findBrokenLinks tests: ripgrep (rg) not installed",
-        )
+        console.log("Skipping findBrokenLinks tests: ripgrep (rg) not installed")
         return
       }
 
@@ -377,9 +364,7 @@ Broken: [[does-not-exist]]
         const refs = findBrokenLinks()
 
         expect(refs.length).toBeGreaterThanOrEqual(1)
-        expect(refs.some((r) => r.preview.includes("does-not-exist"))).toBe(
-          true,
-        )
+        expect(refs.some((r) => r.preview.includes("does-not-exist"))).toBe(true)
       } finally {
         process.chdir(cwd)
       }

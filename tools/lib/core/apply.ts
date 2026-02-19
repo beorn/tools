@@ -130,9 +130,7 @@ export function verifyEditset(editset: Editset): {
     const checksum = computeChecksum(content)
 
     if (checksum !== ref.checksum) {
-      issues.push(
-        `Checksum mismatch for ${ref.file}: expected ${ref.checksum}, got ${checksum}`,
-      )
+      issues.push(`Checksum mismatch for ${ref.file}: expected ${ref.checksum}, got ${checksum}`)
     }
   }
 

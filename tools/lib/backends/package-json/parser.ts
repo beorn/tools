@@ -44,9 +44,7 @@ export function parsePackageJson(content: string): PackagePathRef[] {
       const ref = findStringInJson(content, "bin", pkg.bin)
       if (ref) refs.push({ field: "bin", path: pkg.bin, ...ref })
     } else if (typeof pkg.bin === "object") {
-      for (const [name, binPath] of Object.entries(
-        pkg.bin as Record<string, string>,
-      )) {
+      for (const [name, binPath] of Object.entries(pkg.bin as Record<string, string>)) {
         const ref = findStringInJson(content, binPath, binPath)
         if (ref) refs.push({ field: `bin.${name}`, path: binPath, ...ref })
       }
@@ -75,13 +73,9 @@ export function parsePackageJson(content: string): PackagePathRef[] {
 
   // typesVersions
   if (pkg.typesVersions && typeof pkg.typesVersions === "object") {
-    for (const [version, mappings] of Object.entries(
-      pkg.typesVersions as Record<string, unknown>,
-    )) {
+    for (const [version, mappings] of Object.entries(pkg.typesVersions as Record<string, unknown>)) {
       if (typeof mappings === "object" && mappings) {
-        for (const [pattern, paths] of Object.entries(
-          mappings as Record<string, unknown>,
-        )) {
+        for (const [pattern, paths] of Object.entries(mappings as Record<string, unknown>)) {
           if (Array.isArray(paths)) {
             for (const p of paths) {
               if (typeof p === "string") {
@@ -107,24 +101,15 @@ export function parsePackageJson(content: string): PackagePathRef[] {
 /**
  * Parse exports/imports field recursively
  */
-function parseExportsField(
-  content: string,
-  value: unknown,
-  fieldPath: string,
-  refs: PackagePathRef[],
-): void {
+function parseExportsField(content: string, value: unknown, fieldPath: string, refs: PackagePathRef[]): void {
   if (typeof value === "string") {
     // Direct path: "exports": "./dist/index.js"
     const ref = findStringInJson(content, value, value)
     if (ref) refs.push({ field: fieldPath, path: value, ...ref })
   } else if (typeof value === "object" && value !== null) {
     // Object with conditions or subpaths
-    for (const [key, subValue] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      const subPath = key.startsWith(".")
-        ? `${fieldPath}['${key}']`
-        : `${fieldPath}.${key}`
+    for (const [key, subValue] of Object.entries(value as Record<string, unknown>)) {
+      const subPath = key.startsWith(".") ? `${fieldPath}['${key}']` : `${fieldPath}.${key}`
       parseExportsField(content, subValue, subPath, refs)
     }
   }
@@ -134,19 +119,12 @@ function parseExportsField(
  * Find a string value in JSON content and return its position
  * This is a simple approach that finds the quoted string
  */
-function findStringInJson(
-  content: string,
-  _key: string,
-  value: string,
-): { start: number; end: number } | null {
+function findStringInJson(content: string, _key: string, value: string): { start: number; end: number } | null {
   // Escape special regex characters in the value
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
   // Find the quoted string - could be single or double quotes
-  const patterns = [
-    new RegExp(`"${escaped}"`, "g"),
-    new RegExp(`'${escaped}'`, "g"),
-  ]
+  const patterns = [new RegExp(`"${escaped}"`, "g"), new RegExp(`'${escaped}'`, "g")]
 
   for (const pattern of patterns) {
     const match = pattern.exec(content)
@@ -178,9 +156,7 @@ export function pathMatchesFile(pkgPath: string, filePath: string): boolean {
   if (pkgWithoutExt === fileWithoutExt) return true
 
   // Match with dist/src swap (common pattern)
-  const pkgAsSrc = normalizedPkg
-    .replace(/^dist\//, "src/")
-    .replace(/\.js$/, ".ts")
+  const pkgAsSrc = normalizedPkg.replace(/^dist\//, "src/").replace(/\.js$/, ".ts")
   if (pkgAsSrc === normalizedFile) return true
 
   return false
@@ -189,11 +165,7 @@ export function pathMatchesFile(pkgPath: string, filePath: string): boolean {
 /**
  * Generate replacement path preserving the original style
  */
-export function generateReplacementPath(
-  originalPath: string,
-  oldFile: string,
-  newFile: string,
-): string {
+export function generateReplacementPath(originalPath: string, oldFile: string, newFile: string): string {
   // Preserve the ./ prefix if present
   const hadDotSlash = originalPath.startsWith("./")
 

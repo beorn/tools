@@ -1,9 +1,5 @@
 import { registerBackend, type RefactorBackend } from "../../backend"
-import {
-  findLinksToFile,
-  createFileRenameEditset,
-  findBrokenLinks,
-} from "./search"
+import { findLinksToFile, createFileRenameEditset, findBrokenLinks } from "./search"
 
 // Re-export for direct use
 export { findLinksToFile, createFileRenameEditset, findBrokenLinks }

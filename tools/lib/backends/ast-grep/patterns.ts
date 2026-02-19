@@ -28,11 +28,7 @@ export function findPatterns(pattern: string, glob?: string): Reference[] {
  * @param replacement - Replacement with metavariables (e.g., "log.Info($MSG)")
  * @param glob - Optional file glob filter
  */
-export function createPatternReplaceProposal(
-  pattern: string,
-  replacement: string,
-  glob?: string,
-): Editset {
+export function createPatternReplaceProposal(pattern: string, replacement: string, glob?: string): Editset {
   const refs = findPatterns(pattern, glob)
 
   const id = `pattern-replace-${Date.now()}`
@@ -81,13 +77,8 @@ function runSg(args: string[]): SgMatch[] | null {
       return []
     }
     // Check if sg is installed
-    if (
-      error instanceof Error &&
-      (error.message.includes("ENOENT") || error.message.includes("not found"))
-    ) {
-      throw new Error(
-        "ast-grep CLI (sg) not found. Install via: brew install ast-grep or cargo install ast-grep",
-      )
+    if (error instanceof Error && (error.message.includes("ENOENT") || error.message.includes("not found"))) {
+      throw new Error("ast-grep CLI (sg) not found. Install via: brew install ast-grep or cargo install ast-grep")
     }
     throw error
   }
@@ -108,13 +99,7 @@ function parseMatches(matches: SgMatch[]): Reference[] {
 
     const checksum = computeChecksum(content)
     const { start, end } = match.range
-    const refId = computeRefId(
-      match.file,
-      start.line,
-      start.column,
-      end.line,
-      end.column,
-    )
+    const refId = computeRefId(match.file, start.line, start.column, end.line, end.column)
 
     // Get preview (the line containing the match)
     const lines = content.split("\n")

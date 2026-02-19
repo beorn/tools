@@ -8,16 +8,7 @@
   },
   "repository": "https://github.com/beorn/claude-tools",
   "license": "MIT",
-  "keywords": [
-    "batch",
-    "refactoring",
-    "rename",
-    "search-replace",
-    "ast-grep",
-    "migrate",
-    "bulk-edit",
-    "mass-rename"
-  ],
+  "keywords": ["batch", "refactoring", "rename", "search-replace", "ast-grep", "migrate", "bulk-edit", "mass-rename"],
   "mcpServers": {
     "refactor-typescript": {
       "type": "stdio",

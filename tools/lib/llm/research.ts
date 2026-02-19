@@ -31,15 +31,7 @@ export interface QueryResult {
  * Query a single model
  */
 export async function queryModel(options: QueryOptions): Promise<QueryResult> {
-  const {
-    question,
-    model,
-    systemPrompt,
-    stream = false,
-    onToken,
-    context,
-    abortSignal,
-  } = options
+  const { question, model, systemPrompt, stream = false, onToken, context, abortSignal } = options
   const startTime = Date.now()
 
   // Check provider availability
@@ -69,9 +61,7 @@ export async function queryModel(options: QueryOptions): Promise<QueryResult> {
   const languageModel = getLanguageModel(model)
 
   const messages = [
-    ...(systemPrompt
-      ? [{ role: "system" as const, content: systemPrompt }]
-      : []),
+    ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
     { role: "user" as const, content: question },
   ]
 
@@ -100,8 +90,7 @@ export async function queryModel(options: QueryOptions): Promise<QueryResult> {
             ? {
                 promptTokens: usage.inputTokens ?? 0,
                 completionTokens: usage.outputTokens ?? 0,
-                totalTokens:
-                  (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+                totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
               }
             : undefined,
           durationMs: Date.now() - startTime,
@@ -126,9 +115,7 @@ export async function queryModel(options: QueryOptions): Promise<QueryResult> {
             ? {
                 promptTokens: result.usage.inputTokens ?? 0,
                 completionTokens: result.usage.outputTokens ?? 0,
-                totalTokens:
-                  (result.usage.inputTokens ?? 0) +
-                  (result.usage.outputTokens ?? 0),
+                totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
               }
             : undefined,
           durationMs: Date.now() - startTime,
@@ -196,10 +183,7 @@ export interface ResearchCallOptions {
 /**
  * Deep research query using deep research models
  */
-export async function research(
-  topic: string,
-  options: ResearchCallOptions = {},
-): Promise<ModelResponse> {
+export async function research(topic: string, options: ResearchCallOptions = {}): Promise<ModelResponse> {
   const { context } = options
 
   // Get a deep research model, or use override
@@ -211,14 +195,9 @@ export async function research(
     }
   } else {
     // Prefer deep research models, fall back to strong standard models
-    const deepModels = MODELS.filter(
-      (m) => m.isDeepResearch && isProviderAvailable(m.provider),
-    )
+    const deepModels = MODELS.filter((m) => m.isDeepResearch && isProviderAvailable(m.provider))
     const strongModels = MODELS.filter(
-      (m) =>
-        !m.isDeepResearch &&
-        m.costTier === "high" &&
-        isProviderAvailable(m.provider),
+      (m) => !m.isDeepResearch && m.costTier === "high" && isProviderAvailable(m.provider),
     )
     model = deepModels[0] || strongModels[0]
     if (!model) {
@@ -240,9 +219,7 @@ export async function research(
   }
 
   // Build the research prompt with optional context for non-deep-research models
-  const contextSection = context
-    ? `## Background Context\n\n${context}\n\n---\n\n`
-    : ""
+  const contextSection = context ? `## Background Context\n\n${context}\n\n---\n\n` : ""
 
   const researchPrompt = `${contextSection}Research the following topic thoroughly. Provide comprehensive information with sources where possible.
 
@@ -280,11 +257,7 @@ export async function compare(
   })
 
   // Query all models in parallel
-  const results = await Promise.all(
-    models.map((model) =>
-      queryModel({ question, model, stream: options.stream }),
-    ),
-  )
+  const results = await Promise.all(models.map((model) => queryModel({ question, model, stream: options.stream })))
 
   return results.map((r) => r.response)
 }

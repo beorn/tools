@@ -1,28 +1,11 @@
 import { Project } from "ts-morph"
-import type {
-  Editset,
-  Reference,
-  Edit,
-  SymbolMatch,
-  ConflictReport,
-  Conflict,
-  SafeRename,
-} from "../../core/types"
-import {
-  getReferences,
-  findSymbols,
-  findAllSymbols,
-  computeNewName,
-} from "./symbols"
+import type { Editset, Reference, Edit, SymbolMatch, ConflictReport, Conflict, SafeRename } from "../../core/types"
+import { getReferences, findSymbols, findAllSymbols, computeNewName } from "./symbols"
 
 /**
  * Create an editset for renaming a single symbol
  */
-export function createRenameProposal(
-  project: Project,
-  symbolKey: string,
-  newName: string,
-): Editset {
+export function createRenameProposal(project: Project, symbolKey: string, newName: string): Editset {
   const [filePath, lineStr, colStr, oldName] = symbolKey.split(":")
   const refs = getReferences(project, symbolKey)
 
@@ -46,11 +29,7 @@ export function createRenameProposal(
 /**
  * Create an editset for batch renaming all symbols matching a pattern
  */
-export function createBatchRenameProposal(
-  project: Project,
-  pattern: RegExp,
-  replacement: string,
-): Editset {
+export function createBatchRenameProposal(project: Project, pattern: RegExp, replacement: string): Editset {
   const symbols = findSymbols(project, pattern)
   const allRefs: Reference[] = []
   const seenRefIds = new Set<string>()
@@ -93,11 +72,7 @@ export function createBatchRenameProposal(
 /**
  * Check for naming conflicts before batch rename
  */
-export function checkConflicts(
-  project: Project,
-  pattern: RegExp,
-  replacement: string,
-): ConflictReport {
+export function checkConflicts(project: Project, pattern: RegExp, replacement: string): ConflictReport {
   // Get symbols that match the rename pattern
   const matchingSymbols = findSymbols(project, pattern)
 
@@ -153,9 +128,7 @@ export function createBatchRenameProposalFiltered(
   skipNames: string[],
 ): Editset {
   const skipSet = new Set(skipNames)
-  const symbols = findSymbols(project, pattern).filter(
-    (sym) => !skipSet.has(sym.name),
-  )
+  const symbols = findSymbols(project, pattern).filter((sym) => !skipSet.has(sym.name))
 
   const allRefs: Reference[] = []
   const seenRefIds = new Set<string>()
@@ -193,12 +166,7 @@ export function createBatchRenameProposalFiltered(
 
 // Internal helpers
 
-function generateEditsFromRefs(
-  project: Project,
-  refs: Reference[],
-  oldName: string,
-  newName: string,
-): Edit[] {
+function generateEditsFromRefs(project: Project, refs: Reference[], oldName: string, newName: string): Edit[] {
   const edits: Edit[] = []
   const fileContents = new Map<string, string>()
 
@@ -231,12 +199,7 @@ function generateEditsFromRefs(
   return sortEditsForApplication(edits)
 }
 
-function generateBatchEdits(
-  project: Project,
-  symbols: SymbolMatch[],
-  pattern: RegExp,
-  replacement: string,
-): Edit[] {
+function generateBatchEdits(project: Project, symbols: SymbolMatch[], pattern: RegExp, replacement: string): Edit[] {
   const allEdits: Edit[] = []
   const seenLocations = new Set<string>()
   const fileContents = new Map<string, string>()
@@ -311,7 +274,5 @@ function createDefinitionEdit(
 
 /** Sort edits by file, then by offset descending (for safe reverse application) */
 function sortEditsForApplication(edits: Edit[]): Edit[] {
-  return edits.sort((a, b) =>
-    a.file !== b.file ? a.file.localeCompare(b.file) : b.offset - a.offset,
-  )
+  return edits.sort((a, b) => (a.file !== b.file ? a.file.localeCompare(b.file) : b.offset - a.offset))
 }

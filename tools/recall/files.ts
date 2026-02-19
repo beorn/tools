@@ -11,10 +11,7 @@ import { formatBytes, groupBy, BOLD, DIM, RESET } from "./format"
 // List/search writes
 // ============================================================================
 
-export async function cmdFiles(
-  pattern?: string,
-  opts?: { date?: string; restore?: string },
-): Promise<void> {
+export async function cmdFiles(pattern?: string, opts?: { date?: string; restore?: string }): Promise<void> {
   // --restore takes priority
   if (opts?.restore) {
     await restoreFile(opts.restore)
@@ -76,10 +73,7 @@ async function listWrites(date?: string): Promise<void> {
 async function searchWrites(pattern: string): Promise<void> {
   const db = getDb()
 
-  const sqlPattern = pattern
-    .replace(/\*\*/g, "%")
-    .replace(/\*/g, "%")
-    .replace(/\?/g, "_")
+  const sqlPattern = pattern.replace(/\*\*/g, "%").replace(/\*/g, "%").replace(/\?/g, "_")
 
   const rows = db
     .prepare(`
@@ -103,9 +97,7 @@ async function searchWrites(pattern: string): Promise<void> {
     for (const v of versions.slice(0, 5)) {
       const d = new Date(v.timestamp).toLocaleString()
       const size = formatBytes(v.content_size)
-      console.log(
-        `   ${d}  ${size}  [${v.content_hash}]  session:${v.session_id.slice(0, 8)}`,
-      )
+      console.log(`   ${d}  ${size}  [${v.content_hash}]  session:${v.session_id.slice(0, 8)}`)
     }
     if (versions.length > 5) {
       console.log(`   ... and ${versions.length - 5} more versions`)
@@ -124,9 +116,7 @@ async function restoreFile(filePath: string): Promise<void> {
   const db = getDb()
 
   const rows = db
-    .prepare(
-      `SELECT * FROM writes WHERE file_path LIKE ? ORDER BY timestamp DESC`,
-    )
+    .prepare(`SELECT * FROM writes WHERE file_path LIKE ? ORDER BY timestamp DESC`)
     .all(`%${filePath}`) as WriteRecord[]
 
   if (rows.length === 0) {
@@ -139,43 +129,31 @@ async function restoreFile(filePath: string): Promise<void> {
   if (rows.length === 1 || firstRow.content) {
     if (firstRow.content) {
       console.log(`// File: ${firstRow.file_path}`)
-      console.log(
-        `// Written: ${new Date(firstRow.timestamp).toLocaleString()}`,
-      )
+      console.log(`// Written: ${new Date(firstRow.timestamp).toLocaleString()}`)
       console.log(`// Session: ${firstRow.session_id}`)
       console.log(`// Hash: ${firstRow.content_hash}`)
       console.log(`// Size: ${formatBytes(firstRow.content_size)}`)
       console.log("// " + "=".repeat(70))
       console.log(firstRow.content)
     } else {
-      console.log(
-        `Content not stored (file was ${formatBytes(firstRow.content_size)}, exceeds 1MB limit)`,
-      )
+      console.log(`Content not stored (file was ${formatBytes(firstRow.content_size)}, exceeds 1MB limit)`)
       console.log(`Session file: ${firstRow.session_file}`)
       console.log(`Tool use ID: ${firstRow.tool_use_id}`)
-      console.log(
-        "\nTo extract manually, search the session file for the tool_use_id",
-      )
+      console.log("\nTo extract manually, search the session file for the tool_use_id")
     }
   } else {
-    console.log(
-      `Found ${rows.length} versions of files matching "${filePath}":\n`,
-    )
+    console.log(`Found ${rows.length} versions of files matching "${filePath}":\n`)
 
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
       const row = rows[i]!
       const d = new Date(row.timestamp).toLocaleString()
       const hasContent = row.content ? "\u2713" : "\u2717"
-      console.log(
-        `${i + 1}. ${d}  [${row.content_hash}]  ${hasContent}content  session:${row.session_id.slice(0, 8)}`,
-      )
+      console.log(`${i + 1}. ${d}  [${row.content_hash}]  ${hasContent}content  session:${row.session_id.slice(0, 8)}`)
       if (row.file_path !== filePath) console.log(`   ${row.file_path}`)
     }
 
     console.log("\nTo restore a specific version, use:")
-    console.log(
-      `  bun recall files --restore "${firstRow.file_path}" --session <session-id>`,
-    )
+    console.log(`  bun recall files --restore "${firstRow.file_path}" --session <session-id>`)
   }
 
   closeDb()

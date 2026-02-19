@@ -2,11 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, rmSync, existsSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
-import {
-  filterEditset,
-  saveEditset,
-  loadEditset,
-} from "../../tools/lib/core/editset"
+import { filterEditset, saveEditset, loadEditset } from "../../tools/lib/core/editset"
 import type { Editset } from "../../tools/lib/core/types"
 
 function createMockEditset(): Editset {
@@ -110,9 +106,7 @@ describe("saveEditset / loadEditset", () => {
   })
 
   test("throws on missing file", () => {
-    expect(() => loadEditset("/nonexistent/path.json")).toThrow(
-      "Editset file not found",
-    )
+    expect(() => loadEditset("/nonexistent/path.json")).toThrow("Editset file not found")
   })
 
   test("preserves all fields through save/load", () => {

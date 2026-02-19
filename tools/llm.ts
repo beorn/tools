@@ -11,45 +11,20 @@
  * Streaming tokens shown on stderr only when running in an interactive terminal (TTY).
  */
 
-import { ask, research } from "./lib/llm/research"
+import { ask, research, queryModel } from "./lib/llm/research"
 import { retrieveResponse, pollForCompletion } from "./lib/llm/openai-deep"
-import {
-  listPartials,
-  findPartialByResponseId,
-  cleanupPartials,
-} from "./lib/llm/persistence"
+import { listPartials, findPartialByResponseId, cleanupPartials } from "./lib/llm/persistence"
 import { consensus } from "./lib/llm/consensus"
-import {
-  getAvailableProviders,
-  getProviderEnvVar,
-  isProviderAvailable,
-} from "./lib/llm/providers"
-import {
-  estimateCost,
-  formatCost,
-  getBestAvailableModel,
-  getBestAvailableModels,
-} from "./lib/llm/types"
-import { initializePricing, getStaleWarning } from "./lib/llm/pricing"
-import {
-  getDb,
-  closeDb,
-  findSimilarQueries,
-  ftsSearchWithSnippet,
-} from "./lib/history/db"
+import { getAvailableProviders, getProviderEnvVar, isProviderAvailable } from "./lib/llm/providers"
+import { estimateCost, formatCost, getBestAvailableModel, getBestAvailableModels, MODELS } from "./lib/llm/types"
+import { initializePricing, getStaleWarning, cacheCurrentPricing, PRICING_SOURCES } from "./lib/llm/pricing"
+import { getDb, closeDb, findSimilarQueries, ftsSearchWithSnippet } from "./lib/history/db"
 
 // Initialize pricing on startup
 initializePricing()
 
 // Clean up stale output files (>7 days old)
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "fs"
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "fs"
 import * as os from "os"
 try {
   const maxAge = 7 * 24 * 60 * 60 * 1000
@@ -105,6 +80,7 @@ KEYWORDS
   opinion                Second opinion from different provider (~$0.02)
   debate                 Query 3 models, synthesize consensus (~$1-3, confirms)
   quick/cheap/mini/nano  Cheap/fast model if you really want it (~$0.01)
+  update-pricing         Fetch latest model pricing from provider pages
 
 FLAGS
   --deep, /deep          Deep research with web search (~$2-5, confirms)
@@ -159,9 +135,7 @@ const sessionTag = process.env.CLAUDE_SESSION_ID?.slice(0, 8) ?? "manual"
  * when Claude Code captures background task output (stderr streaming tokens + stdout JSON
  * exceed 30KB limit). The --output - mode was removed for this reason.
  */
-const outputFile =
-  outputArg ??
-  `/tmp/llm-${sessionTag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.txt`
+const outputFile = outputArg ?? `/tmp/llm-${sessionTag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.txt`
 
 /**
  * Write token during streaming — stderr ONLY if interactive terminal (TTY).
@@ -188,10 +162,7 @@ interface OutputMeta {
 }
 
 /** Build JSON summary object for the response */
-function buildResultJson(
-  content: string,
-  meta?: OutputMeta,
-): Record<string, unknown> {
+function buildResultJson(content: string, meta?: OutputMeta): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   if (meta?.query) result.query = meta.query
   result.chars = content.length
@@ -220,11 +191,7 @@ function persistToResearch(content: string, meta?: OutputMeta): void {
 
     // Generate filename: YYYY-MM-DD-HHmmss-<slug>.md
     const now = new Date()
-    const date = now
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace("T", "-")
-      .slice(0, 15)
+    const date = now.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
     const slug = meta.query
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
@@ -241,9 +208,7 @@ function persistToResearch(content: string, meta?: OutputMeta): void {
       meta.tokens ? `tokens: ${meta.tokens}` : null,
       meta.durationMs ? `duration_ms: ${meta.durationMs}` : null,
       `timestamp: ${JSON.stringify(now.toISOString())}`,
-      sessionTag !== "manual"
-        ? `session_id: ${JSON.stringify(sessionTag)}`
-        : null,
+      sessionTag !== "manual" ? `session_id: ${JSON.stringify(sessionTag)}` : null,
       "---",
     ]
       .filter(Boolean)
@@ -289,9 +254,7 @@ function finishResponse(
   query?: string,
 ): void {
   if (!content) return
-  const cost = usage
-    ? estimateCost(model as any, usage.promptTokens, usage.completionTokens)
-    : undefined
+  const cost = usage ? estimateCost(model as any, usage.promptTokens, usage.completionTokens) : undefined
   finalizeOutput(content, {
     query,
     model: model.displayName,
@@ -310,12 +273,7 @@ function totalResponseCost(
 ): number {
   let total = 0
   for (const resp of responses) {
-    if (resp.usage)
-      total += estimateCost(
-        resp.model,
-        resp.usage.promptTokens,
-        resp.usage.completionTokens,
-      )
+    if (resp.usage) total += estimateCost(resp.model, resp.usage.promptTokens, resp.usage.completionTokens)
   }
   return total
 }
@@ -327,10 +285,7 @@ async function askAndFinish(
   level: "standard" | "quick",
   header: (name: string) => string,
 ): Promise<void> {
-  const { model, warning } = getBestAvailableModel(
-    modelMode,
-    isProviderAvailable,
-  )
+  const { model, warning } = getBestAvailableModel(modelMode, isProviderAvailable)
   if (!model) error(`No model available for ${modelMode}. ${warning || ""}`)
   if (warning) console.error(`⚠️  ${warning}\n`)
   console.error(header(model.displayName) + "\n")
@@ -339,13 +294,7 @@ async function askAndFinish(
     stream: true,
     onToken: streamToken,
   })
-  finishResponse(
-    response.content,
-    model,
-    response.usage,
-    response.durationMs,
-    question,
-  )
+  finishResponse(response.content, model, response.usage, response.durationMs, question)
 }
 
 /** Prompt user for Y/n confirmation; exit if declined */
@@ -404,14 +353,7 @@ async function buildContext(topic: string): Promise<string | undefined> {
   return parts.length > 0 ? parts.join("\n\n---\n\n") : undefined
 }
 
-const VALUE_FLAGS = [
-  "--model",
-  "--models",
-  "--provider",
-  "--context",
-  "--context-file",
-  "--output",
-]
+const VALUE_FLAGS = ["--model", "--models", "--provider", "--context", "--context-file", "--output"]
 
 /** Extract non-flag text from args, optionally starting from index 0 (all args) or 1 (after command) */
 function extractText(fromAll: boolean, exclude?: string[]): string {
@@ -421,12 +363,7 @@ function extractText(fromAll: boolean, exclude?: string[]): string {
       if (a.startsWith("--")) return false
       if (a.match(/^-[a-zA-Z]$/)) return false
       if (exclude?.includes(a)) return false
-      if (
-        i > 0 &&
-        arr[i - 1]?.startsWith("--") &&
-        VALUE_FLAGS.includes(arr[i - 1]!)
-      )
-        return false
+      if (i > 0 && arr[i - 1]?.startsWith("--") && VALUE_FLAGS.includes(arr[i - 1]!)) return false
       return true
     })
     .join(" ")
@@ -446,29 +383,20 @@ async function checkAndRecoverPartials(): Promise<boolean> {
   const partials = listPartials()
   if (partials.length === 0) return true
 
-  console.error(
-    `📦 Found ${partials.length} incomplete response(s) - attempting recovery...\n`,
-  )
+  console.error(`📦 Found ${partials.length} incomplete response(s) - attempting recovery...\n`)
 
   for (const partial of partials) {
     const age = Date.now() - new Date(partial.metadata.startedAt).getTime()
-    const ageStr =
-      age < 3600000
-        ? `${Math.round(age / 60000)}m ago`
-        : `${Math.round(age / 3600000)}h ago`
+    const ageStr = age < 3600000 ? `${Math.round(age / 60000)}m ago` : `${Math.round(age / 3600000)}h ago`
 
     console.error(`  ${partial.metadata.responseId}`)
-    console.error(
-      `    Started: ${ageStr} | Topic: ${partial.metadata.topic.slice(0, 50)}...`,
-    )
+    console.error(`    Started: ${ageStr} | Topic: ${partial.metadata.topic.slice(0, 50)}...`)
 
     // Try to retrieve from OpenAI
     if (partial.metadata.responseId) {
       const recovered = await retrieveResponse(partial.metadata.responseId)
       if (recovered.status === "completed" && recovered.content) {
-        console.error(
-          `    ✅ Recovered from OpenAI (${recovered.content.length} chars)`,
-        )
+        console.error(`    ✅ Recovered from OpenAI (${recovered.content.length} chars)`)
         console.error(`\n--- Recovered Response ---\n`)
         console.log(recovered.content)
         if (recovered.usage) {
@@ -478,42 +406,25 @@ async function checkAndRecoverPartials(): Promise<boolean> {
         const { completePartial } = await import("./lib/llm/persistence")
         completePartial(partial.path, { delete: true })
         console.error(`\n--- End Recovered Response ---\n`)
-      } else if (
-        recovered.status === "failed" ||
-        recovered.status === "cancelled" ||
-        recovered.status === "expired"
-      ) {
-        console.error(
-          `    ❌ Response ${recovered.status} — removing stale partial`,
-        )
+      } else if (recovered.status === "failed" || recovered.status === "cancelled" || recovered.status === "expired") {
+        console.error(`    ❌ Response ${recovered.status} — removing stale partial`)
         const { completePartial } = await import("./lib/llm/persistence")
         completePartial(partial.path, { delete: true })
-      } else if (
-        recovered.status === "in_progress" ||
-        recovered.status === "queued"
-      ) {
+      } else if (recovered.status === "in_progress" || recovered.status === "queued") {
         // Check if stale (>30 min for deep research is suspicious)
         const age = Date.now() - new Date(partial.metadata.startedAt).getTime()
         if (age > 30 * 60 * 1000) {
-          console.error(
-            `    ⚠️  Still ${recovered.status} after ${Math.round(age / 60000)}m — likely stale, removing`,
-          )
+          console.error(`    ⚠️  Still ${recovered.status} after ${Math.round(age / 60000)}m — likely stale, removing`)
           const { completePartial } = await import("./lib/llm/persistence")
           completePartial(partial.path, { delete: true })
         } else {
-          console.error(
-            `    ⏳ Still ${recovered.status} on OpenAI (${Math.round(age / 60000)}m old)`,
-          )
-          console.error(
-            `    Run 'llm recover ${partial.metadata.responseId}' to poll until complete`,
-          )
+          console.error(`    ⏳ Still ${recovered.status} on OpenAI (${Math.round(age / 60000)}m old)`)
+          console.error(`    Run 'llm recover ${partial.metadata.responseId}' to poll until complete`)
         }
       } else {
         console.error(`    ⚠️  Could not recover (status: ${recovered.status})`)
         if (partial.content.length > 0) {
-          console.error(
-            `    Local partial has ${partial.content.length} chars saved`,
-          )
+          console.error(`    Local partial has ${partial.content.length} chars saved`)
         }
       }
     }
@@ -541,16 +452,7 @@ async function checkAndRecoverPartials(): Promise<boolean> {
 }
 
 // Keywords that trigger specific modes
-const KEYWORDS = [
-  "quick",
-  "cheap",
-  "mini",
-  "nano",
-  "opinion",
-  "debate",
-  "recover",
-  "partials",
-]
+const KEYWORDS = ["quick", "cheap", "mini", "nano", "opinion", "debate", "recover", "partials", "update-pricing"]
 
 async function main() {
   if (!command || command === "--help" || command === "-h") {
@@ -580,9 +482,7 @@ async function main() {
         console.error("📚 Similar past queries:\n")
         for (const s of similar) {
           const relTime = formatRelativeTime(new Date(s.timestamp).getTime())
-          const preview = (s.user_content || "")
-            .slice(0, 100)
-            .replace(/\n/g, " ")
+          const preview = (s.user_content || "").slice(0, 100).replace(/\n/g, " ")
           console.error(`  ${relTime}: ${preview}...`)
         }
         console.error()
@@ -606,10 +506,7 @@ async function main() {
       process.exit(0)
     }
 
-    const { model: deepModel, warning: deepWarning } = getBestAvailableModel(
-      "deep",
-      isProviderAvailable,
-    )
+    const { model: deepModel, warning: deepWarning } = getBestAvailableModel("deep", isProviderAvailable)
     if (!deepModel) {
       error("No deep research model available. " + (deepWarning || ""))
     }
@@ -630,9 +527,7 @@ async function main() {
       process.exit(0)
     }
 
-    await confirmOrExit(
-      "⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ",
-    )
+    await confirmOrExit("⚠️  This uses deep research models (~$2-5). Proceed? [Y/n] ")
 
     const response = await research(topic, {
       context,
@@ -641,13 +536,7 @@ async function main() {
     })
 
     if (response.error) console.error(`Error: ${response.error}`)
-    finishResponse(
-      response.content,
-      response.model,
-      response.usage,
-      response.durationMs,
-      topic,
-    )
+    finishResponse(response.content, response.model, response.usage, response.durationMs, topic)
     process.exit(0)
   }
 
@@ -666,24 +555,14 @@ async function main() {
     case "nano": {
       const question = getQuestion()
       if (!question) error("Usage: llm quick <question>")
-      await askAndFinish(
-        question,
-        "quick",
-        "quick",
-        (name) => `[${name} - quick mode]`,
-      )
+      await askAndFinish(question, "quick", "quick", (name) => `[${name} - quick mode]`)
       break
     }
 
     case "opinion": {
       const question = getQuestion()
       if (!question) error("Usage: llm opinion <question>")
-      await askAndFinish(
-        question,
-        "opinion",
-        "standard",
-        (name) => `[Second opinion from ${name}]`,
-      )
+      await askAndFinish(question, "opinion", "standard", (name) => `[Second opinion from ${name}]`)
       break
     }
 
@@ -693,9 +572,7 @@ async function main() {
       if (!question) error("Usage: llm debate <question>")
 
       const contextDebate = await buildContext(question)
-      const enrichedQuestion = contextDebate
-        ? `${contextDebate}\n\n---\n\n${question}`
-        : question
+      const enrichedQuestion = contextDebate ? `${contextDebate}\n\n---\n\n${question}` : question
 
       const shouldContinueDebate = await checkAndRecoverPartials()
       if (!shouldContinueDebate) {
@@ -703,16 +580,13 @@ async function main() {
         process.exit(0)
       }
 
-      const { models: debateModels, warning: debateWarning } =
-        getBestAvailableModels("debate", isProviderAvailable, 3)
+      const { models: debateModels, warning: debateWarning } = getBestAvailableModels("debate", isProviderAvailable, 3)
       if (debateModels.length < 2) {
         error("Need at least 2 models for debate. " + (debateWarning || ""))
       }
 
       console.error(`Multi-model debate: ${question}`)
-      console.error(
-        `Models: ${debateModels.map((m) => m.displayName).join(", ")}`,
-      )
+      console.error(`Models: ${debateModels.map((m) => m.displayName).join(", ")}`)
       console.error(`Estimated cost: ~$1-3\n`)
       if (debateWarning) console.error(`⚠️  ${debateWarning}\n`)
       if (contextDebate) {
@@ -731,9 +605,7 @@ async function main() {
         process.exit(0)
       }
 
-      await confirmOrExit(
-        "⚠️  This queries multiple models (~$1-3). Proceed? [Y/n] ",
-      )
+      await confirmOrExit("⚠️  This queries multiple models (~$1-3). Proceed? [Y/n] ")
 
       const result = await consensus({
         question: enrichedQuestion,
@@ -741,9 +613,7 @@ async function main() {
         synthesize: true,
         onModelComplete: (response) => {
           if (response.error) {
-            console.error(
-              `[${response.model.displayName}] Error: ${response.error}`,
-            )
+            console.error(`[${response.model.displayName}] Error: ${response.error}`)
           } else {
             console.error(`[${response.model.displayName}] ✓`)
           }
@@ -803,16 +673,12 @@ async function main() {
         // First check local partials
         const localPartial = findPartialByResponseId(responseId)
         if (localPartial) {
-          console.error(
-            `Found local partial (${localPartial.content.length} chars):\n`,
-          )
+          console.error(`Found local partial (${localPartial.content.length} chars):\n`)
           console.log(localPartial.content)
 
           if (!localPartial.metadata.completedAt) {
             console.error("\n---")
-            console.error(
-              "This response was interrupted. Attempting to retrieve from OpenAI...",
-            )
+            console.error("This response was interrupted. Attempting to retrieve from OpenAI...")
           }
         }
 
@@ -823,9 +689,7 @@ async function main() {
           if (!localPartial) {
             error(`Failed to retrieve: ${initial.error}`)
           }
-          console.error(
-            `\n⚠️  Could not retrieve from OpenAI: ${initial.error}`,
-          )
+          console.error(`\n⚠️  Could not retrieve from OpenAI: ${initial.error}`)
         } else if (initial.status === "completed") {
           console.error("\nFull response from OpenAI:\n")
           console.log(initial.content)
@@ -837,18 +701,13 @@ async function main() {
             const { completePartial } = await import("./lib/llm/persistence")
             completePartial(localPartial.path, { delete: true })
           }
-        } else if (
-          initial.status === "in_progress" ||
-          initial.status === "queued"
-        ) {
+        } else if (initial.status === "in_progress" || initial.status === "queued") {
           console.error(`\nStatus: ${initial.status} — polling every 5s...`)
           const result = await pollForCompletion(responseId, {
             intervalMs: 5_000,
             maxAttempts: 180,
             onProgress: (status, elapsed) => {
-              process.stderr.write(
-                `\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`,
-              )
+              process.stderr.write(`\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`)
             },
           })
           process.stderr.write("\n")
@@ -865,15 +724,9 @@ async function main() {
               completePartial(localPartial.path, { delete: true })
             }
           } else {
-            console.error(
-              `Response ${result.status}${result.error ? `: ${result.error}` : ""}`,
-            )
+            console.error(`Response ${result.status}${result.error ? `: ${result.error}` : ""}`)
           }
-        } else if (
-          initial.status === "failed" ||
-          initial.status === "cancelled" ||
-          initial.status === "expired"
-        ) {
+        } else if (initial.status === "failed" || initial.status === "cancelled" || initial.status === "expired") {
           console.error(`\nResponse ${initial.status}`)
           // Clean up stale partial file for terminal states
           if (localPartial) {
@@ -892,9 +745,7 @@ async function main() {
 
       if (partials.length === 0) {
         console.error("No incomplete responses found.")
-        console.error(
-          "\nPartial responses are saved automatically during deep research calls.",
-        )
+        console.error("\nPartial responses are saved automatically during deep research calls.")
         console.error("If interrupted, they appear here for recovery.")
         break
       }
@@ -911,20 +762,14 @@ async function main() {
               : `${Math.round(age / 86400000)}d ago`
 
         const isStale = age > 30 * 60 * 1000 // >30 min
-        const status = partial.metadata.completedAt
-          ? "✓ completed"
-          : isStale
-            ? "💀 stale"
-            : "⚠️  interrupted"
+        const status = partial.metadata.completedAt ? "✓ completed" : isStale ? "💀 stale" : "⚠️  interrupted"
         const preview = partial.content.slice(0, 100).replace(/\n/g, " ")
 
         console.error(`  ${partial.metadata.responseId}`)
         console.error(`    ${status} | ${ageStr} | ${partial.metadata.model}`)
         console.error(`    Topic: ${partial.metadata.topic.slice(0, 60)}...`)
         if (partial.content.length > 0) {
-          console.error(
-            `    Content: ${preview}${partial.content.length > 100 ? "..." : ""}`,
-          )
+          console.error(`    Content: ${preview}${partial.content.length > 100 ? "..." : ""}`)
         }
         console.error(`    (${partial.content.length} chars saved)`)
         console.error()
@@ -932,6 +777,180 @@ async function main() {
 
       console.error("To retrieve a response: llm recover <response_id>")
       console.error("To clean up old partials: llm partials --clean")
+      break
+    }
+
+    case "update-pricing": {
+      console.error("📊 Updating model pricing...\n")
+
+      // Current prices for comparison
+      const currentPrices = new Map(
+        MODELS.filter((m) => m.inputPricePerM != null).map((m) => [
+          m.modelId,
+          { input: m.inputPricePerM!, output: m.outputPricePerM! },
+        ]),
+      )
+
+      // Fetch pricing pages in parallel
+      console.error("Fetching pricing pages...")
+      const pageTexts: string[] = []
+
+      await Promise.allSettled(
+        Object.entries(PRICING_SOURCES).map(async ([provider, url]) => {
+          try {
+            const resp = await fetch(url, {
+              headers: { "User-Agent": "Mozilla/5.0 (compatible; llm-pricing/1.0)" },
+              signal: AbortSignal.timeout(15000),
+              redirect: "follow",
+            })
+            if (!resp.ok) {
+              console.error(`  ⚠️  ${provider}: HTTP ${resp.status}`)
+              return
+            }
+            const html = await resp.text()
+            // Strip HTML to text
+            const text = html
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&nbsp;/g, " ")
+              .replace(/&#\d+;/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 8000)
+
+            pageTexts.push(`[${provider.toUpperCase()} — ${url}]\n${text}`)
+            console.error(`  ✓ ${provider} (${text.length} chars)`)
+          } catch (e) {
+            console.error(`  ⚠️  ${provider}: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }),
+      )
+
+      if (pageTexts.length === 0) {
+        console.error("\n⚠️  Could not fetch any pricing pages. Refreshing cache from hardcoded values.")
+        cacheCurrentPricing()
+        console.error("✓ Cache refreshed (stale warning cleared).")
+        break
+      }
+
+      // Build extraction prompt
+      const modelList = MODELS.filter((m) => !m.isDeepResearch)
+        .map((m) => `  ${m.modelId} (${m.displayName}): $${m.inputPricePerM}/M in, $${m.outputPricePerM}/M out`)
+        .join("\n")
+
+      const extractionPrompt = `Extract current API pricing for these AI models from the pricing pages below.
+
+MODELS TO CHECK:
+${modelList}
+
+PRICING PAGES:
+${pageTexts.join("\n\n---\n\n")}
+
+Return a JSON array of objects for models where the price DIFFERS from what's listed above.
+Each object: { "modelId": "exact-id-from-above", "inputPricePerM": number, "outputPricePerM": number }
+- Prices are per 1 MILLION tokens in USD
+- Input = prompt/input tokens, Output = completion/output tokens
+- Only include models whose prices DIFFER. If prices match or model isn't on the pages, skip it.
+- If no prices changed, return []
+- Return ONLY the JSON array, no markdown fences, no explanation.`
+
+      // Find a model for extraction
+      const { model: extractModel, warning: extractWarning } = getBestAvailableModel("default", (p) =>
+        isProviderAvailable(p),
+      )
+      if (!extractModel) {
+        console.error("\n⚠️  No LLM available for extraction. Refreshing cache from hardcoded values.")
+        cacheCurrentPricing()
+        console.error("✓ Cache refreshed (stale warning cleared).")
+        break
+      }
+      if (extractWarning) console.error(`  ℹ ${extractWarning}`)
+
+      console.error(`\nExtracting prices via ${extractModel.displayName}...`)
+
+      const extractResult = await queryModel({
+        question: extractionPrompt,
+        model: extractModel,
+        systemPrompt: "You are a data extraction assistant. Output only valid JSON arrays. No markdown fences.",
+      })
+
+      if (extractResult.response.error || !extractResult.response.content) {
+        console.error(`\n⚠️  LLM extraction failed: ${extractResult.response.error ?? "empty response"}`)
+        console.error("Refreshing cache from hardcoded values.")
+        cacheCurrentPricing()
+        console.error("✓ Cache refreshed (stale warning cleared).")
+        break
+      }
+
+      // Parse response
+      let priceUpdates: Array<{ modelId: string; inputPricePerM: number; outputPricePerM: number }> = []
+      try {
+        const jsonStr = extractResult.response.content
+          .replace(/```json?\n?/g, "")
+          .replace(/```/g, "")
+          .trim()
+        priceUpdates = JSON.parse(jsonStr)
+        if (!Array.isArray(priceUpdates)) priceUpdates = []
+      } catch {
+        console.error("\n⚠️  Could not parse LLM response as JSON:")
+        console.error(extractResult.response.content.slice(0, 300))
+        console.error("\nRefreshing cache from hardcoded values.")
+        cacheCurrentPricing()
+        console.error("✓ Cache refreshed (stale warning cleared).")
+        break
+      }
+
+      if (priceUpdates.length === 0) {
+        console.error("\n✓ All prices are current — no changes detected.")
+      } else {
+        console.error(`\n📋 Price changes detected (${priceUpdates.length}):\n`)
+        for (const u of priceUpdates) {
+          const current = currentPrices.get(u.modelId)
+          if (!current) {
+            console.error(`  ⚠️  Unknown model: ${u.modelId} (skipping)`)
+            continue
+          }
+          const inChanged = u.inputPricePerM !== current.input
+          const outChanged = u.outputPricePerM !== current.output
+          if (inChanged || outChanged) {
+            console.error(`  ${u.modelId}:`)
+            if (inChanged) console.error(`    input:  $${current.input}/M → $${u.inputPricePerM}/M`)
+            if (outChanged) console.error(`    output: $${current.output}/M → $${u.outputPricePerM}/M`)
+          }
+        }
+
+        // Apply to in-memory MODELS
+        let applied = 0
+        for (const u of priceUpdates) {
+          const model = MODELS.find((m) => m.modelId === u.modelId)
+          if (model) {
+            model.inputPricePerM = u.inputPricePerM
+            model.outputPricePerM = u.outputPricePerM
+            applied++
+          }
+        }
+        if (applied > 0) {
+          console.error(`\n⚠️  To persist, update vendor/beorn-tools/tools/lib/llm/types.ts`)
+        }
+      }
+
+      // Save cache (resets stale timer regardless)
+      cacheCurrentPricing()
+      console.error("✓ Pricing cache updated.")
+
+      // Show cost summary
+      if (extractResult.response.usage) {
+        const cost = estimateCost(
+          extractModel,
+          extractResult.response.usage.promptTokens,
+          extractResult.response.usage.completionTokens,
+        )
+        console.error(`  (extraction cost: ${formatCost(cost)})`)
+      }
       break
     }
 

@@ -4,11 +4,7 @@ import type { Editset } from "./types"
 /**
  * Filter an editset to include/exclude specific refs
  */
-export function filterEditset(
-  editset: Editset,
-  include?: string[],
-  exclude?: string[],
-): Editset {
+export function filterEditset(editset: Editset, include?: string[], exclude?: string[]): Editset {
   let refs = editset.refs
 
   if (include && include.length > 0) {
@@ -28,9 +24,7 @@ export function filterEditset(
   }
 
   // Regenerate edits for selected refs only
-  const selectedFiles = new Set(
-    refs.filter((r) => r.selected).map((r) => r.file),
-  )
+  const selectedFiles = new Set(refs.filter((r) => r.selected).map((r) => r.file))
   const edits = editset.edits.filter((e) => selectedFiles.has(e.file))
 
   return {

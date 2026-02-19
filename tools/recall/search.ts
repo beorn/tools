@@ -13,18 +13,9 @@ import {
   getAllSessionTitles,
   type MessageSearchOptions,
 } from "../lib/history/db"
-import {
-  recall,
-  type RecallOptions,
-  type RecallResult,
-} from "../lib/history/recall"
+import { recall, type RecallOptions, type RecallResult } from "../lib/history/recall"
 import { findSessionFiles, extractTextContent } from "../lib/history/indexer"
-import type {
-  ContentType,
-  ContentRecord,
-  MessageRecord,
-  JsonlRecord,
-} from "../lib/history/types"
+import type { ContentType, ContentRecord, MessageRecord, JsonlRecord } from "../lib/history/types"
 import {
   BOLD,
   RESET,
@@ -68,10 +59,7 @@ export interface SearchOptions {
 // Main search command
 // ============================================================================
 
-export async function cmdSearch(
-  query: string | undefined,
-  options: SearchOptions,
-): Promise<void> {
+export async function cmdSearch(query: string | undefined, options: SearchOptions): Promise<void> {
   const {
     raw,
     json,
@@ -88,14 +76,7 @@ export async function cmdSearch(
   } = options
 
   // Power-user flags imply raw mode
-  const impliedRaw =
-    raw ||
-    !!question ||
-    !!response ||
-    !!tool ||
-    !!session ||
-    !!include ||
-    !!regexMode
+  const impliedRaw = raw || !!question || !!response || !!tool || !!session || !!include || !!regexMode
 
   // Regex mode delegates to grep
   if (regexMode) {
@@ -142,10 +123,7 @@ export async function cmdSearch(
 // Recall output (synthesis mode)
 // ============================================================================
 
-function formatRecallOutput(
-  result: RecallResult,
-  options: { json?: boolean },
-): void {
+function formatRecallOutput(result: RecallResult, options: { json?: boolean }): void {
   if (options.json) {
     console.log(JSON.stringify(result, null, 2))
     return
@@ -164,8 +142,7 @@ function formatRecallOutput(
     const timingParts = [`${result.durationMs}ms`]
     if (result.timing) {
       timingParts.push(`search=${result.timing.searchMs}ms`)
-      if (result.timing.llmMs !== undefined)
-        timingParts.push(`llm=${result.timing.llmMs}ms`)
+      if (result.timing.llmMs !== undefined) timingParts.push(`llm=${result.timing.llmMs}ms`)
     }
     console.log(
       `${DIM}${result.results.length} results from ${uniqueSessions} sessions (${timingParts.join(", ")})${RESET}`,
@@ -181,9 +158,7 @@ function formatRecallOutput(
 }
 
 function formatRawRecallResults(result: RecallResult): void {
-  console.log(
-    `${BOLD}${result.results.length} results${RESET} for "${result.query}":\n`,
-  )
+  console.log(`${BOLD}${result.results.length} results${RESET} for "${result.query}":\n`)
 
   for (const r of result.results) {
     const date = new Date(r.timestamp)
@@ -191,17 +166,11 @@ function formatRawRecallResults(result: RecallResult): void {
       .replace("T", " ")
       .replace(/\.\d+Z$/, "Z")
     const typeLabel = formatType(r.type)
-    const sessionLabel = r.sessionTitle
-      ? `${r.sessionTitle}`
-      : `${r.sessionId.slice(0, 8)}...`
+    const sessionLabel = r.sessionTitle ? `${r.sessionTitle}` : `${r.sessionId.slice(0, 8)}...`
 
-    console.log(
-      `${typeLabel} ${BOLD}${sessionLabel}${RESET} ${DIM}(${date})${RESET}`,
-    )
+    console.log(`${typeLabel} ${BOLD}${sessionLabel}${RESET} ${DIM}(${date})${RESET}`)
 
-    const highlighted = r.snippet
-      .replace(/>>>/g, `${BOLD}${YELLOW}`)
-      .replace(/<<</g, RESET)
+    const highlighted = r.snippet.replace(/>>>/g, `${BOLD}${YELLOW}`).replace(/<<</g, RESET)
     const indented = highlighted
       .split("\n")
       .map((line) => `  ${line}`)
@@ -213,8 +182,7 @@ function formatRawRecallResults(result: RecallResult): void {
   const timingParts = [`${result.durationMs}ms`]
   if (result.timing) {
     timingParts.push(`search=${result.timing.searchMs}ms`)
-    if (result.timing.llmMs !== undefined)
-      timingParts.push(`llm=${result.timing.llmMs}ms`)
+    if (result.timing.llmMs !== undefined) timingParts.push(`llm=${result.timing.llmMs}ms`)
   }
   console.log(`${DIM}(${timingParts.join(", ")})${RESET}`)
 }
@@ -254,21 +222,8 @@ interface RawSearchOptions extends SearchOptions {
   limit: number
 }
 
-async function rawSearch(
-  query: string | undefined,
-  options: RawSearchOptions,
-): Promise<void> {
-  const {
-    include,
-    question,
-    response,
-    tool,
-    since,
-    project,
-    session,
-    limit,
-    json,
-  } = options
+async function rawSearch(query: string | undefined, options: RawSearchOptions): Promise<void> {
+  const { include, question, response, tool, since, project, session, limit, json } = options
 
   // Parse time filter
   let sinceTime: number | undefined
@@ -296,13 +251,7 @@ async function rawSearch(
 
   // Determine message type filter
   const messageType: "user" | "assistant" | undefined =
-    question && response
-      ? undefined
-      : question
-        ? "user"
-        : response
-          ? "assistant"
-          : undefined
+    question && response ? undefined : question ? "user" : response ? "assistant" : undefined
 
   // Allow searching without query if filters are provided
   if (!query && !question && !response && !tool && !since) {
@@ -332,9 +281,7 @@ async function rawSearch(
 
   // Determine which sources to search
   const searchMessages = !types || types.includes("message")
-  const contentTypes = types?.filter((t) => t !== "message") as
-    | ContentType[]
-    | undefined
+  const contentTypes = types?.filter((t) => t !== "message") as ContentType[] | undefined
   const searchContent = !types || (contentTypes && contentTypes.length > 0)
 
   // Build search options
@@ -394,16 +341,8 @@ async function rawSearch(
   // Search content table if needed
   // Project source types (bead, session_memory, project_memory, doc, claude_md)
   // are not time-filtered — they represent persistent project knowledge
-  const PROJECT_SOURCE_TYPES = new Set([
-    "bead",
-    "session_memory",
-    "project_memory",
-    "doc",
-    "claude_md",
-  ])
-  const hasOnlyProjectTypes = contentTypes?.every((t) =>
-    PROJECT_SOURCE_TYPES.has(t),
-  )
+  const PROJECT_SOURCE_TYPES = new Set(["bead", "session_memory", "project_memory", "doc", "claude_md"])
+  const hasOnlyProjectTypes = contentTypes?.every((t) => PROJECT_SOURCE_TYPES.has(t))
   const contentSinceTime = hasOnlyProjectTypes ? undefined : sinceTime
 
   let contentResults: {
@@ -472,21 +411,12 @@ async function rawSearch(
         rank: r.rank,
       })),
     ]
-    console.log(
-      JSON.stringify(
-        { query, total, durationMs: duration, results: allResults },
-        null,
-        2,
-      ),
-    )
+    console.log(JSON.stringify({ query, total, durationMs: duration, results: allResults }, null, 2))
     closeDb()
     return
   }
 
-  if (
-    messageResults.results.length === 0 &&
-    contentResults.results.length === 0
-  ) {
+  if (messageResults.results.length === 0 && contentResults.results.length === 0) {
     const queryPart = query ? ` for "${query}"` : ""
     console.log(`No matches found${queryPart} (searched in ${duration}ms)`)
     closeDb()
@@ -509,9 +439,7 @@ async function rawSearch(
       console.log(
         `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
       )
-      console.log(
-        `\u{1F4C1} ${sessionDisplay}  |  ${displayProject}  |  ${relTime}`,
-      )
+      console.log(`\u{1F4C1} ${sessionDisplay}  |  ${displayProject}  |  ${relTime}`)
       console.log(
         `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
       )
@@ -519,18 +447,11 @@ async function rawSearch(
       for (const r of sessionResults.slice(0, 3)) {
         const time = formatTime(r.timestamp)
         const icon = typeIcons[r.type] || "\u{1F4AC}"
-        const role =
-          r.type === "user"
-            ? "User"
-            : r.type === "assistant"
-              ? "Assistant"
-              : r.type
+        const role = r.type === "user" ? "User" : r.type === "assistant" ? "Assistant" : r.type
         console.log(`\n${icon} ${role} (${time}):`)
         console.log("\u2500".repeat(60))
         if (r.snippet) {
-          const highlighted = r.snippet
-            .replace(/>>>/g, "\x1b[1m\x1b[33m")
-            .replace(/<<</g, "\x1b[0m")
+          const highlighted = r.snippet.replace(/>>>/g, "\x1b[1m\x1b[33m").replace(/<<</g, "\x1b[0m")
           console.log(highlighted)
         } else if (r.content) {
           const content = r.content.slice(0, 300)
@@ -539,9 +460,7 @@ async function rawSearch(
       }
 
       if (sessionResults.length > 3) {
-        console.log(
-          `\n  ... and ${sessionResults.length - 3} more matches in this session`,
-        )
+        console.log(`\n  ... and ${sessionResults.length - 3} more matches in this session`)
       }
       console.log()
     }
@@ -560,17 +479,13 @@ async function rawSearch(
       const relTime = formatRelativeTime(r.timestamp)
 
       const titleDisplay = r.title || r.source_id.slice(0, 20)
-      const projectPart = r.project_path
-        ? ` ${DIM}${displayProjectPath(r.project_path)}${RESET}`
-        : ""
+      const projectPart = r.project_path ? ` ${DIM}${displayProjectPath(r.project_path)}${RESET}` : ""
 
       console.log(
         `${icon} ${color}[${r.content_type}]${RESET} ${BOLD}${titleDisplay}${RESET}${projectPart} ${DIM}(${relTime})${RESET}`,
       )
 
-      const highlighted = r.snippet
-        .replace(/>>>/g, "\x1b[1m\x1b[33m")
-        .replace(/<<</g, "\x1b[0m")
+      const highlighted = r.snippet.replace(/>>>/g, "\x1b[1m\x1b[33m").replace(/<<</g, "\x1b[0m")
       const indentedSnippet = highlighted
         .split("\n")
         .map((line) => `   ${line}`)
@@ -580,16 +495,11 @@ async function rawSearch(
     }
   }
 
-  const shownCount =
-    messageResults.results.length + contentResults.results.length
+  const shownCount = messageResults.results.length + contentResults.results.length
   if (total > limit) {
-    console.log(
-      `${DIM}(showing ${shownCount} of ${total} matches, use -n/--limit <num> to see more)${RESET}`,
-    )
+    console.log(`${DIM}(showing ${shownCount} of ${total} matches, use -n/--limit <num> to see more)${RESET}`)
   } else if (shownCount === limit && total === limit) {
-    console.log(
-      `${DIM}(showing ${shownCount} matches, use -n/--limit <num> to see more if needed)${RESET}`,
-    )
+    console.log(`${DIM}(showing ${shownCount} matches, use -n/--limit <num> to see more if needed)${RESET}`)
   }
 
   closeDb()
@@ -599,10 +509,7 @@ async function rawSearch(
 // Grep (regex search through raw session files)
 // ============================================================================
 
-async function cmdGrep(
-  pattern: string,
-  options: { project?: string; limit?: number },
-): Promise<void> {
+async function cmdGrep(pattern: string, options: { project?: string; limit?: number }): Promise<void> {
   const { project, limit = 50 } = options
   const contextLines = 2
 
@@ -673,9 +580,7 @@ async function cmdGrep(
   }
 
   if (matches.length === 0) {
-    console.log(
-      `No matches found for "${pattern}" in ${filesSearched} session files.`,
-    )
+    console.log(`No matches found for "${pattern}" in ${filesSearched} session files.`)
     return
   }
 
@@ -685,9 +590,7 @@ async function cmdGrep(
 
   for (const [sessionId, sessionMatches] of bySession) {
     const firstMatch = sessionMatches[0]!
-    const displayProject = displayProjectPath(
-      firstMatch.sessionFile.split(path.sep)[0] || "",
-    )
+    const displayProject = displayProjectPath(firstMatch.sessionFile.split(path.sep)[0] || "")
     const date = firstMatch.timestamp
       ? new Date(firstMatch.timestamp)
           .toISOString()
@@ -698,23 +601,15 @@ async function cmdGrep(
     console.log(
       `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
     )
-    console.log(
-      `\u{1F4C1} Session: ${sessionId.slice(0, 12)}...  |  Project: ${displayProject}  |  ${date}`,
-    )
+    console.log(`\u{1F4C1} Session: ${sessionId.slice(0, 12)}...  |  Project: ${displayProject}  |  ${date}`)
     console.log(
       `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
     )
 
     for (const match of sessionMatches.slice(0, 5)) {
-      const time = match.timestamp
-        ? new Date(match.timestamp).toLocaleTimeString()
-        : ""
+      const time = match.timestamp ? new Date(match.timestamp).toLocaleTimeString() : ""
       const role =
-        match.type === "user"
-          ? "\u{1F464} User"
-          : match.type === "assistant"
-            ? "\u{1F916} Assistant"
-            : match.type
+        match.type === "user" ? "\u{1F464} User" : match.type === "assistant" ? "\u{1F916} Assistant" : match.type
 
       console.log(`\n${role} (${time}):`)
       console.log("\u2500".repeat(60))
@@ -722,9 +617,7 @@ async function cmdGrep(
     }
 
     if (sessionMatches.length > 5) {
-      console.log(
-        `\n  ... and ${sessionMatches.length - 5} more matches in this session`,
-      )
+      console.log(`\n  ... and ${sessionMatches.length - 5} more matches in this session`)
     }
     console.log()
   }

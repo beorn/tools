@@ -1,12 +1,6 @@
 import { registerBackend, type RefactorBackend } from "../../backend"
 import { getProject, resetProject } from "./project"
-import {
-  getSymbolAt,
-  getReferences,
-  findSymbols,
-  findAllSymbols,
-  computeNewName,
-} from "./symbols"
+import { getSymbolAt, getReferences, findSymbols, findAllSymbols, computeNewName } from "./symbols"
 import {
   createRenameProposal,
   createBatchRenameProposal,

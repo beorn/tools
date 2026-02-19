@@ -75,11 +75,7 @@ export function parseWikiLinks(content: string): WikiLink[] {
  * @param targetName - The file name to match (without extension)
  * @param targetPath - Optional full path for path-aware matching
  */
-export function linkMatchesTarget(
-  link: WikiLink,
-  targetName: string,
-  targetPath?: string,
-): boolean {
+export function linkMatchesTarget(link: WikiLink, targetName: string, targetPath?: string): boolean {
   const linkTarget = link.target.toLowerCase()
   const name = targetName.toLowerCase()
 
@@ -130,9 +126,7 @@ export function generateReplacement(link: WikiLink, newName: string): string {
     }
     case "markdown": {
       const ext = newName.endsWith(".md") ? "" : ".md"
-      const path = link.heading
-        ? `${newName}${ext}#${link.heading}`
-        : `${newName}${ext}`
+      const path = link.heading ? `${newName}${ext}#${link.heading}` : `${newName}${ext}`
       return `[${link.alias}](${path})`
     }
   }

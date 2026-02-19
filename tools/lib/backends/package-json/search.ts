@@ -3,11 +3,7 @@ import { readFileSync, existsSync } from "fs"
 import { basename, dirname, join, relative } from "path"
 import type { Reference, Edit, Editset } from "../../core/types"
 import { computeChecksum, computeRefId } from "../../core/apply"
-import {
-  parsePackageJson,
-  pathMatchesFile,
-  generateReplacementPath,
-} from "./parser"
+import { parsePackageJson, pathMatchesFile, generateReplacementPath } from "./parser"
 
 /**
  * Find all package.json files that reference a specific file
@@ -58,11 +54,7 @@ export function findPackageJsonRefs(
 /**
  * Generate edits to update package.json when files are renamed
  */
-export function findPackageJsonEdits(
-  oldPath: string,
-  newPath: string,
-  searchPath: string = ".",
-): Edit[] {
+export function findPackageJsonEdits(oldPath: string, newPath: string, searchPath: string = "."): Edit[] {
   const edits: Edit[] = []
 
   // Find all package.json files
@@ -82,11 +74,7 @@ export function findPackageJsonEdits(
       if (pathMatchesFile(pathRef.path, oldRelative)) {
         // Generate the new path
         const newRelative = relative(pkgDir, join(searchPath, newPath))
-        const replacement = generateReplacementPath(
-          pathRef.path,
-          oldPath,
-          newRelative,
-        )
+        const replacement = generateReplacementPath(pathRef.path, oldPath, newRelative)
 
         // The replacement includes quotes
         const originalQuote = content[pathRef.start]
@@ -112,11 +100,7 @@ export function findPackageJsonEdits(
 /**
  * Create an editset for updating package.json paths
  */
-export function createPackageJsonEditset(
-  oldPath: string,
-  newPath: string,
-  searchPath: string = ".",
-): Editset {
+export function createPackageJsonEditset(oldPath: string, newPath: string, searchPath: string = "."): Editset {
   const edits = findPackageJsonEdits(oldPath, newPath, searchPath)
 
   // Convert edits to refs for the editset format
@@ -128,10 +112,7 @@ export function createPackageJsonEditset(
     const content = readFileSync(filePath, "utf-8")
     const checksum = computeChecksum(content)
     const [line, col] = offsetToLineCol(content, edit.offset)
-    const [endLine, endCol] = offsetToLineCol(
-      content,
-      edit.offset + edit.length,
-    )
+    const [endLine, endCol] = offsetToLineCol(content, edit.offset + edit.length)
 
     refs.push({
       refId: computeRefId(edit.file, line, col, endLine, endCol),
@@ -157,9 +138,7 @@ export function createPackageJsonEditset(
 /**
  * Find all package.json that might have outdated paths (for linting)
  */
-export function findBrokenPackageJsonPaths(
-  searchPath: string = ".",
-): Reference[] {
+export function findBrokenPackageJsonPaths(searchPath: string = "."): Reference[] {
   const refs: Reference[] = []
   const packageJsonFiles = findPackageJsonFiles(searchPath, "**/package.json")
 

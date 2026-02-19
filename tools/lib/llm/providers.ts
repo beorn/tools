@@ -113,13 +113,7 @@ export function isProviderAvailable(provider: Provider): boolean {
  * Get list of available providers (those with API keys set)
  */
 export function getAvailableProviders(): Provider[] {
-  const providers: Provider[] = [
-    "openai",
-    "anthropic",
-    "google",
-    "xai",
-    "perplexity",
-  ]
+  const providers: Provider[] = ["openai", "anthropic", "google", "xai", "perplexity"]
   return providers.filter(isProviderAvailable)
 }
 

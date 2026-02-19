@@ -21,11 +21,7 @@ export interface RefactorBackend {
   // Proposal generation
   createRenameProposal?(symbolKey: string, newName: string): Editset
   createBatchRenameProposal?(pattern: RegExp, replacement: string): Editset
-  createPatternReplaceProposal?(
-    pattern: string,
-    replacement: string,
-    glob?: string,
-  ): Editset
+  createPatternReplaceProposal?(pattern: string, replacement: string, glob?: string): Editset
 }
 
 // Registry of backends
@@ -44,11 +40,7 @@ export function registerBackend(backend: RefactorBackend): void {
  */
 export function getBackendForFile(file: string): RefactorBackend | null {
   const ext = path.extname(file)
-  return (
-    backends.find(
-      (b) => b.extensions.includes(ext) || b.extensions.includes("*"),
-    ) ?? null
-  )
+  return backends.find((b) => b.extensions.includes(ext) || b.extensions.includes("*")) ?? null
 }
 
 /**

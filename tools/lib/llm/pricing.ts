@@ -100,10 +100,7 @@ export function cacheCurrentPricing(): void {
   const models: PricingCache["models"] = {}
 
   for (const model of MODELS) {
-    if (
-      model.inputPricePerM !== undefined &&
-      model.outputPricePerM !== undefined
-    ) {
+    if (model.inputPricePerM !== undefined && model.outputPricePerM !== undefined) {
       models[model.modelId] = {
         inputPricePerM: model.inputPricePerM,
         outputPricePerM: model.outputPricePerM,

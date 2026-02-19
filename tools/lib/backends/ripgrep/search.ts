@@ -29,11 +29,7 @@ export function findPatterns(pattern: string, glob?: string): Reference[] {
  * @param replacement - Replacement string (supports $1, $2, etc. for capture groups)
  * @param glob - Optional file glob filter
  */
-export function createPatternReplaceProposal(
-  pattern: string,
-  replacement: string,
-  glob?: string,
-): Editset {
+export function createPatternReplaceProposal(pattern: string, replacement: string, glob?: string): Editset {
   const refs = findPatterns(pattern, glob)
 
   const id = `text-replace-${Date.now()}`
@@ -104,13 +100,8 @@ function runRg(args: string[]): RgMatch[] | null {
       return []
     }
     // Check if rg is installed
-    if (
-      error instanceof Error &&
-      (error.message.includes("ENOENT") || error.message.includes("not found"))
-    ) {
-      throw new Error(
-        "ripgrep (rg) not found. Install via: brew install ripgrep",
-      )
+    if (error instanceof Error && (error.message.includes("ENOENT") || error.message.includes("not found"))) {
+      throw new Error("ripgrep (rg) not found. Install via: brew install ripgrep")
     }
     throw error
   }
@@ -139,13 +130,7 @@ function parseMatches(matches: RgMatch[], pattern: string): Reference[] {
       const startCol = submatch.start + 1 // Convert to 1-indexed
       const endCol = submatch.end + 1
 
-      const refId = computeRefId(
-        filePath,
-        lineNumber,
-        startCol,
-        lineNumber,
-        endCol,
-      )
+      const refId = computeRefId(filePath, lineNumber, startCol, lineNumber, endCol)
 
       // Use the line text as preview
       const preview = match.data.lines.text.trim()
@@ -181,11 +166,7 @@ function preserveCase(match: string, replacement: string): string {
   return replacement.toLowerCase()
 }
 
-function generateEdits(
-  refs: Reference[],
-  pattern: string,
-  replacement: string,
-): Edit[] {
+function generateEdits(refs: Reference[], pattern: string, replacement: string): Edit[] {
   const edits: Edit[] = []
   const fileContents = new Map<string, string>()
   const regex = new RegExp(pattern, "gi") // Case-insensitive matching
@@ -228,9 +209,7 @@ function generateEdits(
     // Get the actual matched text to compute proper replacement
     const matchedText = content.slice(charOffset, charOffset + matchLength)
     // Use case-preserving replacement
-    const actualReplacement = matchedText.replace(regex, (m) =>
-      preserveCase(m, replacement),
-    )
+    const actualReplacement = matchedText.replace(regex, (m) => preserveCase(m, replacement))
 
     edits.push({
       file: ref.file,

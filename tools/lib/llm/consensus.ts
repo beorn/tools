@@ -7,12 +7,7 @@
 import { queryModel } from "./research"
 import { getLanguageModel, isProviderAvailable } from "./providers"
 import { generateText } from "ai"
-import type {
-  Model,
-  ModelResponse,
-  ConsensusResult,
-  ThinkingLevel,
-} from "./types"
+import type { Model, ModelResponse, ConsensusResult, ThinkingLevel } from "./types"
 import { getModelsForLevel, getModel, MODELS } from "./types"
 
 export interface ConsensusOptions {
@@ -27,15 +22,8 @@ export interface ConsensusOptions {
 /**
  * Query multiple models and optionally synthesize their responses
  */
-export async function consensus(
-  options: ConsensusOptions,
-): Promise<ConsensusResult> {
-  const {
-    question,
-    level = "consensus",
-    synthesize = true,
-    onModelComplete,
-  } = options
+export async function consensus(options: ConsensusOptions): Promise<ConsensusResult> {
+  const { question, level = "consensus", synthesize = true, onModelComplete } = options
   const startTime = Date.now()
 
   // Determine which models to use
@@ -68,10 +56,7 @@ export async function consensus(
   )
 
   // Calculate total cost
-  const totalCost = responses.reduce(
-    (sum, r) => sum + (r.usage?.estimatedCost || 0),
-    0,
-  )
+  const totalCost = responses.reduce((sum, r) => sum + (r.usage?.estimatedCost || 0), 0)
 
   // Build base result
   const result: ConsensusResult = {
@@ -108,10 +93,7 @@ interface SynthesisResult {
 /**
  * Synthesize multiple model responses into a unified answer
  */
-async function synthesizeResponses(
-  question: string,
-  responses: ModelResponse[],
-): Promise<SynthesisResult> {
+async function synthesizeResponses(question: string, responses: ModelResponse[]): Promise<SynthesisResult> {
   // Format responses for the synthesis prompt
   const formattedResponses = responses
     .filter((r) => !r.error && r.content)
@@ -143,11 +125,8 @@ Format your response as JSON:
   const synthesisModel =
     MODELS.find(
       (m) =>
-        (m.modelId === "claude-3-5-haiku-latest" ||
-          m.modelId === "gpt-4o-mini") &&
-        isProviderAvailable(m.provider),
-    ) ||
-    MODELS.find((m) => m.costTier === "low" && isProviderAvailable(m.provider))
+        (m.modelId === "claude-3-5-haiku-latest" || m.modelId === "gpt-4o-mini") && isProviderAvailable(m.provider),
+    ) || MODELS.find((m) => m.costTier === "low" && isProviderAvailable(m.provider))
 
   if (!synthesisModel) {
     // Fallback: just concatenate responses
@@ -200,9 +179,7 @@ export async function deepConsensus(
   question: string,
   options: { onModelComplete?: (response: ModelResponse) => void } = {},
 ): Promise<ConsensusResult> {
-  const deepModels = MODELS.filter(
-    (m) => m.isDeepResearch && isProviderAvailable(m.provider),
-  )
+  const deepModels = MODELS.filter((m) => m.isDeepResearch && isProviderAvailable(m.provider))
 
   if (deepModels.length === 0) {
     throw new Error("No deep research models available")

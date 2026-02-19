@@ -1,11 +1,7 @@
 import { describe, test, expect } from "vitest"
 
 // Import to trigger registration
-import {
-  AstGrepBackend,
-  findPatterns,
-  createPatternReplaceProposal,
-} from "../../tools/lib/backends/ast-grep"
+import { AstGrepBackend, findPatterns, createPatternReplaceProposal } from "../../tools/lib/backends/ast-grep"
 import { getBackendByName } from "../../tools/lib/backend"
 
 describe("ast-grep backend", () => {
@@ -35,9 +31,7 @@ describe("ast-grep backend", () => {
     })
 
     test("implements createPatternReplaceProposal", () => {
-      expect(typeof AstGrepBackend.createPatternReplaceProposal).toBe(
-        "function",
-      )
+      expect(typeof AstGrepBackend.createPatternReplaceProposal).toBe("function")
     })
   })
 
@@ -58,11 +52,7 @@ describe("ast-grep backend", () => {
   describe("createPatternReplaceProposal", () => {
     test("creates editset with correct structure", () => {
       try {
-        const editset = createPatternReplaceProposal(
-          "test",
-          "replacement",
-          "*.nonexistent",
-        )
+        const editset = createPatternReplaceProposal("test", "replacement", "*.nonexistent")
         expect(editset.operation).toBe("rename")
         expect(editset.from).toBe("test")
         expect(editset.to).toBe("replacement")

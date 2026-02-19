@@ -7,12 +7,7 @@ import {
 } from "./search"
 
 // Re-export
-export {
-  findPackageJsonRefs,
-  findPackageJsonEdits,
-  createPackageJsonEditset,
-  findBrokenPackageJsonPaths,
-}
+export { findPackageJsonRefs, findPackageJsonEdits, createPackageJsonEditset, findBrokenPackageJsonPaths }
 export * from "./parser"
 
 /**

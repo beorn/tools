@@ -128,10 +128,7 @@ Line to transform: \`${m.text}\`
 /**
  * Build the full LLM prompt for migration.
  */
-export function buildMigrationPrompt(
-  matches: Match[],
-  userPrompt: string,
-): string {
+export function buildMigrationPrompt(matches: Match[], userPrompt: string): string {
   const llmInput = formatForLLM(matches)
 
   return `${userPrompt}
@@ -170,10 +167,7 @@ export function parseReplacements(response: string): Replacement[] {
 /**
  * Create an editset from matches and replacements.
  */
-export function createEditset(
-  matches: Match[],
-  replacements: Replacement[],
-): Editset {
+export function createEditset(matches: Match[], replacements: Replacement[]): Editset {
   const refs: Reference[] = []
   const edits: Edit[] = []
   const fileChecksums = new Map<string, string>()
@@ -195,20 +189,14 @@ export function createEditset(
     if (!fileChecksums.has(match.file)) {
       try {
         const content = readFileSync(match.file, "utf-8")
-        const hash = createHash("sha256")
-          .update(content)
-          .digest("hex")
-          .slice(0, 12)
+        const hash = createHash("sha256").update(content).digest("hex").slice(0, 12)
         fileChecksums.set(match.file, hash)
       } catch {
         fileChecksums.set(match.file, "unknown")
       }
     }
 
-    const refId = createHash("sha256")
-      .update(`${match.file}:${match.line}:${match.text}`)
-      .digest("hex")
-      .slice(0, 8)
+    const refId = createHash("sha256").update(`${match.file}:${match.line}:${match.text}`).digest("hex").slice(0, 8)
 
     refs.push({
       refId,

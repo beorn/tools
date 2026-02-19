@@ -18,18 +18,13 @@ import {
   getAllSessionTitles,
   getIndexMeta,
   getSessionContext,
+  toFts5Query,
   type MessageSearchOptions,
   type ContentSearchOptions,
 } from "./db"
 import type { ContentType } from "./types"
 import { indexProjectSources } from "./indexer"
-import {
-  getCheapModels,
-  getCheapModel,
-  estimateCost,
-  formatCost,
-  type Model,
-} from "../llm/types"
+import { getCheapModels, getCheapModel, estimateCost, formatCost, type Model } from "../llm/types"
 import { queryModel } from "../llm/research"
 import { isProviderAvailable } from "../llm/providers"
 
@@ -250,25 +245,12 @@ export function boostedRank(rank: number, timestamp: number): number {
  * (plans, summaries, todos), merges results by rank, deduplicates by session,
  * and optionally passes them through a cheap LLM for synthesis.
  */
-export async function recall(
-  query: string,
-  options: RecallOptions = {},
-): Promise<RecallResult> {
-  const {
-    limit = 10,
-    raw = false,
-    since,
-    json = false,
-    timeout = 4000,
-    snippetTokens = 200,
-    projectFilter,
-  } = options
+export async function recall(query: string, options: RecallOptions = {}): Promise<RecallResult> {
+  const { limit = 10, raw = false, since, json = false, timeout = 4000, snippetTokens = 200, projectFilter } = options
 
   const startTime = Date.now()
   const sinceLabel = since ?? "30d"
-  log(
-    `search query="${query.slice(0, 80)}" limit=${limit} since=${sinceLabel} raw=${raw} timeout=${timeout}ms`,
-  )
+  log(`search query="${query.slice(0, 80)}" limit=${limit} since=${sinceLabel} raw=${raw} timeout=${timeout}ms`)
 
   const db = getDb()
 
@@ -301,9 +283,7 @@ export async function recall(
     const searchStart = Date.now()
     const messageResults = ftsSearchWithSnippet(db, query, messageOpts)
     const msgMs = Date.now() - searchStart
-    log(
-      `FTS5 messages: ${messageResults.total} total, ${messageResults.results.length} returned (${msgMs}ms)`,
-    )
+    log(`FTS5 messages: ${messageResults.total} total, ${messageResults.results.length} returned (${msgMs}ms)`)
 
     // Search session-scoped content (plans, summaries, todos, first_prompts) with time filter
     const sessionContentOpts: ContentSearchOptions = {
@@ -324,14 +304,7 @@ export async function recall(
       limit: limit * 2,
       projectFilter,
       snippetTokens,
-      types: [
-        "bead",
-        "session_memory",
-        "project_memory",
-        "doc",
-        "claude_md",
-        "llm_research",
-      ] as ContentType[],
+      types: ["bead", "session_memory", "project_memory", "doc", "claude_md", "llm_research"] as ContentType[],
     }
 
     const projectContentResults = searchAll(db, query, projectContentOpts)
@@ -407,31 +380,60 @@ export async function recall(
 
     // Merge both content result sets
     const contentResults = {
-      results: [
-        ...sessionContentResults.results,
-        ...projectContentResults.results,
-      ],
+      results: [...sessionContentResults.results, ...projectContentResults.results],
       total: sessionContentResults.total + projectContentResults.total,
     }
     const searchMs = Date.now() - searchStart
-    log(
-      `FTS5 search: ${searchMs}ms (messages=${msgMs}ms session=${sessionMs}ms project=${projectMs}ms)`,
-    )
+    log(`FTS5 search: ${searchMs}ms (messages=${msgMs}ms session=${sessionMs}ms project=${projectMs}ms)`)
 
     // Get session titles for enrichment
     const sessionTitles = getAllSessionTitles()
+
+    // Session depth corroboration: sessions with more matching messages are more relevant.
+    // A session with 10 messages about the topic is more authoritative than one with 1 passing mention.
+    const corroborationStart = Date.now()
+    const ftsQuery = toFts5Query(query)
+    const sessionDepths = new Map<string, number>()
+    try {
+      const depthRows = db
+        .prepare(
+          `SELECT m.session_id, COUNT(*) as depth
+           FROM messages_fts f
+           JOIN messages m ON f.rowid = m.id
+           WHERE messages_fts MATCH ?
+           GROUP BY m.session_id
+           ORDER BY depth DESC
+           LIMIT 100`,
+        )
+        .all(ftsQuery) as { session_id: string; depth: number }[]
+      for (const r of depthRows) {
+        sessionDepths.set(r.session_id, r.depth)
+      }
+    } catch {
+      // FTS5 query parsing can fail for some edge cases — skip corroboration
+    }
+    const corroborationMs = Date.now() - corroborationStart
+    if (sessionDepths.size > 0) {
+      const maxDepth = Math.max(...sessionDepths.values())
+      log(`corroboration: ${sessionDepths.size} sessions, max depth=${maxDepth} (${corroborationMs}ms)`)
+    }
 
     // Merge results into a unified list
     const merged: RecallSearchResult[] = []
 
     for (const r of messageResults.results) {
+      // Apply corroboration boost: divide BM25 rank by log2(depth+1)
+      // BM25 is negative (more negative = better), so dividing by >1 makes it more negative = better
+      const depth = sessionDepths.get(r.session_id) ?? 1
+      const corroborationBoost = depth > 1 ? Math.log2(depth + 1) : 1
+
       merged.push({
         type: "message",
         sessionId: r.session_id,
         sessionTitle: sessionTitles.get(r.session_id) ?? null,
         timestamp: r.timestamp,
         snippet: r.snippet || (r.content?.slice(0, 500) ?? ""),
-        rank: r.rank,
+        rank: r.rank / corroborationBoost,
       })
     }
 
@@ -447,9 +449,7 @@ export async function recall(
     }
 
     // Sort by recency-boosted rank (bm25 * recency_factor — lower is better)
-    merged.sort(
-      (a, b) => boostedRank(a.rank, a.timestamp) - boostedRank(b.rank, b.timestamp),
-    )
+    merged.sort((a, b) => boostedRank(a.rank, a.timestamp) - boostedRank(b.rank, b.timestamp))
 
     // Dedup: keep best result per session
     const seen = new Set<string>()
@@ -495,7 +495,9 @@ export async function recall(
       }
     }
     if (contextExpanded > 0) {
-      log(`session proximity: expanded ${contextExpanded} results with neighboring context (${Date.now() - proximityStart}ms)`)
+      log(
+        `session proximity: expanded ${contextExpanded} results with neighboring context (${Date.now() - proximityStart}ms)`,
+      )
     }
 
     // No results — return early
@@ -511,9 +513,7 @@ export async function recall(
 
     // Raw mode — return results as-is without LLM
     if (raw) {
-      log(
-        `raw mode — returning ${deduped.length} results without synthesis (${Date.now() - startTime}ms total)`,
-      )
+      log(`raw mode — returning ${deduped.length} results without synthesis (${Date.now() - startTime}ms total)`)
       return {
         query,
         synthesis: null,
@@ -690,9 +690,7 @@ async function synthesizeResults(
   results: RecallSearchResult[],
   timeoutMs: number,
 ): Promise<SynthesisResult> {
-  const models = getCheapModels(2).filter((m) =>
-    isProviderAvailable(m.provider),
-  )
+  const models = getCheapModels(2).filter((m) => isProviderAvailable(m.provider))
   if (models.length === 0) {
     log(`no LLM providers available for synthesis`)
     return { text: null }
@@ -700,18 +698,14 @@ async function synthesizeResults(
 
   const context = formatResultsForLlm(query, results)
   const modelNames = models.map((m) => m.modelId).join(", ")
-  log(
-    `LLM synthesis: racing [${modelNames}] context=${context.length} chars timeout=${timeoutMs}ms`,
-  )
+  log(`LLM synthesis: racing [${modelNames}] context=${context.length} chars timeout=${timeoutMs}ms`)
 
   const race = await raceLlmModels(context, SYNTHESIS_PROMPT, models, timeoutMs)
 
   if (race.winner) {
     log(`LLM winner: ${race.winner} in ${race.totalMs}ms`)
   } else {
-    log(
-      `LLM synthesis ${race.timedOut ? "aborted" : "failed"} after ${race.totalMs}ms (models: [${modelNames}])`,
-    )
+    log(`LLM synthesis ${race.timedOut ? "aborted" : "failed"} after ${race.totalMs}ms (models: [${modelNames}])`)
   }
 
   return {
@@ -721,39 +715,24 @@ async function synthesizeResults(
   }
 }
 
-function formatResultsForLlm(
-  query: string,
-  results: RecallSearchResult[],
-): string {
-  const lines: string[] = [
-    `Query: "${query}"`,
-    "",
-    `Found ${results.length} relevant results from prior sessions:`,
-    "",
-  ]
+function formatResultsForLlm(query: string, results: RecallSearchResult[]): string {
+  const lines: string[] = [`Query: "${query}"`, "", `Found ${results.length} relevant results from prior sessions:`, ""]
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i]!
     const date = new Date(r.timestamp).toISOString().split("T")[0]
-    const sessionLabel = r.sessionTitle
-      ? `${r.sessionTitle} (${r.sessionId.slice(0, 8)})`
-      : r.sessionId.slice(0, 8)
+    const sessionLabel = r.sessionTitle ? `${r.sessionTitle} (${r.sessionId.slice(0, 8)})` : r.sessionId.slice(0, 8)
 
     lines.push(`--- Result ${i + 1} [${r.type}] ${date} - ${sessionLabel} ---`)
 
     // Clean snippet markers
-    const cleanSnippet = r.snippet
-      .replace(/>>>/g, "")
-      .replace(/<<</g, "")
-      .trim()
+    const cleanSnippet = r.snippet.replace(/>>>/g, "").replace(/<<</g, "").trim()
     lines.push(cleanSnippet)
     lines.push("")
   }
 
   lines.push("---")
-  lines.push(
-    "Synthesize the above results into concise, actionable bullet points relevant to the query.",
-  )
+  lines.push("Synthesize the above results into concise, actionable bullet points relevant to the query.")
 
   return lines.join("\n")
 }
@@ -838,9 +817,7 @@ export interface ReviewResult {
  *
  * @param projectRoot - Absolute path to the project root (for finding settings.json)
  */
-export async function reviewMemorySystem(
-  projectRoot: string,
-): Promise<ReviewResult> {
+export async function reviewMemorySystem(projectRoot: string): Promise<ReviewResult> {
   const startTime = Date.now()
   log(`review: starting diagnostics for ${projectRoot}`)
   const recommendations: string[] = []
@@ -850,19 +827,14 @@ export async function reviewMemorySystem(
   const db = getDb()
   let indexHealth: ReviewResult["indexHealth"]
   try {
-    const sessions =
-      (db.prepare("SELECT COUNT(*) as n FROM sessions").get() as { n: number })
-        .n ?? 0
-    const messages =
-      (db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number })
-        .n ?? 0
+    const sessions = (db.prepare("SELECT COUNT(*) as n FROM sessions").get() as { n: number }).n ?? 0
+    const messages = (db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number }).n ?? 0
 
     // Content table counts by type
-    const contentCounts = db
-      .prepare(
-        "SELECT content_type, COUNT(*) as n FROM content GROUP BY content_type",
-      )
-      .all() as { content_type: string; n: number }[]
+    const contentCounts = db.prepare("SELECT content_type, COUNT(*) as n FROM content GROUP BY content_type").all() as {
+      content_type: string
+      n: number
+    }[]
     const countByType = new Map(contentCounts.map((r) => [r.content_type, r.n]))
 
     const plans = countByType.get("plan") ?? 0
@@ -885,9 +857,7 @@ export async function reviewMemorySystem(
 
     // Last rebuild time
     const lastRebuild = getIndexMeta(db, "last_rebuild") ?? null
-    const isStale = lastRebuild
-      ? Date.now() - new Date(lastRebuild).getTime() > ONE_HOUR_MS
-      : true
+    const isStale = lastRebuild ? Date.now() - new Date(lastRebuild).getTime() > ONE_HOUR_MS : true
 
     indexHealth = {
       sessions,
@@ -908,27 +878,17 @@ export async function reviewMemorySystem(
 
     // Index health recommendations
     if (isStale) {
-      const ago = lastRebuild
-        ? formatTimeSince(new Date(lastRebuild).getTime())
-        : "never"
-      recommendations.push(
-        `Index is stale (${ago}) — run \`bun recall index --incremental\``,
-      )
+      const ago = lastRebuild ? formatTimeSince(new Date(lastRebuild).getTime()) : "never"
+      recommendations.push(`Index is stale (${ago}) — run \`bun recall index --incremental\``)
     }
     if (firstPrompts === 0) {
-      recommendations.push(
-        "No first_prompt content indexed — run full index rebuild: `bun recall index`",
-      )
+      recommendations.push("No first_prompt content indexed — run full index rebuild: `bun recall index`")
     }
     if (plans === 0) {
-      recommendations.push(
-        "No plans indexed — no plan files found in ~/.claude/plans/",
-      )
+      recommendations.push("No plans indexed — no plan files found in ~/.claude/plans/")
     }
     if (sessions === 0) {
-      recommendations.push(
-        "No sessions indexed — run `bun recall index` to build the index",
-      )
+      recommendations.push("No sessions indexed — run `bun recall index` to build the index")
     }
   } finally {
     closeDb()
@@ -974,30 +934,16 @@ export async function reviewMemorySystem(
   }
 
   // Search quality recommendations
-  const totalResults = searchBenchmarks.reduce(
-    (sum, b) => sum + b.resultCount,
-    0,
-  )
+  const totalResults = searchBenchmarks.reduce((sum, b) => sum + b.resultCount, 0)
   if (totalResults === 0) {
-    recommendations.push(
-      "All benchmark queries returned 0 results — index may be empty or corrupt",
-    )
+    recommendations.push("All benchmark queries returned 0 results — index may be empty or corrupt")
   } else {
-    const allFromOneSess = searchBenchmarks.every(
-      (b) => b.uniqueSessions <= 1 && b.resultCount > 0,
-    )
+    const allFromOneSess = searchBenchmarks.every((b) => b.uniqueSessions <= 1 && b.resultCount > 0)
     if (allFromOneSess) {
-      recommendations.push(
-        "Results only from 1 session per query — index may be incomplete",
-      )
+      recommendations.push("Results only from 1 session per query — index may be incomplete")
     }
-    const avgLatency =
-      searchBenchmarks.reduce((sum, b) => sum + b.latencyMs, 0) /
-      searchBenchmarks.length
-    const diverseSessions = searchBenchmarks.reduce(
-      (sum, b) => sum + b.uniqueSessions,
-      0,
-    )
+    const avgLatency = searchBenchmarks.reduce((sum, b) => sum + b.latencyMs, 0) / searchBenchmarks.length
+    const diverseSessions = searchBenchmarks.reduce((sum, b) => sum + b.uniqueSessions, 0)
     if (avgLatency < 500 && totalResults > 0 && diverseSessions > 2) {
       recommendations.push(
         `Search quality is good — ${totalResults} results across ${diverseSessions} sessions in ${Math.round(avgLatency)}ms avg`,
@@ -1030,23 +976,15 @@ export async function reviewMemorySystem(
 
     // Recall quality recommendations
     if (!recallTest.synthesisOk) {
-      recommendations.push(
-        "LLM synthesis failed — check API keys (OPENAI_API_KEY, etc.)",
-      )
+      recommendations.push("LLM synthesis failed — check API keys (OPENAI_API_KEY, etc.)")
     } else {
       if (recallTest.synthesisLength < 50) {
-        recommendations.push(
-          `Synthesis too short (${recallTest.synthesisLength} chars) — may not be useful`,
-        )
+        recommendations.push(`Synthesis too short (${recallTest.synthesisLength} chars) — may not be useful`)
       } else if (recallTest.synthesisLength > 2000) {
-        recommendations.push(
-          `Synthesis too long (${recallTest.synthesisLength} chars) — consider reducing --limit`,
-        )
+        recommendations.push(`Synthesis too long (${recallTest.synthesisLength} chars) — consider reducing --limit`)
       }
       if (durationMs > 8000) {
-        recommendations.push(
-          `Synthesis is slow (${(durationMs / 1000).toFixed(1)}s) — consider reducing --limit`,
-        )
+        recommendations.push(`Synthesis is slow (${(durationMs / 1000).toFixed(1)}s) — consider reducing --limit`)
       }
       if (
         recallTest.synthesisOk &&
@@ -1054,9 +992,7 @@ export async function reviewMemorySystem(
         recallTest.synthesisLength <= 2000 &&
         durationMs <= 8000
       ) {
-        const cost = recallTest.llmCost
-          ? `$${recallTest.llmCost.toFixed(4)}`
-          : "N/A"
+        const cost = recallTest.llmCost ? `$${recallTest.llmCost.toFixed(4)}` : "N/A"
         recommendations.push(
           `Synthesis working — ${recallTest.synthesisLength} chars in ${(durationMs / 1000).toFixed(1)}s (${cost})`,
         )
@@ -1069,22 +1005,12 @@ export async function reviewMemorySystem(
   // ── LLM Race Benchmark ─────────────────────────────────────────────────
   log(`review: running LLM race benchmark...`)
   let llmRaceBenchmark: ReviewResult["llmRaceBenchmark"] = null
-  const raceModels = getCheapModels(2).filter((m) =>
-    isProviderAvailable(m.provider),
-  )
+  const raceModels = getCheapModels(2).filter((m) => isProviderAvailable(m.provider))
 
   if (raceModels.length > 0) {
-    const raceQueries = [
-      "inline edit",
-      "bug fix",
-      "refactor",
-      "test failure",
-      "keyboard input",
-    ]
+    const raceQueries = ["inline edit", "bug fix", "refactor", "test failure", "keyboard input"]
     const raceTimeoutMs = 10000 // generous for benchmarking
-    const raceResults: NonNullable<
-      ReviewResult["llmRaceBenchmark"]
-    >["results"] = []
+    const raceResults: NonNullable<ReviewResult["llmRaceBenchmark"]>["results"] = []
 
     for (const q of raceQueries) {
       try {
@@ -1098,12 +1024,7 @@ export async function reviewMemorySystem(
         })
         const contentResults = searchAll(db, q, {
           limit: 10,
-          types: [
-            "bead",
-            "session_memory",
-            "doc",
-            "llm_research",
-          ] as ContentType[],
+          types: ["bead", "session_memory", "doc", "llm_research"] as ContentType[],
           snippetTokens: 200,
         })
         closeDb()
@@ -1140,12 +1061,7 @@ export async function reviewMemorySystem(
           `review: racing "${q}" context=${context.length} chars across [${raceModels.map((m) => m.modelId).join(", ")}]`,
         )
 
-        const race = await raceLlmModels(
-          context,
-          SYNTHESIS_PROMPT,
-          raceModels,
-          raceTimeoutMs,
-        )
+        const race = await raceLlmModels(context, SYNTHESIS_PROMPT, raceModels, raceTimeoutMs)
 
         raceResults.push({
           query: q,
@@ -1161,9 +1077,7 @@ export async function reviewMemorySystem(
           `review: "${q}" → ${race.winner ?? "TIMEOUT"} in ${race.totalMs}ms [${race.perModel.map((m) => `${m.model}=${m.ms}ms(${m.status})`).join(", ")}]`,
         )
       } catch (err) {
-        log(
-          `review: race benchmark error for "${q}": ${err instanceof Error ? err.message : String(err)}`,
-        )
+        log(`review: race benchmark error for "${q}": ${err instanceof Error ? err.message : String(err)}`)
       }
     }
 
@@ -1195,16 +1109,10 @@ export async function reviewMemorySystem(
           timeoutPct: Math.round((timeoutCount / raceResults.length) * 100),
           p50Ms: percentile(allLlmMs, 50),
           p95Ms: percentile(allLlmMs, 95),
-          avgSearchMs: Math.round(
-            raceResults.reduce((s, r) => s + r.searchMs, 0) /
-              raceResults.length,
-          ),
-          avgLlmMs: Math.round(
-            raceResults.reduce((s, r) => s + r.totalMs, 0) / raceResults.length,
-          ),
+          avgSearchMs: Math.round(raceResults.reduce((s, r) => s + r.searchMs, 0) / raceResults.length),
+          avgLlmMs: Math.round(raceResults.reduce((s, r) => s + r.totalMs, 0) / raceResults.length),
           totalCost,
-          costPerQuery:
-            raceResults.length > 0 ? totalCost / raceResults.length : 0,
+          costPerQuery: raceResults.length > 0 ? totalCost / raceResults.length : 0,
         },
       }
 
@@ -1219,9 +1127,7 @@ export async function reviewMemorySystem(
           `LLM race P95: ${(llmRaceBenchmark.summary.p95Ms / 1000).toFixed(1)}s — consider making raw mode the default`,
         )
       }
-      const topWinner = Object.entries(winsByModel).sort(
-        (a, b) => b[1] - a[1],
-      )[0]
+      const topWinner = Object.entries(winsByModel).sort((a, b) => b[1] - a[1])[0]
       if (topWinner) {
         recommendations.push(
           `LLM race winner: ${topWinner[0]} won ${topWinner[1]}/${raceResults.length} (P50=${(llmRaceBenchmark.summary.p50Ms / 1000).toFixed(1)}s, P95=${(llmRaceBenchmark.summary.p95Ms / 1000).toFixed(1)}s)`,
@@ -1229,14 +1135,10 @@ export async function reviewMemorySystem(
       }
     }
   } else {
-    recommendations.push(
-      "No cheap LLM providers available for race benchmark — check API keys",
-    )
+    recommendations.push("No cheap LLM providers available for race benchmark — check API keys")
   }
 
-  log(
-    `review: completed in ${Date.now() - startTime}ms — ${recommendations.length} recommendations`,
-  )
+  log(`review: completed in ${Date.now() - startTime}ms — ${recommendations.length} recommendations`)
 
   return {
     indexHealth,
@@ -1256,10 +1158,7 @@ function percentile(sorted: number[], pct: number): number {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function checkHookConfig(
-  projectRoot: string,
-  recommendations: string[],
-): ReviewResult["hookConfig"] {
+function checkHookConfig(projectRoot: string, recommendations: string[]): ReviewResult["hookConfig"] {
   const settingsPath = path.join(projectRoot, ".claude", "settings.json")
   let userPromptSubmitConfigured = false
   let sessionEndConfigured = false
@@ -1274,20 +1173,14 @@ function checkHookConfig(
       sessionEndConfigured = "SessionEnd" in settings.hooks
     }
   } catch {
-    recommendations.push(
-      "Could not read .claude/settings.json — hook config unknown",
-    )
+    recommendations.push("Could not read .claude/settings.json — hook config unknown")
   }
 
   if (!userPromptSubmitConfigured) {
-    recommendations.push(
-      "UserPromptSubmit hook not configured — auto-recall is disabled",
-    )
+    recommendations.push("UserPromptSubmit hook not configured — auto-recall is disabled")
   }
   if (!sessionEndConfigured) {
-    recommendations.push(
-      "SessionEnd hook not configured — session lessons won't be saved",
-    )
+    recommendations.push("SessionEnd hook not configured — session lessons won't be saved")
   }
 
   // Check hook commands point to recall.ts
@@ -1306,8 +1199,7 @@ function checkHookConfig(
     }
     for (const entry of hookEntries.SessionEnd ?? []) {
       for (const h of entry.hooks ?? []) {
-        if (h.command?.includes("recall.ts remember"))
-          rememberHookConfigured = true
+        if (h.command?.includes("recall.ts remember")) rememberHookConfigured = true
       }
     }
   } catch {
@@ -1325,8 +1217,7 @@ function checkHookConfig(
           try {
             const content = fs.readFileSync(hookPath, "utf8")
             if (content.includes("recall.ts index")) recallHookConfigured = true
-            if (content.includes("recall.ts summarize"))
-              rememberHookConfigured = true
+            if (content.includes("recall.ts summarize")) rememberHookConfigured = true
           } catch {
             // Skip unreadable files
           }
@@ -1338,14 +1229,10 @@ function checkHookConfig(
   }
 
   if (userPromptSubmitConfigured && !recallHookConfigured) {
-    recommendations.push(
-      "UserPromptSubmit hook exists but doesn't call recall.ts hook",
-    )
+    recommendations.push("UserPromptSubmit hook exists but doesn't call recall.ts hook")
   }
   if (sessionEndConfigured && !rememberHookConfigured) {
-    recommendations.push(
-      "SessionEnd hook exists but doesn't call recall.ts remember",
-    )
+    recommendations.push("SessionEnd hook exists but doesn't call recall.ts remember")
   }
 
   // Count session memory files
@@ -1361,9 +1248,7 @@ function checkHookConfig(
   }
 
   if (sessionMemoryFiles === 0) {
-    recommendations.push(
-      "No session memory files found — SessionEnd hook may not be firing",
-    )
+    recommendations.push("No session memory files found — SessionEnd hook may not be firing")
   }
 
   return {
@@ -1417,13 +1302,8 @@ function runSearchBenchmark(
       const latencyMs = Date.now() - startTime
       const snippetLengths = results.results.map((r) => r.snippet.length)
       const avgSnippetLength =
-        snippetLengths.length > 0
-          ? Math.round(
-              snippetLengths.reduce((a, b) => a + b, 0) / snippetLengths.length,
-            )
-          : 0
-      const uniqueSessions = new Set(results.results.map((r) => r.source_id))
-        .size
+        snippetLengths.length > 0 ? Math.round(snippetLengths.reduce((a, b) => a + b, 0) / snippetLengths.length) : 0
+      const uniqueSessions = new Set(results.results.map((r) => r.source_id)).size
 
       return {
         query: label,
@@ -1447,16 +1327,9 @@ function runSearchBenchmark(
     const sessionTitles = getAllSessionTitles()
     const snippetLengths = msgResults.results.map((r) => r.snippet.length)
     const avgSnippetLength =
-      snippetLengths.length > 0
-        ? Math.round(
-            snippetLengths.reduce((a, b) => a + b, 0) / snippetLengths.length,
-          )
-        : 0
-    const uniqueSessions = new Set(msgResults.results.map((r) => r.session_id))
-      .size
-    const hasTitles = msgResults.results.some(
-      (r) => sessionTitles.get(r.session_id) !== undefined,
-    )
+      snippetLengths.length > 0 ? Math.round(snippetLengths.reduce((a, b) => a + b, 0) / snippetLengths.length) : 0
+    const uniqueSessions = new Set(msgResults.results.map((r) => r.session_id)).size
+    const hasTitles = msgResults.results.some((r) => sessionTitles.get(r.session_id) !== undefined)
 
     return {
       query: label,
@@ -1499,12 +1372,7 @@ function ensureProjectSourcesIndexed(): void {
     const startTime = Date.now()
     const result = indexProjectSources(db, projectRoot)
     const total =
-      result.beads +
-      result.sessionMemory +
-      result.projectMemory +
-      result.docs +
-      result.claudeMd +
-      result.research
+      result.beads + result.sessionMemory + result.projectMemory + result.docs + result.claudeMd + result.research
     if (total > 0) {
       log(
         `indexed ${total} project sources (${Date.now() - startTime}ms): beads=${result.beads} memory=${result.sessionMemory} project=${result.projectMemory} docs=${result.docs} claude=${result.claudeMd} research=${result.research}`,
@@ -1512,9 +1380,7 @@ function ensureProjectSourcesIndexed(): void {
     }
     // Don't close db here — recall() will use it and close when done
   } catch (e) {
-    log(
-      `project source indexing failed: ${e instanceof Error ? e.message : String(e)}`,
-    )
+    log(`project source indexing failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -1586,9 +1452,7 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
   // Results become eligible again after DEDUP_TTL_TURNS turns
   const DEDUP_TTL_TURNS = 10
   const claudeSessionId = process.env.CLAUDE_SESSION_ID
-  const seenFile = claudeSessionId
-    ? path.join(os.tmpdir(), `recall-hook-seen-${claudeSessionId}.json`)
-    : null
+  const seenFile = claudeSessionId ? path.join(os.tmpdir(), `recall-hook-seen-${claudeSessionId}.json`) : null
   let seen: Record<string, number> = {} // key → turn number when last injected
   let turnNumber = 0
   if (seenFile) {
@@ -1623,9 +1487,15 @@ export async function hookRecall(prompt: string): Promise<HookResult> {
     // Strip FTS5 highlight markers (both >>> and <<<)
     text = text.replace(/>>>|<<</g, "")
     // Strip JSON-like fragments (tool calls, parameters)
-    text = text.replace(/\{"[^"]*"[^}]*\}/g, "").replace(/\{[^}]{0,50}\}?/g, "").trim()
+    text = text
+      .replace(/\{"[^"]*"[^}]*\}/g, "")
+      .replace(/\{[^}]{0,50}\}?/g, "")
+      .trim()
     // Strip [Assistant]/[User] prefixes and --- separators
-    text = text.replace(/\[(?:Assistant|User)\]\s*/g, "").replace(/^-{3,}\n?/gm, "").trim()
+    text = text
+      .replace(/\[(?:Assistant|User)\]\s*/g, "")
+      .replace(/^-{3,}\n?/gm, "")
+      .trim()
     // Collapse whitespace
     text = text.replace(/\n{3,}/g, "\n\n").trim()
     if (text.length < 20) continue // Skip near-empty results
@@ -1689,9 +1559,7 @@ If nothing noteworthy was learned, respond with just: NONE`
  * Extract lessons from a session transcript and append to a dated memory file.
  * Throws on actual errors (fail loud).
  */
-export async function remember(
-  options: RememberOptions,
-): Promise<RememberResult> {
+export async function remember(options: RememberOptions): Promise<RememberResult> {
   const { transcriptPath, sessionId, memoryDir } = options
   const startTime = Date.now()
 
@@ -1706,29 +1574,21 @@ export async function remember(
   const extractStart = Date.now()
   const messages = extractTranscriptMessages(transcriptPath)
   if (!messages) {
-    log(
-      `no user/assistant messages found in transcript (${Date.now() - extractStart}ms)`,
-    )
+    log(`no user/assistant messages found in transcript (${Date.now() - extractStart}ms)`)
     return { skipped: true, reason: "no_messages" }
   }
-  log(
-    `extracted ${messages.length} chars from transcript (${Date.now() - extractStart}ms)`,
-  )
+  log(`extracted ${messages.length} chars from transcript (${Date.now() - extractStart}ms)`)
 
   // Check LLM availability
   const model = getCheapModel()
   if (!model || !isProviderAvailable(model.provider)) {
-    log(
-      `no LLM provider available (model: ${model?.modelId ?? "none"}, provider: ${model?.provider ?? "none"})`,
-    )
+    log(`no LLM provider available (model: ${model?.modelId ?? "none"}, provider: ${model?.provider ?? "none"})`)
     return { skipped: true, reason: "no_llm_provider" }
   }
 
   // Synthesize lessons
   const fullPrompt = `${REMEMBER_PROMPT}\n\nSession transcript (last messages):\n${messages}`
-  log(
-    `LLM synthesis: model=${model.modelId} provider=${model.provider} prompt=${fullPrompt.length} chars`,
-  )
+  log(`LLM synthesis: model=${model.modelId} provider=${model.provider} prompt=${fullPrompt.length} chars`)
   const llmStart = Date.now()
   const result = await queryModel({ question: fullPrompt, model })
   const synthesis = result.response.content
@@ -1757,9 +1617,7 @@ export async function remember(
   fs.appendFileSync(memoryFile, entry)
 
   const lessonsCount = (synthesis.match(/^[-*]/gm) || []).length
-  log(
-    `saved ${lessonsCount} lessons (${synthesis.length} chars) to ${memoryFile} (${Date.now() - startTime}ms total)`,
-  )
+  log(`saved ${lessonsCount} lessons (${synthesis.length} chars) to ${memoryFile} (${Date.now() - startTime}ms total)`)
 
   return {
     skipped: false,

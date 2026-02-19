@@ -54,10 +54,7 @@ export function formatBead(bead: BeadRecord): {
 /**
  * Extract the first markdown heading as a title, with fallback.
  */
-export function extractMarkdownTitle(
-  content: string,
-  fallback: string,
-): string {
+export function extractMarkdownTitle(content: string, fallback: string): string {
   const match = content.match(/^#\s+(.+)$/m)
   return match?.[1] ?? fallback
 }

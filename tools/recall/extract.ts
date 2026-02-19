@@ -35,15 +35,13 @@ export interface SessionExtract {
 export function findSessionJsonl(sessionId: string): string | null {
   const db = getDb()
   try {
-    const row = db
-      .prepare("SELECT jsonl_path FROM sessions WHERE id = ?")
-      .get(sessionId) as { jsonl_path: string } | undefined
+    const row = db.prepare("SELECT jsonl_path FROM sessions WHERE id = ?").get(sessionId) as
+      | { jsonl_path: string }
+      | undefined
 
     if (!row?.jsonl_path) return null
 
-    const fullPath = row.jsonl_path.startsWith("/")
-      ? row.jsonl_path
-      : path.join(PROJECTS_DIR, row.jsonl_path)
+    const fullPath = row.jsonl_path.startsWith("/") ? row.jsonl_path : path.join(PROJECTS_DIR, row.jsonl_path)
 
     return fs.existsSync(fullPath) ? fullPath : null
   } catch {
@@ -169,12 +167,7 @@ export function isSubAgent(sessionId: string): boolean {
 
         for (const block of content) {
           if (typeof block === "string" && block.length > 0) return false
-          if (
-            block &&
-            typeof block === "object" &&
-            block.type === "text" &&
-            block.text
-          ) {
+          if (block && typeof block === "object" && block.type === "text" && block.text) {
             return false
           }
         }

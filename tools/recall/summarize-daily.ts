@@ -113,9 +113,7 @@ export async function summarizeDay(
   date: string,
   opts: { projectFilter?: string; verbose?: boolean } = {},
 ): Promise<DailySummaryResult> {
-  const log = opts.verbose
-    ? (msg: string) => console.error(`[summarize] ${msg}`)
-    : () => {}
+  const log = opts.verbose ? (msg: string) => console.error(`[summarize] ${msg}`) : () => {}
 
   log(`summarizing ${date}...`)
 
@@ -148,9 +146,7 @@ export async function summarizeDay(
          FROM sessions WHERE updated_at >= ? AND updated_at <= ?
          ORDER BY created_at ASC`
 
-    const params = opts.projectFilter
-      ? [startMs, endMs, `%${opts.projectFilter}%`]
-      : [startMs, endMs]
+    const params = opts.projectFilter ? [startMs, endMs, `%${opts.projectFilter}%`] : [startMs, endMs]
 
     rows = db.prepare(query).all(...params) as SessionRecord[]
   } finally {
@@ -179,9 +175,7 @@ export async function summarizeDay(
       return false
     }
   })
-  log(
-    `${rows.length} total sessions, ${meaningfulSessions.length} meaningful (>5KB)`,
-  )
+  log(`${rows.length} total sessions, ${meaningfulSessions.length} meaningful (>5KB)`)
 
   if (meaningfulSessions.length === 0) {
     log(`no meaningful sessions for ${date}`)
@@ -206,12 +200,8 @@ export async function summarizeDay(
   )
 
   // Filter out sub-agent sessions and sessions with null summary
-  const usableSummaries = sessionSummaries.filter(
-    (s) => !s.isSubAgent && s.summary != null,
-  )
-  log(
-    `${sessionSummaries.length} session summaries, ${usableSummaries.length} usable (non-sub-agent with content)`,
-  )
+  const usableSummaries = sessionSummaries.filter((s) => !s.isSubAgent && s.summary != null)
+  log(`${sessionSummaries.length} session summaries, ${usableSummaries.length} usable (non-sub-agent with content)`)
 
   if (usableSummaries.length === 0) {
     log(`no usable session summaries for ${date}`)
@@ -230,10 +220,7 @@ export async function summarizeDay(
   const gitContent = await extractGitCommits(date, log)
 
   // Build LLM context from per-session summaries
-  const totalMessages = meaningfulSessions.reduce(
-    (s, sess) => s + (sess.message_count || 0),
-    0,
-  )
+  const totalMessages = meaningfulSessions.reduce((s, sess) => s + (sess.message_count || 0), 0)
   const projects = [...new Set(meaningfulSessions.map((s) => s.project_path))]
 
   let context = `# Daily Development Summary: ${date}\n\n`
@@ -268,9 +255,7 @@ export async function summarizeDay(
     context = context.slice(0, 30000) + "\n\n[...truncated]"
   }
 
-  log(
-    `LLM context: ${context.length} chars from ${usableSummaries.length} sessions`,
-  )
+  log(`LLM context: ${context.length} chars from ${usableSummaries.length} sessions`)
 
   // Check LLM availability
   const model = getCheapModel()
@@ -351,9 +336,7 @@ export async function summarizeUnprocessedDays(
   opts: { limit?: number; verbose?: boolean; projectFilter?: string } = {},
 ): Promise<DailySummaryResult[]> {
   const limit = opts.limit ?? 10
-  const log = opts.verbose
-    ? (msg: string) => console.error(`[summarize] ${msg}`)
-    : () => {}
+  const log = opts.verbose ? (msg: string) => console.error(`[summarize] ${msg}`) : () => {}
 
   const memoryDir = getSessionMemoryDir()
   const existingSummaries = new Set<string>()
@@ -385,9 +368,7 @@ export async function summarizeUnprocessedDays(
 
   // Filter out today (still in progress) and already-summarized days
   const today = localDateStr(new Date())
-  const unprocessed = days
-    .filter((d) => d !== today && !existingSummaries.has(d))
-    .slice(0, limit)
+  const unprocessed = days.filter((d) => d !== today && !existingSummaries.has(d)).slice(0, limit)
 
   if (unprocessed.length === 0) {
     log(`no unprocessed days found`)
@@ -444,9 +425,7 @@ export async function cmdSummarize(
       if (result.skipped) {
         console.error(`${result.date}: skipped (${result.reason})`)
       } else {
-        console.error(
-          `${result.date}: ${result.sessionsCount} sessions → ${result.memoryFile}`,
-        )
+        console.error(`${result.date}: ${result.sessionsCount} sessions → ${result.memoryFile}`)
       }
     }
 
@@ -500,13 +479,8 @@ export interface WeeklySummaryResult {
   reason?: string
 }
 
-export async function summarizeWeek(
-  weekOf: string,
-  opts: { verbose?: boolean } = {},
-): Promise<WeeklySummaryResult> {
-  const log = opts.verbose
-    ? (msg: string) => console.error(`[weekly] ${msg}`)
-    : () => {}
+export async function summarizeWeek(weekOf: string, opts: { verbose?: boolean } = {}): Promise<WeeklySummaryResult> {
+  const log = opts.verbose ? (msg: string) => console.error(`[weekly] ${msg}`) : () => {}
 
   // Parse the date and find the Monday of that week
   const target = new Date(`${weekOf}T12:00:00`)
@@ -556,9 +530,7 @@ export async function summarizeWeek(
     }
   }
 
-  log(
-    `found ${dailySummaries.length} daily summaries: ${daysIncluded.join(", ")}`,
-  )
+  log(`found ${dailySummaries.length} daily summaries: ${daysIncluded.join(", ")}`)
 
   // Build context — budget each day equally to avoid skew
   const WEEKLY_BUDGET = 28000 // leave room for header
@@ -630,10 +602,7 @@ export async function summarizeWeek(
   }
 }
 
-export async function cmdWeekly(
-  weekOf?: string,
-  opts: { verbose?: boolean } = {},
-): Promise<void> {
+export async function cmdWeekly(weekOf?: string, opts: { verbose?: boolean } = {}): Promise<void> {
   // Default to last week (most recent complete week)
   if (!weekOf) {
     const lastWeek = new Date()
@@ -683,9 +652,7 @@ export async function cmdShow(dateArg?: string): Promise<void> {
   if (dateArg) {
     const filePath = path.join(memoryDir, `${dateArg}.md`)
     if (!fs.existsSync(filePath)) {
-      console.error(
-        `No summary for ${dateArg}. Run \`bun recall summarize ${dateArg}\` to generate.`,
-      )
+      console.error(`No summary for ${dateArg}. Run \`bun recall summarize ${dateArg}\` to generate.`)
       return
     }
     console.log(fs.readFileSync(filePath, "utf8"))
@@ -718,9 +685,7 @@ export async function cmdShow(dateArg?: string): Promise<void> {
     console.log(`  ... and ${dailies.length - 14} more`)
   }
 
-  console.log(
-    `\nUsage: bun recall show <date>     # e.g. bun recall show 2026-02-06`,
-  )
+  console.log(`\nUsage: bun recall show <date>     # e.g. bun recall show 2026-02-06`)
   console.log(`       bun recall show week       # latest weekly summary`)
 }
 
@@ -731,14 +696,7 @@ export async function cmdShow(dateArg?: string): Promise<void> {
 function getSessionMemoryDir(): string {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
   const encodedPath = projectDir.replace(/\//g, "-")
-  return path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-    "sessions",
-  )
+  return path.join(os.homedir(), ".claude", "projects", encodedPath, "memory", "sessions")
 }
 
 function localDateStr(d: Date): string {
@@ -784,8 +742,7 @@ async function extractBeadsActivity(
 
     const lines = ["### Beads Activity\n"]
     for (const r of beadRows) {
-      const snippet =
-        r.content.length > 500 ? r.content.slice(0, 500) + "..." : r.content
+      const snippet = r.content.length > 500 ? r.content.slice(0, 500) + "..." : r.content
       lines.push(`**${r.title}** (${r.source_id})\n${snippet}\n`)
     }
     return lines.join("\n")
@@ -796,10 +753,7 @@ async function extractBeadsActivity(
   }
 }
 
-function extractPriorMistakes(
-  date: string,
-  log: (msg: string) => void,
-): string | null {
+function extractPriorMistakes(date: string, log: (msg: string) => void): string | null {
   const memoryDir = getSessionMemoryDir()
   if (!fs.existsSync(memoryDir)) return null
 
@@ -816,9 +770,7 @@ function extractPriorMistakes(
     try {
       const content = fs.readFileSync(filePath, "utf8")
       // Extract "## Mistakes & Dead Ends" section
-      const match = content.match(
-        /## Mistakes & Dead Ends\n([\s\S]*?)(?=\n## |\n---|\n$)/,
-      )
+      const match = content.match(/## Mistakes & Dead Ends\n([\s\S]*?)(?=\n## |\n---|\n$)/)
       if (match?.[1]?.trim()) {
         priorMistakes.push(`**${dayStr}:**\n${match[1].trim()}`)
       }
@@ -836,14 +788,7 @@ function extractPriorMistakes(
 function loadMemoryMd(log: (msg: string) => void): string | null {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
   const encodedPath = projectDir.replace(/\//g, "-")
-  const memoryPath = path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    encodedPath,
-    "memory",
-    "MEMORY.md",
-  )
+  const memoryPath = path.join(os.homedir(), ".claude", "projects", encodedPath, "memory", "MEMORY.md")
 
   try {
     let content = fs.readFileSync(memoryPath, "utf8")
@@ -858,21 +803,10 @@ function loadMemoryMd(log: (msg: string) => void): string | null {
   }
 }
 
-async function extractGitCommits(
-  date: string,
-  log: (msg: string) => void,
-): Promise<string | null> {
+async function extractGitCommits(date: string, log: (msg: string) => void): Promise<string | null> {
   try {
     const proc = Bun.spawn(
-      [
-        "git",
-        "log",
-        `--after=${date}T00:00:00`,
-        `--before=${date}T23:59:59`,
-        "--oneline",
-        "--no-merges",
-        "-30",
-      ],
+      ["git", "log", `--after=${date}T00:00:00`, `--before=${date}T23:59:59`, "--oneline", "--no-merges", "-30"],
       {
         cwd: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
         stdout: "pipe",

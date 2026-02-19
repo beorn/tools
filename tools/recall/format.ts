@@ -75,8 +75,7 @@ export function parseTime(timeStr: string): number | undefined {
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`
 }
 
@@ -97,16 +96,10 @@ export function displayProjectPath(encoded: string): string {
 }
 
 export function highlightMatch(text: string, regex: RegExp): string {
-  return text.replace(
-    new RegExp(`(${regex.source})`, "gi"),
-    `${BOLD}${YELLOW}$1${RESET}`,
-  )
+  return text.replace(new RegExp(`(${regex.source})`, "gi"), `${BOLD}${YELLOW}$1${RESET}`)
 }
 
-export function groupBy<T>(
-  items: T[],
-  keyFn: (item: T) => string,
-): Map<string, T[]> {
+export function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
   const map = new Map<string, T[]>()
   for (const item of items) {
     const key = keyFn(item)
@@ -120,10 +113,7 @@ export function groupBy<T>(
   return map
 }
 
-export function formatSessionId(
-  id: string,
-  titleMap: Map<string, string>,
-): string {
+export function formatSessionId(id: string, titleMap: Map<string, string>): string {
   const title = titleMap.get(id)
   return title ? `${title} (${id.slice(0, 8)})` : `${id.slice(0, 8)}...`
 }
@@ -192,10 +182,7 @@ export function parseInclude(includeStr: string): ContentType[] {
 /**
  * Match a project path against a glob pattern.
  */
-export function matchProjectGlob(
-  encodedPath: string,
-  pattern: string,
-): boolean {
+export function matchProjectGlob(encodedPath: string, pattern: string): boolean {
   const normalPath = encodedPath.replace(/-/g, "/")
   const regexStr = pattern
     .replace(/\*\*/g, "<<<GLOBSTAR>>>")
