@@ -7,6 +7,7 @@
 import { generateText, streamText } from "ai"
 import { getLanguageModel, isProviderAvailable } from "./providers"
 import { isOpenAIDeepResearch, queryOpenAIDeepResearch } from "./openai-deep"
+import { isGeminiDeepResearch, queryGeminiDeepResearch } from "./gemini-deep"
 import type { Model, ModelResponse, ThinkingLevel } from "./types"
 import { getModelsForLevel, getModel, MODELS } from "./types"
 
@@ -49,6 +50,18 @@ export async function queryModel(options: QueryOptions): Promise<QueryResult> {
   // Use direct OpenAI SDK for deep research models (requires web_search_preview)
   if (isOpenAIDeepResearch(model)) {
     const response = await queryOpenAIDeepResearch({
+      topic: question,
+      model,
+      stream,
+      onToken,
+      context,
+    })
+    return { response }
+  }
+
+  // Use Gemini Interactions API for Gemini deep research models
+  if (isGeminiDeepResearch(model)) {
+    const response = await queryGeminiDeepResearch({
       topic: question,
       model,
       stream,
@@ -205,9 +218,9 @@ export async function research(topic: string, options: ResearchCallOptions = {})
     }
   }
 
-  // For OpenAI deep research, pass topic and context separately
+  // For deep research models, pass topic and context separately
   // For other models, build the prompt ourselves
-  if (isOpenAIDeepResearch(model)) {
+  if (isOpenAIDeepResearch(model) || isGeminiDeepResearch(model)) {
     const result = await queryModel({
       question: topic,
       model,
