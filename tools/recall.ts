@@ -198,8 +198,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 }
 
 if (import.meta.main) {
-  main().catch((e) => {
+  try {
+    await main()
+  } catch (e) {
     console.error(`[recall] FATAL: ${e instanceof Error ? `${e.message}\n${e.stack}` : String(e)}`)
     process.exit(1)
-  })
+  }
 }

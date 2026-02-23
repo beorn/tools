@@ -48,11 +48,7 @@ interface InteractionResponse {
 /**
  * Create a deep research interaction via the Interactions API
  */
-async function createInteraction(
-  input: string,
-  agent: string,
-  options: { stream?: boolean } = {},
-): Promise<Response> {
+async function createInteraction(input: string, agent: string, options: { stream?: boolean } = {}): Promise<Response> {
   const apiKey = getApiKey()
   const url = options.stream ? `${BASE_URL}?alt=sse&key=${apiKey}` : `${BASE_URL}?key=${apiKey}`
 
@@ -97,11 +93,13 @@ function extractText(interaction: InteractionResponse): string {
 /**
  * Extract usage from interaction response
  */
-function extractUsage(interaction: InteractionResponse): {
-  promptTokens: number
-  completionTokens: number
-  totalTokens: number
-} | undefined {
+function extractUsage(interaction: InteractionResponse):
+  | {
+      promptTokens: number
+      completionTokens: number
+      totalTokens: number
+    }
+  | undefined {
   const meta = interaction.usageMetadata
   if (!meta) return undefined
   return {
@@ -448,7 +446,10 @@ export async function pollForGeminiCompletion(
       options.onProgress?.(interaction.status || "in_progress", Date.now() - startTime)
     } catch (err) {
       // Network errors during polling are transient - keep trying
-      options.onProgress?.(`error (retrying): ${err instanceof Error ? err.message : String(err)}`, Date.now() - startTime)
+      options.onProgress?.(
+        `error (retrying): ${err instanceof Error ? err.message : String(err)}`,
+        Date.now() - startTime,
+      )
     }
 
     await new Promise((resolve) => setTimeout(resolve, intervalMs))

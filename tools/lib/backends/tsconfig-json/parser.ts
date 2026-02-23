@@ -26,7 +26,6 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
 
   let config: Record<string, unknown>
   try {
-    // Handle JSON with comments (JSONC) - strip comments first
     const stripped = stripJsonComments(content)
     config = JSON.parse(stripped) as Record<string, unknown>
   } catch {
@@ -39,105 +38,80 @@ export function parseTsConfig(content: string): TsConfigPathRef[] {
     if (ref) refs.push({ field: "extends", path: config.extends, ...ref })
   }
 
-  // compilerOptions paths
+  // compilerOptions
   const compilerOptions = config.compilerOptions as Record<string, unknown> | undefined
   if (compilerOptions) {
-    // baseUrl
-    if (typeof compilerOptions.baseUrl === "string") {
-      const ref = findStringInJson(content, compilerOptions.baseUrl)
-      if (ref) {
-        refs.push({
-          field: "compilerOptions.baseUrl",
-          path: compilerOptions.baseUrl,
-          ...ref,
-        })
-      }
-    }
-
-    // outDir, rootDir, declarationDir
-    for (const field of ["outDir", "rootDir", "declarationDir", "outFile"]) {
-      if (typeof compilerOptions[field] === "string") {
-        const ref = findStringInJson(content, compilerOptions[field] as string)
-        if (ref) {
-          refs.push({
-            field: `compilerOptions.${field}`,
-            path: compilerOptions[field] as string,
-            ...ref,
-          })
-        }
-      }
-    }
-
-    // paths mapping
-    if (compilerOptions.paths && typeof compilerOptions.paths === "object") {
-      for (const [alias, targets] of Object.entries(compilerOptions.paths as Record<string, unknown>)) {
-        if (Array.isArray(targets)) {
-          for (const target of targets) {
-            if (typeof target === "string") {
-              const ref = findStringInJson(content, target)
-              if (ref) {
-                refs.push({
-                  field: `compilerOptions.paths['${alias}']`,
-                  path: target,
-                  ...ref,
-                  isGlob: target.includes("*"),
-                })
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // typeRoots
-    if (Array.isArray(compilerOptions.typeRoots)) {
-      for (const typeRoot of compilerOptions.typeRoots) {
-        if (typeof typeRoot === "string") {
-          const ref = findStringInJson(content, typeRoot)
-          if (ref) {
-            refs.push({
-              field: "compilerOptions.typeRoots[]",
-              path: typeRoot,
-              ...ref,
-            })
-          }
-        }
-      }
-    }
+    parseCompilerOptions(content, compilerOptions, refs)
   }
 
   // include, exclude, files
-  for (const field of ["include", "exclude", "files"]) {
-    if (Array.isArray(config[field])) {
-      for (const pattern of config[field] as string[]) {
-        if (typeof pattern === "string") {
-          const ref = findStringInJson(content, pattern)
-          if (ref) {
-            refs.push({
-              field: `${field}[]`,
-              path: pattern,
-              ...ref,
-              isGlob: pattern.includes("*"),
-            })
-          }
-        }
-      }
-    }
-  }
+  parseStringArrayFields(content, config, ["include", "exclude", "files"], refs)
 
   // references (project references)
-  if (Array.isArray(config.references)) {
-    for (const ref of config.references) {
-      if (typeof ref === "object" && ref && "path" in ref && typeof ref.path === "string") {
-        const pathRef = findStringInJson(content, ref.path)
-        if (pathRef) {
-          refs.push({ field: "references[].path", path: ref.path, ...pathRef })
-        }
+  parseProjectReferences(content, config, refs)
+
+  return refs
+}
+
+function parseCompilerOptions(content: string, opts: Record<string, unknown>, refs: TsConfigPathRef[]): void {
+  // baseUrl
+  addStringRef(content, opts.baseUrl, "compilerOptions.baseUrl", refs)
+
+  // outDir, rootDir, declarationDir, outFile
+  for (const field of ["outDir", "rootDir", "declarationDir", "outFile"]) {
+    addStringRef(content, opts[field], `compilerOptions.${field}`, refs)
+  }
+
+  // paths mapping
+  if (opts.paths && typeof opts.paths === "object") {
+    for (const [alias, targets] of Object.entries(opts.paths as Record<string, unknown>)) {
+      if (!Array.isArray(targets)) continue
+      for (const target of targets) {
+        if (typeof target !== "string") continue
+        const ref = findStringInJson(content, target)
+        if (ref)
+          refs.push({ field: `compilerOptions.paths['${alias}']`, path: target, ...ref, isGlob: target.includes("*") })
       }
     }
   }
 
-  return refs
+  // typeRoots
+  if (Array.isArray(opts.typeRoots)) {
+    for (const typeRoot of opts.typeRoots) {
+      addStringRef(content, typeRoot, "compilerOptions.typeRoots[]", refs)
+    }
+  }
+}
+
+function addStringRef(content: string, value: unknown, field: string, refs: TsConfigPathRef[]): void {
+  if (typeof value !== "string") return
+  const ref = findStringInJson(content, value)
+  if (ref) refs.push({ field, path: value, ...ref })
+}
+
+function parseStringArrayFields(
+  content: string,
+  config: Record<string, unknown>,
+  fields: string[],
+  refs: TsConfigPathRef[],
+): void {
+  for (const field of fields) {
+    if (!Array.isArray(config[field])) continue
+    for (const pattern of config[field] as string[]) {
+      if (typeof pattern !== "string") continue
+      const ref = findStringInJson(content, pattern)
+      if (ref) refs.push({ field: `${field}[]`, path: pattern, ...ref, isGlob: pattern.includes("*") })
+    }
+  }
+}
+
+function parseProjectReferences(content: string, config: Record<string, unknown>, refs: TsConfigPathRef[]): void {
+  if (!Array.isArray(config.references)) return
+  for (const ref of config.references) {
+    if (typeof ref !== "object" || !ref || !("path" in ref) || typeof ref.path !== "string") continue
+    const pathRef = findStringInJson(content, ref.path)
+    if (pathRef) refs.push({ field: "references[].path", path: ref.path, ...pathRef })
+  }
 }
 
 /**

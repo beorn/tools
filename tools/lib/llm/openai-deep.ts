@@ -41,17 +41,9 @@ export interface DeepResearchOptions {
 /**
  * Query OpenAI deep research model using Responses API
  */
-export async function queryOpenAIDeepResearch(options: DeepResearchOptions): Promise<ModelResponse> {
-  const { topic, model, stream = false, onToken, noPersist = false, context } = options
-  // Default to background mode for streaming to enable recovery
-  const background = options.background ?? stream
-  const startTime = Date.now()
-  const openai = getClient()
-
-  // Build the research prompt with optional context
+function buildResearchPrompt(topic: string, context?: string): string {
   const contextSection = context ? `## Background Context\n\n${context}\n\n---\n\n` : ""
-
-  const researchPrompt = `${contextSection}Research the following topic thoroughly. Provide comprehensive information with sources where possible.
+  return `${contextSection}Research the following topic thoroughly. Provide comprehensive information with sources where possible.
 
 Topic: ${topic}
 
@@ -61,189 +53,213 @@ Please provide:
 3. Different perspectives or approaches (if applicable)
 4. Recent developments or current state
 5. Sources and references (if available)`
+}
+
+function formatApiError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error)
+
+  const errorMap: Array<{ match: string; message: string }> = [
+    {
+      match: "verified",
+      message: "Organization not verified. Visit https://platform.openai.com/settings/organization/general to verify.",
+    },
+    { match: "rate_limit", message: "Rate limited. Wait a moment and try again." },
+    { match: "429", message: "Rate limited. Wait a moment and try again." },
+    {
+      match: "insufficient_quota",
+      message: "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing",
+    },
+    {
+      match: "billing",
+      message: "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing",
+    },
+    { match: "invalid_api_key", message: "Invalid API key. Check OPENAI_API_KEY environment variable." },
+    { match: "401", message: "Invalid API key. Check OPENAI_API_KEY environment variable." },
+  ]
+
+  for (const { match, message } of errorMap) {
+    if (msg.includes(match)) return message
+  }
+  return msg
+}
+
+async function handleStreamingResponse(
+  openai: ReturnType<typeof getClient>,
+  researchPrompt: string,
+  options: DeepResearchOptions & { background: boolean },
+): Promise<{ fullText: string; responseId: string; promptTokens: number; completionTokens: number }> {
+  const { model, topic, onToken, noPersist = false, background } = options
+  const response = await openai.responses.create({
+    model: model.modelId,
+    input: researchPrompt,
+    tools: [{ type: "web_search_preview" }],
+    stream: true,
+    background,
+  })
+
+  let responseId = ""
+  let partialPath = ""
+  let fullText = ""
+  let promptTokens = 0
+  let completionTokens = 0
+  let completed = false
+
+  for await (const event of response) {
+    if (!responseId && "response" in event && event.response?.id) {
+      responseId = event.response.id
+      if (!noPersist) {
+        partialPath = getPartialPath(responseId)
+        writePartialHeader(partialPath, {
+          responseId,
+          model: model.displayName,
+          modelId: model.modelId,
+          topic,
+          startedAt: new Date().toISOString(),
+        })
+      }
+    }
+
+    if (event.type === "response.output_text.delta") {
+      const delta = event.delta || ""
+      onToken?.(delta)
+      fullText += delta
+      if (partialPath) appendPartial(partialPath, delta)
+    } else if (event.type === "response.completed") {
+      completed = true
+      const usage = event.response?.usage
+      if (usage) {
+        promptTokens = usage.input_tokens || 0
+        completionTokens = usage.output_tokens || 0
+      }
+    }
+  }
+
+  // Handle disconnected stream with background polling
+  if (!completed && responseId && background) {
+    const pollResult = await handleStreamDisconnect(responseId, model, topic, fullText, partialPath, onToken)
+    fullText = pollResult.fullText
+    promptTokens = pollResult.promptTokens
+    completionTokens = pollResult.completionTokens
+    completed = pollResult.completed
+  } else if (!completed && !responseId && background) {
+    process.stderr.write("\n⚠️  Stream ended without yielding any events (no response ID received)\n")
+  }
+
+  // Clean up partial file
+  if (partialPath && completed) {
+    completePartial(partialPath, {
+      delete: true,
+      usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+    })
+  }
+
+  return { fullText, responseId, promptTokens, completionTokens }
+}
+
+async function handleStreamDisconnect(
+  responseId: string,
+  model: DeepResearchOptions["model"],
+  topic: string,
+  currentText: string,
+  partialPath: string,
+  onToken?: (token: string) => void,
+): Promise<{ fullText: string; promptTokens: number; completionTokens: number; completed: boolean }> {
+  process.stderr.write("\n⏳ Stream disconnected, polling for background response...\n")
+  let fullText = currentText
+  let promptTokens = 0
+  let completionTokens = 0
+
+  const pollResult = await pollForCompletion(responseId, {
+    intervalMs: 5_000,
+    maxAttempts: 180,
+    onProgress: (status, elapsed) => {
+      process.stderr.write(`\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`)
+    },
+  })
+
+  if (pollResult.content) {
+    const newContent = pollResult.content.slice(fullText.length)
+    if (newContent) onToken?.(newContent)
+    fullText = pollResult.content
+    process.stderr.write("\n")
+    if (partialPath) {
+      writePartialHeader(partialPath, {
+        responseId,
+        model: model.displayName,
+        modelId: model.modelId,
+        topic,
+        startedAt: new Date().toISOString(),
+      })
+      appendPartial(partialPath, fullText)
+    }
+  }
+  if (pollResult.usage) {
+    promptTokens = pollResult.usage.promptTokens
+    completionTokens = pollResult.usage.completionTokens
+  }
+
+  return { fullText, promptTokens, completionTokens, completed: pollResult.status === "completed" }
+}
+
+export async function queryOpenAIDeepResearch(options: DeepResearchOptions): Promise<ModelResponse> {
+  const { topic, model, stream = false, onToken, noPersist = false, context } = options
+  const background = options.background ?? stream
+  const startTime = Date.now()
+  const openai = getClient()
+  const researchPrompt = buildResearchPrompt(topic, context)
 
   try {
     if (stream && onToken) {
-      // Streaming with Responses API + background mode + persistence
-      const response = await openai.responses.create({
-        model: model.modelId,
-        input: researchPrompt,
-        tools: [{ type: "web_search_preview" }],
-        stream: true,
-        background,
-      })
-
-      // Get response ID from the stream (first event or headers)
-      let responseId = ""
-      let partialPath = ""
-      let fullText = ""
-      let promptTokens = 0
-      let completionTokens = 0
-      let lastSequence = 0
-      let completed = false
-
-      for await (const event of response) {
-        // Capture response ID from first event
-        if (!responseId && "response" in event && event.response?.id) {
-          responseId = event.response.id
-
-          // Initialize persistence
-          if (!noPersist) {
-            partialPath = getPartialPath(responseId)
-            writePartialHeader(partialPath, {
-              responseId,
-              model: model.displayName,
-              modelId: model.modelId,
-              topic,
-              startedAt: new Date().toISOString(),
-            })
-          }
-        }
-
-        // Track sequence number for potential resume
-        if ("sequence_number" in event && typeof event.sequence_number === "number") {
-          lastSequence = event.sequence_number
-        }
-
-        if (event.type === "response.output_text.delta") {
-          const delta = event.delta || ""
-          onToken(delta)
-          fullText += delta
-
-          // Persist incrementally
-          if (partialPath) {
-            appendPartial(partialPath, delta)
-          }
-        } else if (event.type === "response.completed") {
-          completed = true
-          // Extract usage from completed event
-          const usage = event.response?.usage
-          if (usage) {
-            promptTokens = usage.input_tokens || 0
-            completionTokens = usage.output_tokens || 0
-          }
-        }
-      }
-
-      // If stream ended without completing (connection dropped during deep research),
-      // fall back to polling retrieveResponse() until the background response finishes
-      if (!completed && !responseId && background) {
-        process.stderr.write("\n⚠️  Stream ended without yielding any events (no response ID received)\n")
-      }
-      if (!completed && responseId && background) {
-        process.stderr.write("\n⏳ Stream disconnected, polling for background response...\n")
-        const pollResult = await pollForCompletion(responseId, {
-          intervalMs: 5_000,
-          maxAttempts: 180, // 15 min max
-          onProgress: (status, elapsed) => {
-            process.stderr.write(`\r⏳ ${status} (${Math.round(elapsed / 1000)}s elapsed)`)
-          },
-        })
-
-        if (pollResult.content) {
-          // Polled content is the complete response — use it instead of stream fragments
-          const newContent = pollResult.content.slice(fullText.length)
-          if (newContent) onToken(newContent)
-          fullText = pollResult.content
-          process.stderr.write("\n")
-
-          if (partialPath) {
-            // Rewrite partial with complete content (stream fragments may be incomplete)
-            writePartialHeader(partialPath, {
-              responseId,
-              model: model.displayName,
-              modelId: model.modelId,
-              topic,
-              startedAt: new Date().toISOString(),
-            })
-            appendPartial(partialPath, fullText)
-          }
-        }
-        if (pollResult.usage) {
-          promptTokens = pollResult.usage.promptTokens
-          completionTokens = pollResult.usage.completionTokens
-        }
-        if (pollResult.status === "completed") {
-          completed = true
-        }
-      }
-
-      // Mark as complete and clean up
-      const usage = {
-        promptTokens,
-        completionTokens,
-        totalTokens: promptTokens + completionTokens,
-      }
-
-      if (partialPath) {
-        if (completed) {
-          // Delete partial file on successful completion
-          completePartial(partialPath, { delete: true, usage })
-        }
-        // If not completed, leave partial file for later recovery
-      }
-
+      const result = await handleStreamingResponse(openai, researchPrompt, { ...options, background })
       return {
         model,
-        content: fullText,
-        responseId,
-        usage,
+        content: result.fullText,
+        responseId: result.responseId,
+        usage: {
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+          totalTokens: result.promptTokens + result.completionTokens,
+        },
         durationMs: Date.now() - startTime,
       }
-    } else {
-      // Non-streaming (also uses background for consistency)
-      const response = await openai.responses.create({
-        model: model.modelId,
-        input: researchPrompt,
-        tools: [{ type: "web_search_preview" }],
-        background,
-      })
+    }
 
-      // Extract text from output
-      let fullText = ""
-      for (const item of response.output || []) {
-        if (item.type === "message" && item.content) {
-          for (const content of item.content) {
-            if (content.type === "output_text") {
-              fullText += content.text || ""
-            }
+    // Non-streaming
+    const response = await openai.responses.create({
+      model: model.modelId,
+      input: researchPrompt,
+      tools: [{ type: "web_search_preview" }],
+      background,
+    })
+
+    let fullText = ""
+    for (const item of response.output || []) {
+      if (item.type === "message" && item.content) {
+        for (const content of item.content) {
+          if (content.type === "output_text") {
+            fullText += content.text || ""
           }
         }
       }
+    }
 
-      const usage = response.usage
-
-      return {
-        model,
-        content: fullText,
-        responseId: response.id,
-        usage: usage
-          ? {
-              promptTokens: usage.input_tokens || 0,
-              completionTokens: usage.output_tokens || 0,
-              totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-            }
-          : undefined,
-        durationMs: Date.now() - startTime,
-      }
+    const usage = response.usage
+    return {
+      model,
+      content: fullText,
+      responseId: response.id,
+      usage: usage
+        ? {
+            promptTokens: usage.input_tokens || 0,
+            completionTokens: usage.output_tokens || 0,
+            totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
+          }
+        : undefined,
+      durationMs: Date.now() - startTime,
     }
   } catch (error) {
-    // Provide helpful error messages for common issues
-    let errorMessage = error instanceof Error ? error.message : String(error)
-
-    if (errorMessage.includes("verified")) {
-      errorMessage =
-        "Organization not verified. Visit https://platform.openai.com/settings/organization/general to verify."
-    } else if (errorMessage.includes("rate_limit") || errorMessage.includes("429")) {
-      errorMessage = "Rate limited. Wait a moment and try again."
-    } else if (errorMessage.includes("insufficient_quota") || errorMessage.includes("billing")) {
-      errorMessage = "Insufficient credits. Check your OpenAI billing at https://platform.openai.com/account/billing"
-    } else if (errorMessage.includes("invalid_api_key") || errorMessage.includes("401")) {
-      errorMessage = "Invalid API key. Check OPENAI_API_KEY environment variable."
-    }
-
+    const errorMessage = formatApiError(error)
     process.stderr.write(`\n❌ Deep research error: ${errorMessage}\n`)
-
     return {
       model,
       content: "",

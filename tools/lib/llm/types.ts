@@ -586,7 +586,12 @@ export const BEST_MODELS = {
   // Default query - best general-purpose models
   default: ["gpt-5.2", "gemini-3-pro-preview", "claude-sonnet-4-5-20250514", "grok-4"],
   // Deep research - models with web search/citations
-  deep: ["o3-deep-research-2025-06-26", "deep-research-pro-preview-12-2025", "sonar-deep-research", "o4-mini-deep-research-2025-06-26"],
+  deep: [
+    "o3-deep-research-2025-06-26",
+    "deep-research-pro-preview-12-2025",
+    "sonar-deep-research",
+    "o4-mini-deep-research-2025-06-26",
+  ],
   // Second opinion - prefer different provider than default
   opinion: ["gemini-3-pro-preview", "gemini-2.5-pro", "gpt-5.2", "grok-4"],
   // Debate - one from each major provider

@@ -149,77 +149,53 @@ export interface CreateOptions {
   allowDirty?: boolean // Skip uncommitted changes check
 }
 
-export async function createWorktree(name: string, branch?: string, options: CreateOptions = {}): Promise<void> {
-  const { install = true, direnv = true, hooks = true, allowDirty = false } = options
+async function checkUncommittedChanges(gitRoot: string, submodules: string[]): Promise<void> {
+  info("Checking for uncommitted changes...")
+  const issues: string[] = []
 
-  const gitRoot = findGitRoot(process.cwd())
-  if (!gitRoot) {
-    error("Not in a git repository")
+  // Check main repo
+  const mainStatus = await getWorktreeStatus(gitRoot)
+  if (mainStatus.dirty) {
+    issues.push(`Main repo has ${mainStatus.changes.length} uncommitted change(s)`)
+    for (const change of mainStatus.changes.slice(0, 3)) {
+      issues.push(DIM + `    ${change}` + RESET)
+    }
+    if (mainStatus.changes.length > 3) {
+      issues.push(DIM + `    ... and ${mainStatus.changes.length - 3} more` + RESET)
+    }
+  }
+
+  // Check submodules for uncommitted changes
+  for (const submodule of submodules) {
+    const subPath = join(gitRoot, submodule)
+    if (!existsSync(join(subPath, ".git"))) continue
+
+    const subStatus = await getWorktreeStatus(subPath)
+    if (subStatus.dirty) {
+      issues.push(`Submodule ${submodule} has ${subStatus.changes.length} uncommitted change(s)`)
+    }
+  }
+
+  if (issues.length > 0) {
+    error("Cannot create worktree - uncommitted changes detected:")
+    console.log("")
+    for (const issue of issues) {
+      console.log(YELLOW + "  " + issue + RESET)
+    }
+    console.log("")
+    console.log("The new worktree would not include these uncommitted changes,")
+    console.log("which could lead to confusion about what code is where.")
+    console.log("")
+    console.log("Options:")
+    console.log(CYAN + "  1. Commit your changes first" + RESET)
+    console.log(CYAN + "  2. Stash your changes: git stash" + RESET)
+    console.log(CYAN + "  3. Use --allow-dirty to create anyway (not recommended)" + RESET)
     process.exit(1)
   }
+  success("Working tree is clean")
+}
 
-  const repoName = basename(gitRoot)
-  const worktreePath = join(dirname(gitRoot), `${repoName}-${name}`)
-  const branchName = branch ?? `feat/${name}`
-
-  // Check if directory exists
-  if (existsSync(worktreePath)) {
-    error(`Directory already exists: ${worktreePath}`)
-    process.exit(1)
-  }
-
-  // Get submodules list (used in multiple checks)
-  const submodules = getSubmodulePaths(gitRoot)
-
-  // Check for uncommitted changes in main repo and submodules
-  // This ensures the new worktree will be an exact copy of the committed state
-  if (!allowDirty) {
-    info("Checking for uncommitted changes...")
-    const issues: string[] = []
-
-    // Check main repo
-    const mainStatus = await getWorktreeStatus(gitRoot)
-    if (mainStatus.dirty) {
-      issues.push(`Main repo has ${mainStatus.changes.length} uncommitted change(s)`)
-      for (const change of mainStatus.changes.slice(0, 3)) {
-        issues.push(DIM + `    ${change}` + RESET)
-      }
-      if (mainStatus.changes.length > 3) {
-        issues.push(DIM + `    ... and ${mainStatus.changes.length - 3} more` + RESET)
-      }
-    }
-
-    // Check submodules for uncommitted changes
-    for (const submodule of submodules) {
-      const subPath = join(gitRoot, submodule)
-      if (!existsSync(join(subPath, ".git"))) continue
-
-      const subStatus = await getWorktreeStatus(subPath)
-      if (subStatus.dirty) {
-        issues.push(`Submodule ${submodule} has ${subStatus.changes.length} uncommitted change(s)`)
-      }
-    }
-
-    if (issues.length > 0) {
-      error("Cannot create worktree - uncommitted changes detected:")
-      console.log("")
-      for (const issue of issues) {
-        console.log(YELLOW + "  " + issue + RESET)
-      }
-      console.log("")
-      console.log("The new worktree would not include these uncommitted changes,")
-      console.log("which could lead to confusion about what code is where.")
-      console.log("")
-      console.log("Options:")
-      console.log(CYAN + "  1. Commit your changes first" + RESET)
-      console.log(CYAN + "  2. Stash your changes: git stash" + RESET)
-      console.log(CYAN + "  3. Use --allow-dirty to create anyway (not recommended)" + RESET)
-      process.exit(1)
-    }
-    success("Working tree is clean")
-  }
-
-  // Check for unpushed submodule commits
+async function checkUnpushedSubmodules(gitRoot: string, submodules: string[]): Promise<void> {
   info("Checking submodule commits are pushed...")
   const unpushed: string[] = []
 
@@ -246,6 +222,79 @@ export async function createWorktree(name: string, branch?: string, options: Cre
     process.exit(1)
   }
   success("Submodules OK")
+}
+
+async function installDependencies(worktreePath: string): Promise<void> {
+  const hasBunLock = existsSync(join(worktreePath, "bun.lockb")) || existsSync(join(worktreePath, "bun.lock"))
+  const hasPackageJson = existsSync(join(worktreePath, "package.json"))
+  if (!hasPackageJson) return
+
+  if (hasBunLock) {
+    info("Running bun install...")
+    const result = await safeExec($`cd ${worktreePath} && bun install`)
+    if (result.exitCode !== 0) warn("bun install failed (continuing)")
+    else success("Dependencies installed")
+  } else if (existsSync(join(worktreePath, "package-lock.json"))) {
+    info("Running npm install...")
+    const result = await safeExec($`cd ${worktreePath} && npm install`)
+    if (result.exitCode !== 0) warn("npm install failed (continuing)")
+    else success("Dependencies installed")
+  }
+}
+
+async function allowDirenv(worktreePath: string): Promise<void> {
+  if (!existsSync(join(worktreePath, ".envrc"))) return
+  info("Allowing direnv...")
+  const result = await safeExec($`direnv allow ${worktreePath} 2>/dev/null`)
+  if (result.exitCode === 0) success("Direnv allowed")
+  else console.log(DIM + "  (direnv not available)" + RESET)
+}
+
+async function installHooks(worktreePath: string): Promise<void> {
+  if (!existsSync(join(worktreePath, "package.json"))) return
+  try {
+    const pkg = (await Bun.file(join(worktreePath, "package.json")).json()) as {
+      scripts?: { prepare?: string }
+    }
+    if (pkg.scripts?.prepare) {
+      info("Installing hooks...")
+      await safeExec($`cd ${worktreePath} && bun run prepare 2>/dev/null`)
+      success("Hooks installed")
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export async function createWorktree(name: string, branch?: string, options: CreateOptions = {}): Promise<void> {
+  const { install = true, direnv = true, hooks = true, allowDirty = false } = options
+
+  const gitRoot = findGitRoot(process.cwd())
+  if (!gitRoot) {
+    error("Not in a git repository")
+    process.exit(1)
+  }
+
+  const repoName = basename(gitRoot)
+  const worktreePath = join(dirname(gitRoot), `${repoName}-${name}`)
+  const branchName = branch ?? `feat/${name}`
+
+  // Check if directory exists
+  if (existsSync(worktreePath)) {
+    error(`Directory already exists: ${worktreePath}`)
+    process.exit(1)
+  }
+
+  // Get submodules list (used in multiple checks)
+  const submodules = getSubmodulePaths(gitRoot)
+
+  // Check for uncommitted changes in main repo and submodules
+  if (!allowDirty) {
+    await checkUncommittedChanges(gitRoot, submodules)
+  }
+
+  // Check for unpushed submodule commits
+  await checkUnpushedSubmodules(gitRoot, submodules)
 
   // Warn about existing worktrees
   const existingWorktrees = await getWorktrees(gitRoot)
@@ -308,57 +357,13 @@ export async function createWorktree(name: string, branch?: string, options: Cre
   }
 
   // Run package manager install
-  if (install) {
-    const hasBunLockb = existsSync(join(worktreePath, "bun.lockb")) || existsSync(join(worktreePath, "bun.lock"))
-    const hasPackageJson = existsSync(join(worktreePath, "package.json"))
-
-    if (hasPackageJson) {
-      if (hasBunLockb) {
-        info("Running bun install...")
-        const bunResult = await safeExec($`cd ${worktreePath} && bun install`)
-        if (bunResult.exitCode !== 0) {
-          warn("bun install failed (continuing)")
-        } else {
-          success("Dependencies installed")
-        }
-      } else if (existsSync(join(worktreePath, "package-lock.json"))) {
-        info("Running npm install...")
-        const npmResult = await safeExec($`cd ${worktreePath} && npm install`)
-        if (npmResult.exitCode !== 0) {
-          warn("npm install failed (continuing)")
-        } else {
-          success("Dependencies installed")
-        }
-      }
-    }
-  }
+  if (install) await installDependencies(worktreePath)
 
   // Allow direnv
-  if (direnv && existsSync(join(worktreePath, ".envrc"))) {
-    info("Allowing direnv...")
-    const direnvResult = await safeExec($`direnv allow ${worktreePath} 2>/dev/null`)
-    if (direnvResult.exitCode === 0) {
-      success("Direnv allowed")
-    } else {
-      console.log(DIM + "  (direnv not available)" + RESET)
-    }
-  }
+  if (direnv) await allowDirenv(worktreePath)
 
   // Run prepare script for hooks
-  if (hooks && existsSync(join(worktreePath, "package.json"))) {
-    try {
-      const pkg = (await Bun.file(join(worktreePath, "package.json")).json()) as {
-        scripts?: { prepare?: string }
-      }
-      if (pkg.scripts?.prepare) {
-        info("Installing hooks...")
-        await safeExec($`cd ${worktreePath} && bun run prepare 2>/dev/null`)
-        success("Hooks installed")
-      }
-    } catch {
-      // Ignore
-    }
-  }
+  if (hooks) await installHooks(worktreePath)
 
   console.log("")
   success(`Worktree ready: ${worktreePath}`)
@@ -589,6 +594,55 @@ export async function mergeWorktree(name: string, options: MergeOptions = {}): P
   success(`Merge complete: ${branchName} → ${currentBranch}`)
 }
 
+function formatBranchColor(wt: { branch: string; isDetached: boolean }): string {
+  if (wt.branch === "main" || wt.branch === "master") return GREEN + wt.branch + RESET
+  if (wt.isDetached) return RED + wt.branch + RESET
+  return BLUE + wt.branch + RESET
+}
+
+async function printWorktreeEntry(
+  wt: { path: string; branch: string; isDetached: boolean },
+  gitRoot: string,
+  detailed: boolean,
+): Promise<void> {
+  const name = basename(wt.path)
+  const isMain = wt.path === gitRoot
+  const status = await getWorktreeStatus(wt.path)
+  const dirty = status.dirty ? YELLOW + "*" + RESET : ""
+  const branchColor = formatBranchColor(wt)
+
+  if (!detailed) {
+    const marker = isMain ? CYAN + " (main)" + RESET : ""
+    console.log(`  ${name.padEnd(25)} ${branchColor}${dirty}${marker}`)
+    return
+  }
+
+  let submoduleDirty = ""
+  const submodules = getSubmodulePaths(wt.path)
+  for (const submodule of submodules) {
+    const subPath = join(wt.path, submodule)
+    if (!existsSync(join(subPath, ".git"))) continue
+    const subStatus = await getWorktreeStatus(subPath)
+    if (subStatus.dirty) {
+      submoduleDirty = YELLOW + " (submodule changes)" + RESET
+      break
+    }
+  }
+
+  console.log(`${name.padEnd(30)} ${branchColor}${dirty}${submoduleDirty}`)
+  console.log(DIM + `  ${wt.path}` + RESET)
+
+  if (status.dirty) {
+    for (const change of status.changes.slice(0, 5)) {
+      console.log(DIM + `    ${change}` + RESET)
+    }
+    if (status.changes.length > 5) {
+      console.log(DIM + `    ... and ${status.changes.length - 5} more` + RESET)
+    }
+  }
+  console.log("")
+}
+
 export async function listWorktrees(detailed = false): Promise<void> {
   const gitRoot = findGitRoot(process.cwd())
   if (!gitRoot) {
@@ -602,58 +656,7 @@ export async function listWorktrees(detailed = false): Promise<void> {
   const worktrees = await getWorktrees(gitRoot)
 
   for (const wt of worktrees) {
-    const name = basename(wt.path)
-    const isMain = wt.path === gitRoot
-
-    // Check for changes
-    const status = await getWorktreeStatus(wt.path)
-    const dirty = status.dirty ? YELLOW + "*" + RESET : ""
-
-    // Check submodules
-    let submoduleDirty = ""
-    if (detailed) {
-      const submodules = getSubmodulePaths(wt.path)
-      for (const submodule of submodules) {
-        const subPath = join(wt.path, submodule)
-        if (!existsSync(join(subPath, ".git"))) continue
-
-        const subStatus = await getWorktreeStatus(subPath)
-        if (subStatus.dirty) {
-          submoduleDirty = YELLOW + " (submodule changes)" + RESET
-          break
-        }
-      }
-    }
-
-    // Format branch color
-    let branchColor
-    if (wt.branch === "main" || wt.branch === "master") {
-      branchColor = GREEN + wt.branch + RESET
-    } else if (wt.isDetached) {
-      branchColor = RED + wt.branch + RESET
-    } else {
-      branchColor = BLUE + wt.branch + RESET
-    }
-
-    const marker = isMain ? CYAN + " (main)" + RESET : ""
-
-    if (detailed) {
-      console.log(`${name.padEnd(30)} ${branchColor}${dirty}${submoduleDirty}`)
-      console.log(DIM + `  ${wt.path}` + RESET)
-
-      // Show changes if dirty
-      if (status.dirty) {
-        for (const change of status.changes.slice(0, 5)) {
-          console.log(DIM + `    ${change}` + RESET)
-        }
-        if (status.changes.length > 5) {
-          console.log(DIM + `    ... and ${status.changes.length - 5} more` + RESET)
-        }
-      }
-      console.log("")
-    } else {
-      console.log(`  ${name.padEnd(25)} ${branchColor}${dirty}${marker}`)
-    }
+    await printWorktreeEntry(wt, gitRoot, detailed)
   }
 
   console.log("")
