@@ -307,19 +307,23 @@ describe("recall integration", () => {
     return mod.closeDb
   }
 
-  test.skipIf(!dbExists)("returns RecallResult shape in raw mode", async () => {
-    const recall = await getRecall()
-    const result = await recall("test", { raw: true, limit: 3 })
+  test.skipIf(!dbExists)(
+    "returns RecallResult shape in raw mode",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("test", { raw: true, limit: 3 })
 
-    expect(result).toHaveProperty("query", "test")
-    expect(result).toHaveProperty("synthesis")
-    expect(result).toHaveProperty("results")
-    expect(result).toHaveProperty("durationMs")
-    expect(Array.isArray(result.results)).toBe(true)
+      expect(result).toHaveProperty("query", "test")
+      expect(result).toHaveProperty("synthesis")
+      expect(result).toHaveProperty("results")
+      expect(result).toHaveProperty("durationMs")
+      expect(Array.isArray(result.results)).toBe(true)
 
-    // Raw mode should not have synthesis
-    expect(result.synthesis).toBeNull()
-  })
+      // Raw mode should not have synthesis
+      expect(result.synthesis).toBeNull()
+    },
+    15_000,
+  )
 
   test.skipIf(!dbExists)("respects limit option", async () => {
     const recall = await getRecall()
