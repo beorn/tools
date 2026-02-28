@@ -40,10 +40,10 @@ async function ensureBrowserInstalled(): Promise<void> {
 // Prevent unhandled errors from crashing the MCP server process.
 // The server should stay alive — individual tool calls return errors to the client.
 process.on("uncaughtException", (err) => {
-  console.error("[tty-mcp] uncaughtException:", err.message)
+  console.error("[tty-mcp] uncaughtException:", err.stack ?? err.message)
 })
 process.on("unhandledRejection", (err) => {
-  console.error("[tty-mcp] unhandledRejection:", err instanceof Error ? err.message : err)
+  console.error("[tty-mcp] unhandledRejection:", err instanceof Error ? (err.stack ?? err.message) : err)
 })
 
 /** Wrap a tool handler so errors become MCP error responses, not process crashes */

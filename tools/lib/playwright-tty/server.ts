@@ -105,9 +105,10 @@ export class PlaywrightTtyBackend {
       throw new Error(`Session not found: ${sessionId}. Active sessions: ${active}`)
     }
     if (!engine.alive) {
+      const info = engine.exitInfo ? ` (${engine.exitInfo})` : ""
       engine.close().catch(() => {})
       this.engines.delete(sessionId)
-      throw new Error(`Session ${sessionId} is dead (process exited). It has been removed.`)
+      throw new Error(`Session ${sessionId} is dead (process exited${info}). It has been removed.`)
     }
     return engine
   }

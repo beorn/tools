@@ -100,6 +100,8 @@ export interface TtyEngine {
   waitForStable(stableMs: number, timeout: number): Promise<void>
   waitForContent(timeout: number): Promise<void>
   readonly alive: boolean
+  /** Exit info string (e.g., "exit=1") when process has exited, null otherwise */
+  readonly exitInfo: string | null
   close(): Promise<void>
   [Symbol.asyncDispose](): Promise<void>
 }
@@ -158,6 +160,16 @@ export function createTtyEngine(id: string, options: TtyEngineOptions): TtyEngin
 
   const createdAt = new Date()
   let closed = false
+  let exitCode: number | null = null
+  let exitSignal: string | null = null
+
+  // Log when process exits unexpectedly (helps diagnose "session is dead" errors)
+  proc.exited.then((code) => {
+    exitCode = code
+    if (!closed) {
+      console.error(`[tty-engine] session ${id} exited unexpectedly: code=${code} command=${command.join(" ")}`)
+    }
+  }).catch(() => {})
 
   function getText(): string {
     const buf = term.buffer.active
@@ -271,6 +283,9 @@ export function createTtyEngine(id: string, options: TtyEngineOptions): TtyEngin
     waitForContent,
     get alive() {
       return !closed && proc.exitCode === null
+    },
+    get exitInfo() {
+      return exitCode !== null ? `exit=${exitCode}` : exitSignal ? `signal=${exitSignal}` : null
     },
     close,
     [Symbol.asyncDispose]: close,
