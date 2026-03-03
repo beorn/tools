@@ -17,8 +17,8 @@
  */
 
 import { Command } from "commander"
-import { createTerminal } from "termless"
-import { createXtermBackend } from "termless-xtermjs"
+import { createTerminal } from "@termless/core"
+import { createXtermBackend } from "@termless/xtermjs"
 
 const POLL_INTERVAL = 50
 

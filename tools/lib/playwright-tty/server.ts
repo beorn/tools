@@ -10,9 +10,9 @@
  */
 
 import type { Browser } from "playwright"
-import type { Terminal } from "termless"
-import { createTerminal } from "termless"
-import { createXtermBackend } from "termless-xtermjs"
+import type { Terminal } from "@termless/core"
+import { createTerminal } from "@termless/core"
+import { createXtermBackend } from "@termless/xtermjs"
 import {
   TtyStartInputSchema,
   TtyStopInputSchema,

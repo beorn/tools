@@ -3,8 +3,8 @@
  *
  * @example
  * ```typescript
- * import { createTerminal } from "termless"
- * import { createXtermBackend } from "termless-xtermjs"
+ * import { createTerminal } from "@termless/core"
+ * import { createXtermBackend } from "@termless/xtermjs"
  *
  * const term = createTerminal({
  *   backend: createXtermBackend({ cols: 120, rows: 40 }),
