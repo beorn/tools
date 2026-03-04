@@ -87,10 +87,9 @@ program
         const { chromium } = await import("playwright")
         const browser = await chromium.launch()
         const page = await browser.newPage()
-        await page.setContent(
-          `<!DOCTYPE html><html><body style="margin:0;background:#000">${svg}</body></html>`,
-          { waitUntil: "load" },
-        )
+        await page.setContent(`<!DOCTYPE html><html><body style="margin:0;background:#000">${svg}</body></html>`, {
+          waitUntil: "load",
+        })
         await page.waitForTimeout(50)
         const buffer = await page.screenshot({ fullPage: true })
         const { writeFile } = await import("node:fs/promises")
