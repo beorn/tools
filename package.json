@@ -1,6 +1,6 @@
 {
   "name": "@beorn/tools",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Generic Claude Code tools - batch refactoring, multi-LLM research, TTY testing, session search",
   "type": "module",
   "exports": {

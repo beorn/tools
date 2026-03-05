@@ -88,7 +88,7 @@ Use Playwright key formats for `mcp__tty__press`:
 ```typescript
 {
   command: string[]              // Required: ["bun", "km", "view", "/path"]
-  env?: Record<string, string>   // Optional: { DEBUG: "inkx:*" }
+  env?: Record<string, string>   // Optional: { DEBUG: "hightea:*" }
   cols?: number                  // Terminal columns (default: 120)
   rows?: number                  // Terminal rows (default: 40)
   cwd?: string                   // Working directory
