@@ -9,7 +9,7 @@ import { join, dirname } from "path"
 import { MODELS, type Model } from "./types"
 
 // Cache location (in user's home directory)
-const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "beorn-tools")
+const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "tools")
 const PRICING_CACHE_FILE = join(CACHE_DIR, "llm-pricing.json")
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 

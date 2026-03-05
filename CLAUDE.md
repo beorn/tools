@@ -1,4 +1,4 @@
-# beorn-tools
+# tools
 
 Generic Claude Code tools - reusable across projects.
 
@@ -36,20 +36,20 @@ See `skills/` for Claude Code skill definitions:
 Include as git submodule in `vendor/`:
 
 ```bash
-git submodule add <repo-url> vendor/beorn-tools
+git submodule add <repo-url> vendor/tools
 ```
 
 Run tools:
 
 ```bash
-bun vendor/beorn-tools/tools/llm.ts ask "question"
-bun vendor/beorn-tools/tools/refactor.ts rename.batch --pattern foo --replace bar
+bun vendor/tools/tools/llm.ts ask "question"
+bun vendor/tools/tools/refactor.ts rename.batch --pattern foo --replace bar
 ```
 
 ## Development
 
 ```bash
-cd vendor/beorn-tools
+cd vendor/tools
 bun install
 bun run typecheck
 ```

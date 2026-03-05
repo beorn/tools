@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, appendFileSync } from "fs"
 import { join } from "path"
 
-const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "beorn-tools")
+const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "tools")
 const PARTIALS_DIR = join(CACHE_DIR, "llm-partials")
 
 export interface PartialMetadata {

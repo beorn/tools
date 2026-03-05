@@ -934,7 +934,7 @@ Each object: { "modelId": "exact-id-from-above", "inputPricePerM": number, "outp
           }
         }
         if (applied > 0) {
-          console.error(`\n⚠️  To persist, update vendor/beorn-tools/tools/lib/llm/types.ts`)
+          console.error(`\n⚠️  To persist, update vendor/tools/tools/lib/llm/types.ts`)
         }
       }
 

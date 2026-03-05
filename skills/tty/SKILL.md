@@ -9,7 +9,7 @@ Interactive terminal app testing - MCP server with termless (PTY + xterm.js).
   "mcpServers": {
     "tty": {
       "command": "bun",
-      "args": ["vendor/beorn-tools/tools/playwright-tty-mcp.ts"]
+      "args": ["vendor/tools/tools/playwright-tty-mcp.ts"]
     }
   }
 }
@@ -177,7 +177,7 @@ mcp__tty__stop({ sessionId: session2 })
 
 On first `mcp__tty__screenshot`, Chromium is automatically installed to a local cache:
 
-- Location: `vendor/beorn-tools/tools/.playwright-cache/`
+- Location: `vendor/tools/tools/.playwright-cache/`
 - One-time installation, reused for all future sessions
 - Text and key operations do NOT require Chromium
 

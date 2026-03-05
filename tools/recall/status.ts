@@ -39,8 +39,8 @@ import {
 
 /**
  * Resolve the project root directory.
- * The recall.ts script lives at vendor/beorn-tools/tools/recall.ts
- * So project root is 4 levels up from __dirname (tools/recall/ → tools/ → beorn-tools/ → vendor/ → root)
+ * The recall.ts script lives at vendor/tools/tools/recall.ts
+ * So project root is 4 levels up from __dirname (tools/recall/ → tools/ → tools/ → vendor/ → root)
  */
 function getProjectRoot(): string {
   let dir = path.resolve(import.meta.dir)
