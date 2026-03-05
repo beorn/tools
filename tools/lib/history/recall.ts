@@ -161,7 +161,7 @@ const SYNONYMS: Record<string, string[]> = {
   refactor: ["restructure", "reorganize", "cleanup", "clean-up"],
   perf: ["performance", "speed", "latency", "benchmark", "slow", "fast"],
   ui: ["interface", "component", "render", "display", "layout"],
-  tui: ["terminal", "ink", "inkx", "console"],
+  tui: ["terminal", "ink", "@hightea/term", "console"],
   db: ["database", "sqlite", "sql", "query"],
   dep: ["dependency", "package", "module", "import"],
   config: ["configuration", "settings", "options", "preferences"],
