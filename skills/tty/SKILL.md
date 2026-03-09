@@ -1,6 +1,6 @@
 # TTY Skill
 
-Interactive terminal app testing - MCP server with termless (PTY + xterm.js).
+Interactive terminal app testing - MCP server with Termless (PTY + xterm.js).
 
 **Configure in your project's `.mcp.json`:**
 
@@ -27,11 +27,11 @@ Interactive terminal app testing - MCP server with termless (PTY + xterm.js).
 ## Architecture
 
 ```
-MCP Server → termless (PTY + xterm.js backend) → target process
+MCP Server → Termless (PTY + xterm.js backend) → target process
                 └→ Playwright (lazy, screenshots only)
 ```
 
-- **termless** spawns the target process via Bun PTY and emulates the terminal with xterm.js
+- **Termless** spawns the target process via Bun PTY and emulates the terminal with xterm.js
 - **Playwright** is only launched lazily for `screenshot` (renders SVG to PNG)
 - No ttyd, no port allocation, no external processes
 

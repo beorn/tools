@@ -184,4 +184,3 @@ function findCandidateFiles(targetName: string, searchPath: string, glob: string
     throw error
   }
 }
-

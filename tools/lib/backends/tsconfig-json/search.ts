@@ -123,4 +123,3 @@ export function createTsConfigEditset(oldPath: string, newPath: string, searchPa
     createdAt: new Date().toISOString(),
   }
 }
-

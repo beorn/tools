@@ -182,4 +182,3 @@ export function findBrokenPackageJsonPaths(searchPath: string = "."): Reference[
 
   return refs
 }
-
