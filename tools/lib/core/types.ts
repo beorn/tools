@@ -35,8 +35,8 @@ export type Reference = z.infer<typeof Reference>
 // A single edit operation
 export const Edit = z.object({
   file: z.string(),
-  offset: z.number(), // byte offset
-  length: z.number(), // bytes to replace
+  offset: z.number(), // character offset (JS string index, NOT byte offset)
+  length: z.number(), // characters to replace (JS string length, NOT byte length)
   replacement: z.string(),
 })
 export type Edit = z.infer<typeof Edit>

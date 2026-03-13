@@ -217,7 +217,9 @@ export function createEditset(matches: Match[], replacements: Replacement[]): Ed
       const lineContent = lines[match.line - 1]
 
       if (lineContent !== undefined) {
-        // Calculate byte offset to this line
+        // Calculate character offset (JS string index) to this line.
+        // Uses string .length which counts UTF-16 code units, matching
+        // how apply.ts uses string.slice() to apply edits.
         let offset = 0
         for (let j = 0; j < match.line - 1; j++) {
           offset += lines[j]!.length + 1 // +1 for newline
