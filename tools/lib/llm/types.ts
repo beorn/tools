@@ -115,7 +115,39 @@ export type CompareOptions = z.infer<typeof CompareOptionsSchema>
 
 // Available models registry with pricing (per 1M tokens, USD)
 export const MODELS: Model[] = [
-  // OpenAI - GPT-5 series
+  // OpenAI - GPT-5.4 series (2026-03-05)
+  {
+    provider: "openai",
+    modelId: "gpt-5.4",
+    displayName: "GPT-5.4",
+    isDeepResearch: false,
+    costTier: "high",
+    inputPricePerM: 2.5,
+    outputPricePerM: 15.0,
+    typicalLatencyMs: 5000,
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-5.4-pro",
+    displayName: "GPT-5.4 Pro",
+    isDeepResearch: false,
+    costTier: "very-high",
+    inputPricePerM: 25.0,
+    outputPricePerM: 200.0,
+    typicalLatencyMs: 15000,
+  },
+  // OpenAI - GPT-5.3 series
+  {
+    provider: "openai",
+    modelId: "gpt-5.3-codex",
+    displayName: "GPT-5.3 Codex",
+    isDeepResearch: false,
+    costTier: "high",
+    inputPricePerM: 1.5,
+    outputPricePerM: 12.0,
+    typicalLatencyMs: 5000,
+  },
+  // OpenAI - GPT-5.2 series
   {
     provider: "openai",
     modelId: "gpt-5.2",
@@ -135,6 +167,17 @@ export const MODELS: Model[] = [
     inputPricePerM: 21.0,
     outputPricePerM: 168.0,
     typicalLatencyMs: 15000,
+  },
+  // OpenAI - GPT-5.1 series
+  {
+    provider: "openai",
+    modelId: "gpt-5.1-codex-max",
+    displayName: "GPT-5.1 Codex Max",
+    isDeepResearch: false,
+    costTier: "very-high",
+    inputPricePerM: 10.0,
+    outputPricePerM: 40.0,
+    typicalLatencyMs: 10000,
   },
   {
     provider: "openai",
@@ -182,8 +225,8 @@ export const MODELS: Model[] = [
     displayName: "GPT-5 Mini",
     isDeepResearch: false,
     costTier: "medium",
-    inputPricePerM: 0.3,
-    outputPricePerM: 1.2,
+    inputPricePerM: 0.25,
+    outputPricePerM: 2.0,
     typicalLatencyMs: 2000,
   },
   {
@@ -290,7 +333,28 @@ export const MODELS: Model[] = [
     typicalLatencyMs: 60000,
   },
 
-  // Anthropic
+  // Anthropic - Claude 4.6 series (latest)
+  {
+    provider: "anthropic",
+    modelId: "claude-opus-4-6",
+    displayName: "Claude Opus 4.6",
+    isDeepResearch: false,
+    costTier: "very-high",
+    inputPricePerM: 15.0,
+    outputPricePerM: 75.0,
+    typicalLatencyMs: 15000,
+  },
+  {
+    provider: "anthropic",
+    modelId: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6",
+    isDeepResearch: false,
+    costTier: "high",
+    inputPricePerM: 3.0,
+    outputPricePerM: 15.0,
+    typicalLatencyMs: 5000,
+  },
+  // Anthropic - Claude 4.5 series
   {
     provider: "anthropic",
     modelId: "claude-opus-4-5-20251101",
@@ -303,13 +367,24 @@ export const MODELS: Model[] = [
   },
   {
     provider: "anthropic",
-    modelId: "claude-sonnet-4-5-20250514",
+    modelId: "claude-sonnet-4-5-20250929",
     displayName: "Claude Sonnet 4.5",
     isDeepResearch: false,
     costTier: "high",
     inputPricePerM: 3.0,
     outputPricePerM: 15.0,
     typicalLatencyMs: 5000,
+  },
+  // Anthropic - Claude 4.1 / 4 series
+  {
+    provider: "anthropic",
+    modelId: "claude-opus-4-1-20250805",
+    displayName: "Claude Opus 4.1",
+    isDeepResearch: false,
+    costTier: "very-high",
+    inputPricePerM: 15.0,
+    outputPricePerM: 75.0,
+    typicalLatencyMs: 12000,
   },
   {
     provider: "anthropic",
@@ -331,15 +406,26 @@ export const MODELS: Model[] = [
     outputPricePerM: 15.0,
     typicalLatencyMs: 4000,
   },
+  // Anthropic - Claude Haiku
   {
     provider: "anthropic",
-    modelId: "claude-3-5-haiku-latest",
-    displayName: "Claude 3.5 Haiku",
+    modelId: "claude-haiku-4-5-20251001",
+    displayName: "Claude Haiku 4.5",
+    isDeepResearch: false,
+    costTier: "low",
+    inputPricePerM: 0.8,
+    outputPricePerM: 4.0,
+    typicalLatencyMs: 1500,
+  },
+  {
+    provider: "anthropic",
+    modelId: "claude-3-haiku-20240307",
+    displayName: "Claude 3 Haiku",
     isDeepResearch: false,
     costTier: "low",
     inputPricePerM: 0.25,
     outputPricePerM: 1.25,
-    typicalLatencyMs: 1500,
+    typicalLatencyMs: 1000,
   },
 
   // Google
@@ -412,8 +498,8 @@ export const MODELS: Model[] = [
     displayName: "Grok 4",
     isDeepResearch: false,
     costTier: "high",
-    inputPricePerM: 2.0,
-    outputPricePerM: 10.0,
+    inputPricePerM: 3.0,
+    outputPricePerM: 15.0,
     typicalLatencyMs: 5000,
   },
   {
@@ -421,9 +507,9 @@ export const MODELS: Model[] = [
     modelId: "grok-4-1-fast-reasoning",
     displayName: "Grok 4.1 Fast",
     isDeepResearch: false,
-    costTier: "medium",
-    inputPricePerM: 1.0,
-    outputPricePerM: 5.0,
+    costTier: "low",
+    inputPricePerM: 0.2,
+    outputPricePerM: 0.5,
     typicalLatencyMs: 3000,
   },
   {
@@ -584,20 +670,21 @@ export function requiresConfirmation(model: Model, threshold = 0.1): boolean {
  */
 export const BEST_MODELS = {
   // Default query - best general-purpose models
-  default: ["gpt-5.2", "gemini-3-pro-preview", "claude-sonnet-4-5-20250514", "grok-4"],
-  // Deep research - models with web search/citations
+  default: ["gpt-5.4", "gemini-3-pro-preview", "claude-sonnet-4-6", "grok-4"],
+  // Deep research - GPT-5.4 gives better results than deep research models for code review.
+  // Deep research APIs (o3, gemini) still available as fallback for web-search-heavy queries.
   deep: [
+    "gpt-5.4",
     "o3-deep-research-2025-06-26",
     "deep-research-pro-preview-12-2025",
     "sonar-deep-research",
-    "o4-mini-deep-research-2025-06-26",
   ],
   // Second opinion - prefer different provider than default
-  opinion: ["gemini-3-pro-preview", "gemini-2.5-pro", "gpt-5.2", "grok-4"],
+  opinion: ["gemini-3-pro-preview", "gemini-2.5-pro", "gpt-5.4", "grok-4"],
   // Debate - one from each major provider
-  debate: ["gpt-5.2", "gemini-3-pro-preview", "grok-4", "claude-sonnet-4-5-20250514"],
+  debate: ["gpt-5.4", "gemini-3-pro-preview", "grok-4", "claude-sonnet-4-6"],
   // Quick/cheap - fast and cheap
-  quick: ["gpt-5-nano", "gemini-2.0-flash-lite", "grok-3-fast", "claude-3-5-haiku-latest"],
+  quick: ["gpt-5-nano", "gemini-2.0-flash-lite", "grok-3-fast", "claude-haiku-4-5-20251001"],
 }
 
 export type ModelMode = keyof typeof BEST_MODELS

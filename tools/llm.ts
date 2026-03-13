@@ -244,8 +244,21 @@ function persistToResearch(content: string, meta?: OutputMeta): void {
  *
  * DO NOT stream response content to stdout — only the JSON metadata line goes there.
  */
+function buildMetaComment(meta?: OutputMeta): string {
+  const obj: Record<string, unknown> = {}
+  if (meta?.model) obj.model = meta.model
+  if (sessionTag !== "manual") obj.session = sessionTag
+  obj.timestamp = new Date().toISOString()
+  if (meta?.query) obj.query = meta.query
+  if (meta?.cost) obj.cost = meta.cost
+  if (meta?.tokens) obj.tokens = meta.tokens
+  if (meta?.durationMs) obj.durationMs = meta.durationMs
+  return `<!-- llm-meta: ${JSON.stringify(obj)} -->`
+}
+
 function finalizeOutput(content: string, meta?: OutputMeta): void {
-  void Bun.write(outputFile, content)
+  const metaComment = buildMetaComment(meta)
+  void Bun.write(outputFile, `${metaComment}\n\n${content}`)
   persistToResearch(content, meta)
   process.stderr.write("\n")
   process.stderr.write(`Output written to: ${outputFile}\n`)

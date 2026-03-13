@@ -1,7 +1,7 @@
 /**
  * Pricing cache and auto-update functionality
  *
- * Caches model pricing info and auto-updates when stale (>7 days old)
+ * Caches model pricing info and auto-updates when stale (>5 days old)
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
@@ -11,7 +11,7 @@ import { MODELS, type Model } from "./types"
 // Cache location (in user's home directory)
 const CACHE_DIR = join(process.env.HOME ?? "~", ".cache", "tools")
 const PRICING_CACHE_FILE = join(CACHE_DIR, "llm-pricing.json")
-const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const STALE_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000 // 5 days
 
 interface PricingCache {
   updatedAt: string // ISO date
@@ -144,7 +144,7 @@ export function getStaleWarning(): string | null {
   if (days === null) {
     return "⚠️  No pricing cache found. Run `llm update-pricing` to fetch latest prices."
   }
-  if (days > 7) {
+  if (days > 5) {
     return `⚠️  Pricing data is ${days} days old. Run \`llm update-pricing\` to refresh.`
   }
   return null
