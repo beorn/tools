@@ -1,7 +1,23 @@
 {
   "name": "@beorn/tools",
   "version": "0.6.0",
-  "description": "Generic Claude Code tools - batch refactoring, multi-LLM research, TTY testing, session search",
+  "description": "Reusable Claude Code tools — batch refactoring with ts-morph, multi-LLM research (GPT/Gemini/Grok), TTY testing, and session history search",
+  "keywords": [
+    "ai",
+    "batch-refactor",
+    "claude-code",
+    "codemod",
+    "developer-tools",
+    "gemini",
+    "gpt",
+    "llm",
+    "multi-llm",
+    "refactoring",
+    "session-search",
+    "ts-morph",
+    "tty",
+    "worktree"
+  ],
   "license": "MIT",
   "author": "Beorn",
   "repository": {
