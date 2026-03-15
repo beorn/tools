@@ -325,76 +325,104 @@ describe("recall integration", () => {
     15_000,
   )
 
-  test.skipIf(!dbExists)("respects limit option", async () => {
-    const recall = await getRecall()
-    const result = await recall("test", { raw: true, limit: 2 })
-    expect(result.results.length).toBeLessThanOrEqual(2)
-  })
+  test.skipIf(!dbExists)(
+    "respects limit option",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("test", { raw: true, limit: 2 })
+      expect(result.results.length).toBeLessThanOrEqual(2)
+    },
+    15_000,
+  )
 
-  test.skipIf(!dbExists)("returns fewer results for narrow time filter", async () => {
-    const recall = await getRecall()
-    // Compare 30d (default) vs 1h — narrower window should have <= results
-    const wideResult = await recall("test", { raw: true, limit: 20 })
-    const narrowResult = await recall("test", {
-      raw: true,
-      limit: 20,
-      since: "1h",
-    })
-    expect(narrowResult.results.length).toBeLessThanOrEqual(wideResult.results.length)
-  })
+  test.skipIf(!dbExists)(
+    "returns fewer results for narrow time filter",
+    async () => {
+      const recall = await getRecall()
+      // Compare 30d (default) vs 1h — narrower window should have <= results
+      const wideResult = await recall("test", { raw: true, limit: 20 })
+      const narrowResult = await recall("test", {
+        raw: true,
+        limit: 20,
+        since: "1h",
+      })
+      expect(narrowResult.results.length).toBeLessThanOrEqual(wideResult.results.length)
+    },
+    15_000,
+  )
 
-  test.skipIf(!dbExists)("returns empty when since is invalid", async () => {
-    const recall = await getRecall()
-    // Invalid since should cause early return with empty results
-    const result = await recall("test", { raw: true, since: "invalid" })
-    expect(result.results).toHaveLength(0)
-    expect(result.synthesis).toBeNull()
-  })
+  test.skipIf(!dbExists)(
+    "returns empty when since is invalid",
+    async () => {
+      const recall = await getRecall()
+      // Invalid since should cause early return with empty results
+      const result = await recall("test", { raw: true, since: "invalid" })
+      expect(result.results).toHaveLength(0)
+      expect(result.synthesis).toBeNull()
+    },
+    15_000,
+  )
 
-  test.skipIf(!dbExists)("result items have correct shape", async () => {
-    const recall = await getRecall()
-    const result = await recall("function", { raw: true, limit: 1 })
-    if (result.results.length > 0) {
-      const item = result.results[0]!
-      expect(item).toHaveProperty("type")
-      expect(item).toHaveProperty("sessionId")
-      expect(item).toHaveProperty("sessionTitle")
-      expect(item).toHaveProperty("timestamp")
-      expect(item).toHaveProperty("snippet")
-      expect(item).toHaveProperty("rank")
-      expect(typeof item.timestamp).toBe("number")
-      expect(typeof item.rank).toBe("number")
-      expect(typeof item.snippet).toBe("string")
-      expect(typeof item.sessionId).toBe("string")
-      expect(["message", "plan", "summary", "todo", "first_prompt"]).toContain(item.type)
-    }
-  })
-
-  test.skipIf(!dbExists)("deduplicates by session+type", async () => {
-    const recall = await getRecall()
-    const result = await recall("the", { raw: true, limit: 10 })
-    // Each session+type combo should appear at most once
-    const keys = result.results.map((r) => `${r.sessionId}:${r.type}`)
-    const uniqueKeys = new Set(keys)
-    expect(keys.length).toBe(uniqueKeys.size)
-  })
-
-  test.skipIf(!dbExists)("results are sorted by recency-boosted rank", async () => {
-    const recall = await getRecall()
-    const result = await recall("test", { raw: true, limit: 10 })
-    if (result.results.length > 1) {
-      for (let i = 1; i < result.results.length; i++) {
-        const prev = result.results[i - 1]!
-        const curr = result.results[i]!
-        expect(boostedRank(curr.rank, curr.timestamp)).toBeGreaterThanOrEqual(boostedRank(prev.rank, prev.timestamp))
+  test.skipIf(!dbExists)(
+    "result items have correct shape",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("function", { raw: true, limit: 1 })
+      if (result.results.length > 0) {
+        const item = result.results[0]!
+        expect(item).toHaveProperty("type")
+        expect(item).toHaveProperty("sessionId")
+        expect(item).toHaveProperty("sessionTitle")
+        expect(item).toHaveProperty("timestamp")
+        expect(item).toHaveProperty("snippet")
+        expect(item).toHaveProperty("rank")
+        expect(typeof item.timestamp).toBe("number")
+        expect(typeof item.rank).toBe("number")
+        expect(typeof item.snippet).toBe("string")
+        expect(typeof item.sessionId).toBe("string")
+        expect(["message", "plan", "summary", "todo", "first_prompt"]).toContain(item.type)
       }
-    }
-  })
+    },
+    15_000,
+  )
 
-  test.skipIf(!dbExists)("durationMs is a positive number", async () => {
-    const recall = await getRecall()
-    const result = await recall("test", { raw: true, limit: 1 })
-    expect(result.durationMs).toBeGreaterThanOrEqual(0)
-    expect(typeof result.durationMs).toBe("number")
-  })
+  test.skipIf(!dbExists)(
+    "deduplicates by session+type",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("the", { raw: true, limit: 10 })
+      // Each session+type combo should appear at most once
+      const keys = result.results.map((r) => `${r.sessionId}:${r.type}`)
+      const uniqueKeys = new Set(keys)
+      expect(keys.length).toBe(uniqueKeys.size)
+    },
+    15_000,
+  )
+
+  test.skipIf(!dbExists)(
+    "results are sorted by recency-boosted rank",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("test", { raw: true, limit: 10 })
+      if (result.results.length > 1) {
+        for (let i = 1; i < result.results.length; i++) {
+          const prev = result.results[i - 1]!
+          const curr = result.results[i]!
+          expect(boostedRank(curr.rank, curr.timestamp)).toBeGreaterThanOrEqual(boostedRank(prev.rank, prev.timestamp))
+        }
+      }
+    },
+    15_000,
+  )
+
+  test.skipIf(!dbExists)(
+    "durationMs is a positive number",
+    async () => {
+      const recall = await getRecall()
+      const result = await recall("test", { raw: true, limit: 1 })
+      expect(result.durationMs).toBeGreaterThanOrEqual(0)
+      expect(typeof result.durationMs).toBe("number")
+    },
+    15_000,
+  )
 })
