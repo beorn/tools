@@ -465,7 +465,24 @@ async function fileSha256(p: string): Promise<string | null> {
   return r.stdout.split(" ")[0] ?? null
 }
 
-const STANDARD_SLOT_ROOT = ".claude/worktrees"
+/**
+ * Canonical pool-slot path: sibling of the repo, named `<repoBasename>-wtN`.
+ * Example: repo at /Users/beorn/Code/pim/km → slots at /Users/beorn/Code/pim/km-wt0..wt9.
+ *
+ * Legacy slots live under `<gitRoot>/.claude/worktrees/wtN`. The audit flags
+ * those as `slot-location-drift (legacy)` so they migrate as agents recycle.
+ */
+function isCanonicalSlotPath(wtPath: string, gitRoot: string): boolean {
+  const expectedPrefix = `${gitRoot}-wt`
+  if (!wtPath.startsWith(expectedPrefix)) return false
+  return /^\d+$/.test(wtPath.slice(expectedPrefix.length))
+}
+
+function isLegacySlotPath(wtPath: string, gitRoot: string): boolean {
+  const legacyRoot = join(gitRoot, ".claude", "worktrees")
+  if (!wtPath.startsWith(legacyRoot + "/")) return false
+  return /^wt\d+$/.test(wtPath.slice(legacyRoot.length + 1))
+}
 
 export interface AuditOptions {
   json?: boolean
@@ -505,15 +522,23 @@ export async function auditWorktrees(opts: AuditOptions = {}): Promise<AuditFind
 
     // Skip the main worktree from per-worktree drift checks (it's the target).
     if (!isMain) {
-      const slotDriftRel = relative(gitRoot, wt.path)
-      if (!slotDriftRel.startsWith(STANDARD_SLOT_ROOT) && slotDriftRel !== ".") {
+      if (isLegacySlotPath(wt.path, gitRoot)) {
+        findings.push({
+          worktree: wtName,
+          branch: wt.branch,
+          severity: "info",
+          check: "slot-location-legacy",
+          message: `legacy slot at ${wt.path} — recycle to canonical sibling location ${gitRoot}-${wtName}`,
+          details: { path: wt.path, canonical: `${gitRoot}-${wtName}` },
+        })
+      } else if (!isCanonicalSlotPath(wt.path, gitRoot)) {
         findings.push({
           worktree: wtName,
           branch: wt.branch,
           severity: "info",
           check: "slot-location-drift",
-          message: `worktree at non-standard path ${wt.path} (expected under ${STANDARD_SLOT_ROOT}/)`,
-          details: { path: wt.path, expectedRoot: STANDARD_SLOT_ROOT },
+          message: `worktree at non-canonical path ${wt.path} (canonical: ${gitRoot}-wtN sibling layout)`,
+          details: { path: wt.path },
         })
       }
     }
@@ -989,7 +1014,10 @@ export async function createWorktree(name: string, branch?: string, options: Cre
 
   const repoName = basename(gitRoot)
   const worktreePath = join(dirname(gitRoot), `${repoName}-${name}`)
-  const branchName = branch ?? `feat/${name}`
+  // Slot-pattern names (wt0, wt1, ..., wt9) get a plain branch matching the
+  // slot id — agents lease `@agent/N` and expect branch `wtN`. Other names
+  // get the `feat/` prefix as a courtesy.
+  const branchName = branch ?? (/^wt\d+$/.test(name) ? name : `feat/${name}`)
 
   // Check if directory exists
   if (existsSync(worktreePath)) {
