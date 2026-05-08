@@ -372,6 +372,319 @@ export async function gcAgentClones(opts: GcOptions = {}): Promise<{
 }
 
 // ============================================
+// Audit (read-only health check, no deletes)
+// ============================================
+
+/**
+ * Audit findings for `bun worktree audit`. Each finding describes a hygiene
+ * issue, never a fix — the audit is read-only and never deletes/resets state.
+ *
+ * Severities:
+ *   "error"  — corrupted state that blocks normal use (UU files, mid-rebase, broken submodules)
+ *   "warn"   — divergence that will bite eventually (>100 commits behind, dups already on main)
+ *   "info"   — drift worth knowing about (formatter-noise siblings, slot-location drift)
+ */
+export type AuditSeverity = "error" | "warn" | "info"
+
+export interface AuditFinding {
+  worktree: string
+  branch: string
+  severity: AuditSeverity
+  /** Stable kebab-case id for tooling/CI to match against. */
+  check: string
+  message: string
+  /** Optional structured payload for JSON consumers. */
+  details?: Record<string, unknown>
+}
+
+interface WorktreeMeta {
+  path: string
+  name: string
+  branch: string
+  isDetached: boolean
+}
+
+async function getCommitsAhead(wtPath: string): Promise<number> {
+  const r = await safeExec($`cd ${wtPath} && git rev-list --count main..HEAD 2>/dev/null`)
+  return parseInt(r.stdout.trim() || "0", 10) || 0
+}
+
+async function getCommitsBehind(wtPath: string): Promise<number> {
+  const r = await safeExec($`cd ${wtPath} && git rev-list --count HEAD..main 2>/dev/null`)
+  return parseInt(r.stdout.trim() || "0", 10) || 0
+}
+
+async function lastCommitAgeHours(wtPath: string): Promise<number> {
+  const r = await safeExec($`cd ${wtPath} && git log -1 --format=%ct HEAD 2>/dev/null`)
+  const ts = parseInt(r.stdout.trim() || "0", 10)
+  if (!ts) return 0
+  return (Date.now() / 1000 - ts) / 3600
+}
+
+async function isMidRebaseOrMerge(wtPath: string): Promise<{ rebase: boolean; merge: boolean }> {
+  // .git in a worktree is a file pointing at gitdir; resolve via git rev-parse.
+  const r = await safeExec($`cd ${wtPath} && git rev-parse --git-dir 2>/dev/null`)
+  const dir = r.stdout.trim()
+  if (!dir) return { rebase: false, merge: false }
+  const abs = dir.startsWith("/") ? dir : join(wtPath, dir)
+  return {
+    rebase: existsSync(join(abs, "rebase-merge")) || existsSync(join(abs, "rebase-apply")),
+    merge: existsSync(join(abs, "MERGE_HEAD")),
+  }
+}
+
+async function dupCommitsAlreadyOnMain(wtPath: string): Promise<number> {
+  const r = await safeExec($`cd ${wtPath} && git cherry main HEAD 2>/dev/null`)
+  let dups = 0
+  for (const line of r.stdout.split("\n")) {
+    if (line.startsWith("- ")) dups++
+  }
+  return dups
+}
+
+async function uniqueCommitsCount(wtPath: string): Promise<number> {
+  const r = await safeExec($`cd ${wtPath} && git cherry main HEAD 2>/dev/null`)
+  let unique = 0
+  for (const line of r.stdout.split("\n")) {
+    if (line.startsWith("+ ")) unique++
+  }
+  return unique
+}
+
+async function uuFiles(wtPath: string): Promise<string[]> {
+  const r = await safeExec($`cd ${wtPath} && git status --porcelain 2>/dev/null`)
+  return r.stdout
+    .split("\n")
+    .filter((l) => l.startsWith("UU ") || l.startsWith("AA ") || l.startsWith("DD "))
+    .map((l) => l.slice(3))
+}
+
+async function fileSha256(p: string): Promise<string | null> {
+  if (!existsSync(p)) return null
+  const r = await safeExec($`shasum -a 256 ${p} 2>/dev/null`)
+  return r.stdout.split(" ")[0] ?? null
+}
+
+const STANDARD_SLOT_ROOT = ".claude/worktrees"
+
+export interface AuditOptions {
+  json?: boolean
+  /** Threshold (commits) — flag worktrees this far behind main. Default 100. */
+  behindThreshold?: number
+  /** Threshold (days) — flag stale unique-work worktrees. Default 14. */
+  staleAgeDays?: number
+}
+
+/**
+ * Run worktree-hygiene audit. Read-only — never writes, never resets, never
+ * deletes. Returns findings (also printed unless json=true).
+ */
+export async function auditWorktrees(opts: AuditOptions = {}): Promise<AuditFinding[]> {
+  const gitRoot = findGitRoot(process.cwd())
+  if (!gitRoot) {
+    error("Not in a git repository")
+    process.exit(1)
+  }
+  const behindThreshold = opts.behindThreshold ?? 100
+  const staleAgeHours = (opts.staleAgeDays ?? 14) * 24
+
+  const raw = await getWorktrees(gitRoot)
+  const worktrees: WorktreeMeta[] = raw.map((w) => ({
+    path: w.path,
+    name: basename(w.path),
+    branch: w.branch,
+    isDetached: w.isDetached,
+  }))
+
+  const findings: AuditFinding[] = []
+  const dirtyFileShas = new Map<string, Map<string, string[]>>() // file basename → sha → wts
+
+  for (const wt of worktrees) {
+    const isMain = wt.path === gitRoot
+    const wtName = wt.name
+
+    // Skip the main worktree from per-worktree drift checks (it's the target).
+    if (!isMain) {
+      const slotDriftRel = relative(gitRoot, wt.path)
+      if (!slotDriftRel.startsWith(STANDARD_SLOT_ROOT) && slotDriftRel !== ".") {
+        findings.push({
+          worktree: wtName,
+          branch: wt.branch,
+          severity: "info",
+          check: "slot-location-drift",
+          message: `worktree at non-standard path ${wt.path} (expected under ${STANDARD_SLOT_ROOT}/)`,
+          details: { path: wt.path, expectedRoot: STANDARD_SLOT_ROOT },
+        })
+      }
+    }
+
+    // Detached HEAD with UU files
+    const uu = await uuFiles(wt.path)
+    if (uu.length > 0) {
+      const sev: AuditSeverity = wt.isDetached ? "error" : "warn"
+      findings.push({
+        worktree: wtName,
+        branch: wt.branch,
+        severity: sev,
+        check: wt.isDetached ? "detached-head-with-uu" : "uu-conflicts",
+        message: `${uu.length} unmerged file(s)${wt.isDetached ? " on detached HEAD" : ""}: ${uu.slice(0, 3).join(", ")}${uu.length > 3 ? "..." : ""}`,
+        details: { uu },
+      })
+    }
+
+    // Mid-rebase / mid-merge
+    const stuck = await isMidRebaseOrMerge(wt.path)
+    if (stuck.rebase || stuck.merge) {
+      findings.push({
+        worktree: wtName,
+        branch: wt.branch,
+        severity: "error",
+        check: "stuck-merge-state",
+        message: stuck.rebase ? "mid-rebase — abort or continue before further use" : "mid-merge — resolve or abort",
+        details: stuck,
+      })
+    }
+
+    if (isMain) continue
+
+    // Branch divergence vs main
+    const ahead = await getCommitsAhead(wt.path)
+    const behind = await getCommitsBehind(wt.path)
+
+    // Dup commits already on main (cherry "-")
+    if (ahead > 0) {
+      const dups = await dupCommitsAlreadyOnMain(wt.path)
+      const unique = await uniqueCommitsCount(wt.path)
+      if (dups > 0 && unique === 0) {
+        findings.push({
+          worktree: wtName,
+          branch: wt.branch,
+          severity: "warn",
+          check: "duplicate-commits-on-main",
+          message: `${dups} commit(s) already applied to main (cherry "-"), 0 unique. Reset to main is safe.`,
+          details: { dups, unique, ahead },
+        })
+      }
+    }
+
+    if (behind > behindThreshold) {
+      findings.push({
+        worktree: wtName,
+        branch: wt.branch,
+        severity: "warn",
+        check: "branch-stale-vs-main",
+        message: `${behind} commits behind main (threshold: ${behindThreshold})`,
+        details: { behind, threshold: behindThreshold },
+      })
+    }
+
+    // Stale: unique work + last commit > N days ago
+    const unique = await uniqueCommitsCount(wt.path)
+    if (unique > 0) {
+      const ageHours = await lastCommitAgeHours(wt.path)
+      if (ageHours > staleAgeHours) {
+        findings.push({
+          worktree: wtName,
+          branch: wt.branch,
+          severity: "warn",
+          check: "stale-unique-work",
+          message: `${unique} unique commit(s), last commit ${(ageHours / 24).toFixed(1)}d ago — rebase or merge before it bitrots`,
+          details: { unique, ageDays: ageHours / 24 },
+        })
+      }
+    }
+
+    // Track dirty files for cross-worktree formatter-noise detection
+    const status = await getWorktreeStatus(wt.path)
+    for (const change of status.changes) {
+      // Lines look like " M apps/foo.ts" — strip the 3-char prefix
+      const filePath = change.slice(3)
+      if (!filePath || change.startsWith("??")) continue
+      const abs = join(wt.path, filePath)
+      const sha = await fileSha256(abs)
+      if (!sha) continue
+      const byFile = dirtyFileShas.get(filePath) ?? new Map<string, string[]>()
+      const wts = byFile.get(sha) ?? []
+      wts.push(wtName)
+      byFile.set(sha, wts)
+      dirtyFileShas.set(filePath, byFile)
+    }
+  }
+
+  // Cross-worktree: same dirty file with same sha across ≥2 worktrees → formatter noise
+  for (const [filePath, byFile] of dirtyFileShas) {
+    for (const [sha, wts] of byFile) {
+      if (wts.length >= 2) {
+        for (const wtName of wts) {
+          findings.push({
+            worktree: wtName,
+            branch: worktrees.find((w) => w.name === wtName)?.branch ?? "",
+            severity: "info",
+            check: "formatter-noise-sibling",
+            message: `${filePath} has identical bytes (sha ${sha.slice(0, 8)}) across ${wts.length} worktrees — likely formatter run, not real WIP`,
+            details: { filePath, sha, siblings: wts },
+          })
+        }
+      }
+    }
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ gitRoot, worktrees: worktrees.length, findings }, null, 2))
+    return findings
+  }
+
+  // Human-readable output
+  const counts = { error: 0, warn: 0, info: 0 }
+  for (const f of findings) counts[f.severity]++
+
+  console.log(BOLD + `Worktree audit — ${gitRoot}` + RESET)
+  console.log(
+    DIM +
+      `  ${worktrees.length} worktree(s) · ` +
+      `${RED}${counts.error} error${RESET}${DIM} · ` +
+      `${YELLOW}${counts.warn} warn${RESET}${DIM} · ` +
+      `${CYAN}${counts.info} info${RESET}${DIM}` +
+      RESET,
+  )
+  console.log("")
+
+  if (findings.length === 0) {
+    success("All worktrees clean.")
+    return findings
+  }
+
+  const byWt = new Map<string, AuditFinding[]>()
+  for (const f of findings) {
+    const list = byWt.get(f.worktree) ?? []
+    list.push(f)
+    byWt.set(f.worktree, list)
+  }
+
+  for (const [wtName, fs] of byWt) {
+    const wt = worktrees.find((w) => w.name === wtName)
+    const branch = wt ? formatBranchColor(wt) : wtName
+    console.log(`  ${BOLD}${wtName}${RESET}  ${DIM}(${branch})${RESET}`)
+    for (const f of fs) {
+      const tag =
+        f.severity === "error" ? RED + "✗" + RESET : f.severity === "warn" ? YELLOW + "⚠" + RESET : CYAN + "ℹ" + RESET
+      console.log(`    ${tag} ${DIM}[${f.check}]${RESET} ${f.message}`)
+    }
+  }
+  console.log("")
+  if (counts.error > 0) {
+    console.log(DIM + "Recovery: stuck rebases → `git rebase --abort` in the worktree." + RESET)
+  }
+  if (counts.warn > 0) {
+    console.log(
+      DIM + "Cleanup: branches with only `-` commits can be reset to main: `git reset --hard origin/main`." + RESET,
+    )
+  }
+
+  return findings
+}
+
+// ============================================
 // Commands
 // ============================================
 
@@ -1484,6 +1797,44 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "ls":
       await listWorktrees(true)
       break
+
+    case "audit": {
+      const json = hasFlag("--json")
+      const behindIdx = args.indexOf("--behind-threshold")
+      let behindThreshold: number | undefined
+      if (behindIdx !== -1) {
+        const v = args[behindIdx + 1]
+        if (!v || v.startsWith("--")) {
+          error("--behind-threshold requires a number")
+          process.exit(1)
+        }
+        const n = parseInt(v, 10)
+        if (isNaN(n)) {
+          error("--behind-threshold must be a number")
+          process.exit(1)
+        }
+        behindThreshold = n
+      }
+      const staleIdx = args.indexOf("--stale-days")
+      let staleAgeDays: number | undefined
+      if (staleIdx !== -1) {
+        const v = args[staleIdx + 1]
+        if (!v || v.startsWith("--")) {
+          error("--stale-days requires a number")
+          process.exit(1)
+        }
+        const n = parseInt(v, 10)
+        if (isNaN(n)) {
+          error("--stale-days must be a number")
+          process.exit(1)
+        }
+        staleAgeDays = n
+      }
+      const findings = await auditWorktrees({ json, behindThreshold, staleAgeDays })
+      // Exit 1 if any error-severity findings (CI-friendly).
+      if (findings.some((f) => f.severity === "error")) process.exit(1)
+      break
+    }
 
     case "gc": {
       // Parse --root <dir>
