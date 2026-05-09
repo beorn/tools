@@ -43,6 +43,7 @@ import {
   withSocketServer,
 } from "./lib/tribe/compose/index.ts"
 import { TOOLS_LIST } from "./lib/tribe/tools-list.ts"
+import { pruneOldActivityLogs } from "./lib/tribe/activity-log.ts"
 
 const log = createLogger("tribe:daemon")
 
@@ -79,6 +80,17 @@ if (partialShape.config.inheritFd === null) {
     log.info?.(`Another daemon is already listening on ${partialShape.config.socketPath}, exiting`)
     process.exit(0)
   }
+}
+
+// One-shot retention sweep: remove activity-*.jsonl files older than 30 days.
+// Best-effort; failures never block daemon startup. See @km/tribe/activity-log
+// (acceptance criterion "Daily rotation at midnight, no event loss across
+// rollover" implies bounded retention).
+try {
+  const removed = pruneOldActivityLogs(30)
+  if (removed > 0) log.info?.(`activity-log retention: pruned ${removed} stale file(s)`)
+} catch (err) {
+  log.warn?.(`activity-log prune failed (non-fatal): ${String(err)}`)
 }
 
 // ---------------------------------------------------------------------------
