@@ -2282,6 +2282,25 @@ try {
     claudeSessionName: CLAUDE_SESSION_NAME,
     identityToken,
   }
+  var lastAnnouncedRole = null
+  function sendOnboarding(role) {
+    if (role === lastAnnouncedRole) return
+    lastAnnouncedRole = role
+    const runbookFile =
+      role === "chief" ? ".claude/runbooks/tribe-chief.md" : ".claude/runbooks/agent-protocol.md"
+    const headlines =
+      role === "chief"
+        ? "Coordinate the tribe. Headlines: §3 integrate after every bead via chief-integrate.ts wtN; §13 detect + escalate + RESOLVE blocked work (most important job); §15 load-balance via /pm groom + tribe.send; §17 ping any agent silent >15 min."
+        : "Sound off (§17) on every bead state change AND every session-level transition. Reality-check beads older than ~24h before claiming. Slot hygiene before AND after (§6a)."
+    const tools =
+      role === "chief"
+        ? "tribe.members() / tribe.send() / tribe.health() / tribe.broadcast() / tribe.history()"
+        : "tribe.send(to=\"*\", ...) for broadcast / tribe.send(to=\"chief\", ...) for chief DM"
+    sendChannel(
+      `You are ${role.toUpperCase()}. Read ${runbookFile} for the full role contract (if it exists in this project). ${headlines}\n\nTools: ${tools}`,
+      { from: "daemon", type: "onboarding:role-assignment" },
+    )
+  }
   var daemon = await createReconnectingClient2({
     socketPath: SOCKET_PATH,
     async onConnect(client) {
@@ -2290,6 +2309,7 @@ try {
       myRole = reg.role
       log5.info?.(`Registered as ${myName} (${myRole})`)
       client.call("subscribe").catch(() => {})
+      sendOnboarding(myRole)
     },
     onDisconnect() {
       log5.debug?.(`Daemon connection lost`)
@@ -2411,6 +2431,19 @@ Tribe messages:
           if (data.role) myRole = data.role
         } catch {}
         autoRenamed = true
+        sendOnboarding(myRole)
+      }
+      // Role can also change via tribe.claim-chief / tribe.release-chief —
+      // re-fetch our role and re-send onboarding if it differs.
+      if (name === "tribe.claim-chief" || name === "tribe.release-chief") {
+        try {
+          const status = await daemon.call("tribe.chief", {})
+          const txt = status?.content?.[0]?.text ?? ""
+          const meIsChief = txt.includes(myName) && /chief/i.test(txt)
+          const newRole = meIsChief ? "chief" : "member"
+          myRole = newRole
+          sendOnboarding(newRole)
+        } catch {}
       }
       return result
     } catch (err) {
