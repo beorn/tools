@@ -365,7 +365,7 @@ export async function cmdHook(): Promise<void> {
         console.error(
           `[recall hook] daemon OK: ${daemonOutput.contextLen} chars synthesis (${Date.now() - startTime}ms, seen=${daemonOutput.seenCount} turn=${daemonOutput.turnNumber}) prompt="${prompt.slice(0, 60)}"`,
         )
-        console.log(envelopeEmitHookJson("UserPromptSubmit", daemonOutput.additionalContext))
+        console.log(envelopeEmitHookJson("UserPromptSubmit", daemonOutput.additionalContext, prompt))
         process.exit(0)
       }
       // kind === "error" — fall through to library path below.
@@ -381,7 +381,7 @@ export async function cmdHook(): Promise<void> {
     console.error(
       `[recall hook] OK: ${additionalContext.length} chars synthesis (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`,
     )
-    console.log(envelopeEmitHookJson("UserPromptSubmit", additionalContext))
+    console.log(envelopeEmitHookJson("UserPromptSubmit", additionalContext, prompt))
   } catch (e) {
     const elapsed = Date.now() - startTime
     console.error(

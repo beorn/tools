@@ -145,6 +145,7 @@ export function wrapInjectedContext(opts: WrapOptions): string {
     `mode="${mode}"`,
     `trust="${trust}"`,
     `authority="reference"`,
+    `actionable="false"`,
     `changes_goal="false"`,
     `tool_trigger="forbidden"`,
     `note=${JSON.stringify(note)}`,
@@ -276,20 +277,45 @@ function persistManifestFromWrap(opts: WrapOptions): void {
  * - **UserPromptSubmit** with no context → plain `{}`
  * - **SessionEnd** and anything else → plain `{}` (schema forbids
  *   `hookSpecificOutput` there)
+ *
+ * When `userPrompt` is provided alongside non-empty `additionalContext`, the
+ * verbatim user text is wrapped in `<user_prompt>...</user_prompt>` and
+ * prepended to `additionalContext`. This is the positive marker for "what the
+ * user actually typed this turn" — distinguishing it from injected
+ * `<recall-memory>` / `<injected_context>` / `<channel>` content that lands
+ * adjacent in the same `user`-role turn. See @km/bearly/injection-framing.
+ *
+ * When `additionalContext` is empty there is no envelope to disambiguate, so
+ * no `<user_prompt>` is emitted (would be pure noise — the prompt is already
+ * in the user-role turn verbatim from Claude Code).
  */
-export function emitHookJson(eventName: string, additionalContext?: string): string {
-  if (eventName === "UserPromptSubmit" && additionalContext !== undefined) {
+export function emitHookJson(eventName: string, additionalContext?: string, userPrompt?: string): string {
+  if (eventName === "UserPromptSubmit" && additionalContext !== undefined && additionalContext.length > 0) {
+    const finalContext =
+      userPrompt !== undefined && userPrompt.length > 0
+        ? `<user_prompt>${escapeUserPromptBody(userPrompt)}</user_prompt>\n\n${additionalContext}`
+        : additionalContext
     // Observability: record the injection into the unified tribe activity log
     // so `tail -f ~/.local/share/tribe/activity.jsonl` shows everything that
     // lands in the session's prompt stream. Best-effort; write failures never
     // propagate to the hook response. See km-tribe.activity-log phase 2.
-    writeInjectActivity(additionalContext)
+    writeInjectActivity(finalContext)
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
-        additionalContext,
+        additionalContext: finalContext,
       },
     })
   }
   return "{}"
+}
+
+/**
+ * Neutralize literal `</user_prompt>` occurrences in user input so adversarial
+ * pasted text can't break out of the wrapper. Same pattern as
+ * `escapeSnippetBody` in inject-core.ts: insert a space inside the close-tag
+ * so it's still readable but no longer a tag.
+ */
+function escapeUserPromptBody(text: string): string {
+  return text.replaceAll("</user_prompt>", "</ user_prompt>")
 }
