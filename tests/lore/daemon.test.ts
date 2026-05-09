@@ -289,18 +289,18 @@ describe("lore daemon — inject_delta (Phase 5)", () => {
     // circuit before the turn counter advances — the test cares about
     // per-session counter semantics, not retrieval quality.
     const r1 = (await h.client.call(TRIBE_METHODS.injectDelta, {
-      prompt: "tell me about km-tribe.lore the workspace daemon plan",
+      prompt: "tell me about km-tribe-lore-daemon the workspace daemon plan",
       sessionId: "sess-A",
     })) as InjectDeltaResult
     const r2 = (await h.client.call(TRIBE_METHODS.injectDelta, {
-      prompt: "tell me about km-tribe.lore the workspace daemon plan",
+      prompt: "tell me about km-tribe-lore-daemon the workspace daemon plan",
       sessionId: "sess-B",
     })) as InjectDeltaResult
     expect(r1.turnNumber).toBe(1)
     expect(r2.turnNumber).toBe(1)
 
     const r1b = (await h.client.call(TRIBE_METHODS.injectDelta, {
-      prompt: "another substantive prompt for km-tribe.recall A only",
+      prompt: "another substantive prompt for km-tribe-recall-trigger A only",
       sessionId: "sess-A",
     })) as InjectDeltaResult
     expect(r1b.turnNumber).toBe(2)

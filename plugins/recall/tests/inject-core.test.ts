@@ -218,7 +218,10 @@ describe("runInjectDelta — emit only when there's content to frame", () => {
         snippet: "create a bead that captures all of this context about the board refactor work.",
       },
     ])
-    const result = await runInjectDelta("pick up where we left off on km-board-state the refactor", createMemorySeenStore())
+    const result = await runInjectDelta(
+      "pick up where we left off on km-board-state the refactor",
+      createMemorySeenStore(),
+    )
     if (result.skipped) throw new Error("expected non-skipped result")
     expect(result.additionalContext).toContain("[historical")
     // The original imperative text remains, just prefixed.
@@ -296,7 +299,10 @@ describe("runInjectDelta — V2 gates", () => {
         snippet: 'Earlier analysis: "verdict": "orthogonal", "why": "discusses unrelated framework".',
       },
     ])
-    const result = await runInjectDelta("what did we learn about km-storage-sync cognitive types?", createMemorySeenStore())
+    const result = await runInjectDelta(
+      "what did we learn about km-storage-sync cognitive types?",
+      createMemorySeenStore(),
+    )
     // Filtered-out by content gate; was the only hit → all_seen path
     // (the rank gate passed, content gate didn't).
     expect(result.skipped).toBe(true)

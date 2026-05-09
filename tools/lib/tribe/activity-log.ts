@@ -25,8 +25,8 @@
  * activity is always observable, always at debug, always in one place.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { createLogger, type ConditionalLogger } from "loggily"
 
 // ---------------------------------------------------------------------------
@@ -54,13 +54,65 @@ export interface ActivityEntry {
 // Config
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PATH_SUFFIX = "/.local/share/tribe/activity.jsonl"
+const DEFAULT_DIR_SUFFIX = "/.local/share/tribe"
+const DEFAULT_RETAIN_DAYS = 30
 
-export function activityLogPath(): string {
+/**
+ * Return today's activity-log path. Files are date-stamped
+ * (`activity-YYYY-MM-DD.jsonl`) and rotate at midnight local time.
+ *
+ * `TRIBE_ACTIVITY_LOG=<path>` override returns the literal path verbatim
+ * (no rotation) so tests can pin to a single tmp file.
+ */
+export function activityLogPath(now: Date = new Date()): string {
   const override = process.env.TRIBE_ACTIVITY_LOG
   if (override && override !== "off") return override
+  return join(activityLogDir(), activityLogFilename(now))
+}
+
+/** Return the directory containing activity-* files. */
+export function activityLogDir(): string {
   const home = process.env.HOME ?? ""
-  return `${home}${DEFAULT_PATH_SUFFIX}`
+  return `${home}${DEFAULT_DIR_SUFFIX}`
+}
+
+/** Per-day filename for an arbitrary date. Exported for the watch CLI. */
+export function activityLogFilename(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  return `activity-${y}-${m}-${d}.jsonl`
+}
+
+/**
+ * Remove activity-*.jsonl files whose mtime is older than `keepDays` days.
+ * Best-effort: failures are silently ignored (the daemon calls this once
+ * on startup; missing files / permission errors should not block boot).
+ *
+ * Returns the count of files removed.
+ */
+export function pruneOldActivityLogs(keepDays: number = DEFAULT_RETAIN_DAYS, now: Date = new Date()): number {
+  const dir = activityLogDir()
+  if (!existsSync(dir)) return 0
+  const cutoff = now.getTime() - keepDays * 86_400_000
+  let removed = 0
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!/^activity-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)) continue
+      const path = join(dir, name)
+      try {
+        if (statSync(path).mtimeMs < cutoff) {
+          unlinkSync(path)
+          removed++
+        }
+      } catch {
+        // skip one file, keep going
+      }
+    }
+  } catch {
+    // dir read failure → nothing to prune
+  }
+  return removed
 }
 
 function isDisabled(): boolean {
@@ -85,6 +137,9 @@ function ensureParent(path: string): void {
 
 function getLogger(): ConditionalLogger | null {
   if (isDisabled()) return null
+  // Recompute the path on every call so date rollover at midnight rotates
+  // to the next day's file without requiring daemon restart. Cache hits
+  // when the path is unchanged (same day, or env override pinned).
   const path = activityLogPath()
   if (cachedLogger && cachedLoggerPath === path) return cachedLogger
   ensureParent(path)
@@ -92,6 +147,10 @@ function getLogger(): ConditionalLogger | null {
   // makes the downstream Writable receive JSON-serialized strings. The
   // Writable writes synchronously (`appendFileSync`) so tail-f readers and
   // tests both see events immediately — no buffered flush ambiguity.
+  //
+  // The Writable closes over `path` at construction time, but `getLogger()`
+  // re-runs and re-binds when the day rolls — so post-rollover events
+  // append to the new day's file, not the old one.
   cachedLogger = createLogger("tribe:activity", [
     { level: "debug", format: "json" },
     {
@@ -208,6 +267,42 @@ export function writeInjectActivity(content: string, extra?: { meta?: Record<str
     preview: collapsed,
     chars: collapsed.length,
     meta: extra?.meta,
+  })
+}
+
+/**
+ * Record a PreToolUse injection-gate verdict. Called from
+ * tools/injection-gate.ts after `evaluateGate()` decides allow / ask / deny.
+ *
+ * `preview` carries the human-readable reason so `tail -f | jq '.preview'`
+ * shows why a tool was blocked without needing to look up the manifest. The
+ * `meta.reasonCode` field carries the structured slug for filtering /
+ * aggregation (e.g. `injection-only-entities`, `shingle-overlap`,
+ * `allow-explicit-auth`).
+ */
+export function writeGateActivity(args: {
+  decision: "allow" | "ask" | "deny"
+  toolName: string
+  reason: string
+  reasonCode?: string
+  sessionId?: string
+  meta?: Record<string, unknown>
+}): void {
+  const session = args.sessionId ?? process.env.CLAUDE_SESSION_ID ?? `pid-${process.pid}`
+  const reasonClean = args.reason.replace(/\s+/g, " ").trim()
+  const preview = reasonClean.length <= 200 ? reasonClean : reasonClean.slice(0, 199) + "…"
+  writeActivity({
+    ts: Date.now(),
+    source: "gate",
+    kind: "gate",
+    session,
+    type: args.decision,
+    preview,
+    meta: {
+      tool: args.toolName,
+      reasonCode: args.reasonCode,
+      ...args.meta,
+    },
   })
 }
 

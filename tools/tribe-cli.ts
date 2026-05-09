@@ -23,6 +23,7 @@ import {
   formatDoctorReport,
 } from "./lib/tribe/install.ts"
 import { dispatchHook, type HookEvent } from "./lib/tribe/hook-dispatch.ts"
+import { watchActivity } from "./lib/tribe/activity-watch.ts"
 import {
   HOOK_EVENTS,
   type EnrichmentFields,
@@ -439,6 +440,25 @@ program
   .command("watch")
   .description("Live TUI dashboard — sessions + event stream")
   .action(() => cmdWatch())
+
+program
+  .command("activity")
+  .description("Tail the unified activity log (tribe DMs + recall injections + gate verdicts)")
+  .option("-f, --follow", "Follow live — stream new entries as they land")
+  .option("-s, --since <duration>", "Start from now-<duration>, e.g. 1h, 30m, 2d (default: today midnight)")
+  .option("--no-color", "Disable ANSI colors (good for piping to jq / grep)")
+  .action(async (opts: { follow?: boolean; since?: string; color?: boolean }) => {
+    try {
+      await watchActivity({
+        follow: !!opts.follow,
+        since: opts.since,
+        noColor: opts.color === false,
+      })
+    } catch (err) {
+      console.error(`tribe activity: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  })
 
 // ── install / uninstall / doctor — Claude Code setup ────────────────────
 

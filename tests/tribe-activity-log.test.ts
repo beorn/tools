@@ -16,12 +16,16 @@ import { randomUUID } from "node:crypto"
 import {
   activityFromMessage,
   activityLogPath,
+  activityLogFilename,
+  pruneOldActivityLogs,
   writeActivity,
+  writeGateActivity,
   writeInjectActivity,
   __resetActivityLogState,
   type ActivityEntry,
 } from "../tools/lib/tribe/activity-log.ts"
 import { emitHookJson } from "../plugins/injection-envelope/src/emit.ts"
+import { writeFileSync, utimesSync, readdirSync } from "node:fs"
 
 let tmpDir: string
 let origEnv: string | undefined
@@ -227,10 +231,20 @@ describe("activityLogPath resolution", () => {
     expect(activityLogPath()).toBe("/tmp/custom.jsonl")
   })
 
-  it("falls back to HOME/.local/share/tribe/activity.jsonl", () => {
+  it("falls back to HOME/.local/share/tribe/activity-YYYY-MM-DD.jsonl (date-stamped)", () => {
     delete process.env.TRIBE_ACTIVITY_LOG
     const home = process.env.HOME ?? ""
-    expect(activityLogPath()).toBe(`${home}/.local/share/tribe/activity.jsonl`)
+    const fixed = new Date(2026, 4, 8) // 2026-05-08
+    expect(activityLogPath(fixed)).toBe(`${home}/.local/share/tribe/activity-2026-05-08.jsonl`)
+  })
+
+  it("rotates to a new file when the day changes", () => {
+    delete process.env.TRIBE_ACTIVITY_LOG
+    const day1 = new Date(2026, 4, 8) // 2026-05-08
+    const day2 = new Date(2026, 4, 9) // 2026-05-09
+    expect(activityLogPath(day1)).not.toBe(activityLogPath(day2))
+    expect(activityLogPath(day1)).toMatch(/activity-2026-05-08\.jsonl$/)
+    expect(activityLogPath(day2)).toMatch(/activity-2026-05-09\.jsonl$/)
   })
 })
 
@@ -295,5 +309,149 @@ describe("emitHookJson integration — every UserPromptSubmit emission writes to
     const out = emitHookJson("SessionEnd", "some content")
     expect(out).toBe("{}")
     expect(readEntries()).toHaveLength(0)
+  })
+})
+
+describe("writeGateActivity — phase 3 (injection-gate verdicts)", () => {
+  it("records source=gate, kind=gate with decision in `type`", () => {
+    writeGateActivity({
+      decision: "deny",
+      toolName: "Write",
+      reason: "candidate output contains entities only present in injected spans",
+      reasonCode: "injection-only-entities",
+      sessionId: "s-test",
+    })
+    const entries = readEntries()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.source).toBe("gate")
+    expect(entries[0]!.kind).toBe("gate")
+    expect(entries[0]!.type).toBe("deny")
+    expect(entries[0]!.session).toBe("s-test")
+    expect(entries[0]!.preview).toContain("injected spans")
+    expect((entries[0]!.meta as Record<string, unknown>).tool).toBe("Write")
+    expect((entries[0]!.meta as Record<string, unknown>).reasonCode).toBe("injection-only-entities")
+  })
+
+  it("truncates preview to 200 chars + ellipsis", () => {
+    writeGateActivity({
+      decision: "ask",
+      toolName: "Bash",
+      reason: "x".repeat(500),
+      reasonCode: "shingle-overlap",
+    })
+    const entries = readEntries()
+    expect(entries[0]!.preview!.length).toBe(200)
+    expect(entries[0]!.preview!.endsWith("…")).toBe(true)
+  })
+
+  it("falls back to CLAUDE_SESSION_ID then pid when sessionId arg is omitted", () => {
+    const orig = process.env.CLAUDE_SESSION_ID
+    try {
+      process.env.CLAUDE_SESSION_ID = "envelope-sid"
+      writeGateActivity({ decision: "allow", toolName: "Read", reason: "non-mutating" })
+      const entries = readEntries()
+      expect(entries[0]!.session).toBe("envelope-sid")
+    } finally {
+      if (orig === undefined) delete process.env.CLAUDE_SESSION_ID
+      else process.env.CLAUDE_SESSION_ID = orig
+    }
+  })
+})
+
+describe("daily rotation — no event loss across midnight rollover", () => {
+  it("filename helper formats date as activity-YYYY-MM-DD.jsonl", () => {
+    expect(activityLogFilename(new Date(2026, 0, 1))).toBe("activity-2026-01-01.jsonl")
+    expect(activityLogFilename(new Date(2026, 11, 31))).toBe("activity-2026-12-31.jsonl")
+  })
+
+  it("rotates to a new file when the day rolls; both files contain their own writes", () => {
+    // Drop the override so getLogger uses the date-stamped path. Pin HOME to
+    // tmpDir so the date-stamped path lands inside our cleanup root.
+    delete process.env.TRIBE_ACTIVITY_LOG
+    const origHome = process.env.HOME
+    process.env.HOME = tmpDir
+    mkdirSync(join(tmpDir, ".local", "share", "tribe"), { recursive: true })
+    try {
+      // We can't easily mock `new Date()` inside the writer (loggily's
+      // Writable closure binds path at construction). Instead we exercise
+      // the cache-invalidation path by writing once, then resetting the
+      // cached state to simulate a different day's path resolution.
+      __resetActivityLogState()
+      writeActivity({ ts: 1, source: "tribe", kind: "dm", session: "a", peer: "b", preview: "day1-event" })
+      const day1Path = activityLogPath()
+      expect(existsSync(day1Path)).toBe(true)
+      // Simulate day rollover: rename the cached file to "yesterday" and
+      // reset state so the next writeActivity computes a fresh path.
+      const dir = join(tmpDir, ".local", "share", "tribe")
+      const yesterdayName = activityLogFilename(new Date(Date.now() - 86_400_000))
+      const yesterdayPath = join(dir, yesterdayName)
+      if (day1Path !== yesterdayPath) {
+        // Move the just-written file aside so it represents "yesterday"
+        const fs = require("node:fs") as typeof import("node:fs")
+        fs.renameSync(day1Path, yesterdayPath)
+      }
+      __resetActivityLogState()
+      writeActivity({ ts: 2, source: "tribe", kind: "dm", session: "a", peer: "b", preview: "day2-event" })
+      const day2Path = activityLogPath()
+      expect(existsSync(day2Path)).toBe(true)
+      // Both files retain their own writes — no cross-contamination.
+      const day1Body = readFileSync(yesterdayPath, "utf8")
+      const day2Body = readFileSync(day2Path, "utf8")
+      expect(day1Body).toContain("day1-event")
+      expect(day1Body).not.toContain("day2-event")
+      expect(day2Body).toContain("day2-event")
+      expect(day2Body).not.toContain("day1-event")
+    } finally {
+      if (origHome === undefined) delete process.env.HOME
+      else process.env.HOME = origHome
+    }
+  })
+})
+
+describe("pruneOldActivityLogs — keep N days of history", () => {
+  it("removes activity-*.jsonl files older than keepDays, leaves recent files", () => {
+    const dir = join(tmpDir, "prune-target")
+    mkdirSync(dir, { recursive: true })
+    const origHome = process.env.HOME
+    process.env.HOME = tmpDir
+    delete process.env.TRIBE_ACTIVITY_LOG
+    try {
+      // Create some fake date-stamped files at known mtimes
+      const now = Date.now()
+      const tribeDir = join(tmpDir, ".local", "share", "tribe")
+      mkdirSync(tribeDir, { recursive: true })
+      const old = join(tribeDir, "activity-2024-01-01.jsonl")
+      const recent = join(tribeDir, "activity-2026-05-08.jsonl")
+      const unrelated = join(tribeDir, "tribe.db") // must NOT be touched
+      writeFileSync(old, "{}\n")
+      writeFileSync(recent, "{}\n")
+      writeFileSync(unrelated, "x")
+      // Backdate `old` to 100 days ago, leave `recent` at now
+      const past = (now - 100 * 86_400_000) / 1000
+      utimesSync(old, past, past)
+      const removed = pruneOldActivityLogs(30)
+      expect(removed).toBe(1)
+      expect(existsSync(old)).toBe(false)
+      expect(existsSync(recent)).toBe(true)
+      expect(existsSync(unrelated)).toBe(true) // unrelated file untouched
+    } finally {
+      if (origHome === undefined) delete process.env.HOME
+      else process.env.HOME = origHome
+    }
+  })
+
+  it("returns 0 and silently no-ops when the directory does not exist", () => {
+    const origHome = process.env.HOME
+    // Point HOME at a path that has no .local/share/tribe under it
+    const fresh = join(tmpDir, "no-tribe-dir")
+    mkdirSync(fresh, { recursive: true })
+    process.env.HOME = fresh
+    delete process.env.TRIBE_ACTIVITY_LOG
+    try {
+      expect(pruneOldActivityLogs(30)).toBe(0)
+    } finally {
+      if (origHome === undefined) delete process.env.HOME
+      else process.env.HOME = origHome
+    }
   })
 })
