@@ -90,7 +90,24 @@ function resolveClaudeSessionId() {
   return process.env.CLAUDE_SESSION_ID ?? process.env.BD_ACTOR?.replace("claude:", "") ?? null
 }
 function resolveClaudeSessionName() {
-  return process.env.CLAUDE_SESSION_NAME ?? null
+  if (process.env.CLAUDE_SESSION_NAME) return process.env.CLAUDE_SESSION_NAME
+  // Fallback: parse parent process (claude) argv for --name / -n flag.
+  // Claude doesn't export --name as an env var to subprocesses (verified
+  // 2026-05-09 via `claude --name @agent/test --print "echo $CLAUDE_SESSION_NAME"`
+  // returning empty), but the arg IS in the parent's command line, readable
+  // via ps. This lets `claude --name @agent/N` work without manual env prefix.
+  try {
+    const ppid = process.ppid
+    if (!ppid) return null
+    // Use require() for synchronous child_process — keeps function signature sync
+    // (call site at register time expects a string, not a Promise).
+    const { execFileSync } = require("child_process")
+    const cmd = execFileSync("ps", ["-o", "command=", "-p", String(ppid)], { encoding: "utf-8", timeout: 500 }).trim()
+    // Match --name=VALUE, --name VALUE, -n=VALUE, -n VALUE
+    const m = cmd.match(/(?:^|\s)(?:--name|-n)(?:[= ]+|\s+)("[^"]+"|'[^']+'|\S+)/)
+    if (m && m[1]) return m[1].replace(/^["']|["']$/g, "")
+  } catch {}
+  return null
 }
 function resolveProjectId(cwd) {
   const dir = cwd ?? process.cwd()
