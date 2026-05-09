@@ -2330,9 +2330,9 @@ Between-beads (DM chief, after each close, before next claim):
 Before editing vendor/ or shared files, send a request to chief asking for OK.
 Respond to query messages promptly.
 
-Slot hygiene (load-bearing): clean before AND after using a worktree slot. No "not my problem" \u2014 inherited drift is YOUR problem to clean. Use `bun tools/chief-cleanup-slot.ts wtN` for non-destructive per-file restore (works around dcg blocks on git reset --hard).
+Slot hygiene (load-bearing): clean before AND after using a worktree slot. No "not my problem" \u2014 inherited drift is YOUR problem to clean. Use bun tools/chief-cleanup-slot.ts wtN for non-destructive per-file restore (works around dcg blocks on git reset --hard).
 
-Reality-check before claiming a bead older than ~24h: read the body, grep named SHAs/files at origin/main, and only claim if not already paperwork-only. Skill: `.claude/skills/beads/reality-check.md`.
+Reality-check before claiming a bead older than ~24h: read the body, grep named SHAs/files at origin/main, and only claim if not already paperwork-only. Skill: .claude/skills/beads/reality-check.md.
 
 Sub-agent protocol:
 - When you spawn sub-agents (Agent tool), broadcast: tribe.send(to="*", message="spawned: <name> for <task>")
