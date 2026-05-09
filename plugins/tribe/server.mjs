@@ -2308,13 +2308,31 @@ You are a tribe member \u2014 a worker session coordinated by the chief.
 
 ${joinInstruction}
 
-Coordination protocol:
-- When you START work on a task, broadcast what you're doing: tribe.send(to="*", message="starting: <task>")
-- When you FINISH a task or commit, broadcast: tribe.send(to="*", message="done: <summary>")
-- When you claim a bead, broadcast: tribe.send(to="*", message="claimed: <bead-id> \u2014 <title>")
-- When you're blocked, broadcast immediately \u2014 include what would unblock you
-- Before editing vendor/ or shared files, send a request to chief asking for OK
-- Respond to query messages promptly
+Coordination protocol (sound off on every state change \u2014 silence is not progress):
+
+Bead-level (broadcast = peers act on it; DM chief = chief tracks):
+- claimed (broadcast): tribe.send(to="*", message="claimed: <bead-id> \u2014 <title>")
+- working (DM chief, after first commit): tribe.send(to="chief", message="working <bead-id> \u2014 <approach>")
+- discovery / problem (DM chief): tribe.send(to="chief", message="discovery on <bead-id>: <what>")
+- blocked (broadcast): tribe.send(to="*", message="blocked on <bead-id>: <what would unblock>")
+- mid-bead checkpoint every ~1h (DM chief): tribe.send(to="chief", message="checkpoint on <bead-id>: <progress + remaining>")
+- closed (broadcast): tribe.send(to="*", message="closed <bead-id> \u2014 SHA <X> on <branch>; <outcome>")
+- paused intentionally (DM chief): tribe.send(to="chief", message="pausing <bead-id> at <phase> \u2014 resuming next session, holding <slot>")
+
+Session-level (slot lifecycle, all broadcast):
+- online: tribe.send(to="*", message="online @agent/N \u2014 <focus or available>")
+- idle: tribe.send(to="*", message="idle @agent/N \u2014 available for assignment")
+- offline: tribe.send(to="*", message="offline @agent/N \u2014 back at <when>")
+
+Between-beads (DM chief, after each close, before next claim):
+- backlog summary: "backlog @agent/N: depth <X> | top: <top-3 bead-ids+priorities> | recommend: <pick / reassign-to-Y>"
+
+Before editing vendor/ or shared files, send a request to chief asking for OK.
+Respond to query messages promptly.
+
+Slot hygiene (load-bearing): clean before AND after using a worktree slot. No "not my problem" \u2014 inherited drift is YOUR problem to clean. Use `bun tools/chief-cleanup-slot.ts wtN` for non-destructive per-file restore (works around dcg blocks on git reset --hard).
+
+Reality-check before claiming a bead older than ~24h: read the body, grep named SHAs/files at origin/main, and only claim if not already paperwork-only. Skill: `.claude/skills/beads/reality-check.md`.
 
 Sub-agent protocol:
 - When you spawn sub-agents (Agent tool), broadcast: tribe.send(to="*", message="spawned: <name> for <task>")
