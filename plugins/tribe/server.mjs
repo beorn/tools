@@ -2298,7 +2298,7 @@ try {
       log5.info?.(`Reconnected to daemon`)
     },
   })
-  var joinInstruction = `If you receive a stdio-adapter auto-identify message, just call tribe.join with a short name for your focus area. Omit the role parameter \u2014 the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.history afterward \u2014 just join silently and continue.`
+  var joinInstruction = `If you receive a stdio-adapter auto-identify message: call tribe.join with NO args (zero-arg form). The daemon will auto-resolve your name from the parent claude --name flag (read via PPID argv parse at register time). If for some reason that resolves to nothing, fall back to passing name explicitly \u2014 and PRESERVE the exact string from your spawn args. Specifically: if your session was launched as 'claude --name @agent/N', your tribe handle MUST be the literal string '@agent/N' (with the leading @ and slash). Do NOT strip the @/ to make it 'agentN' \u2014 the canonical form is the @agent/N path-form (matches the hat-lease bead id and the slot path). Omit the role parameter \u2014 the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.history afterward \u2014 just join silently and continue.`
   var chiefInstructions = `Messages from other Claude Code sessions arrive as <channel source="tribe" from="..." type="..." bead="...">.
 
 You are the chief of a tribe \u2014 a coordinator for multiple Claude Code sessions working on the same project.
