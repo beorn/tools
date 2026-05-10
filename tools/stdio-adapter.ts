@@ -43,6 +43,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { TOOLS_LIST } from "./lib/tribe/tools-list.ts"
 import { createLogger } from "loggily"
 import { createTimers } from "./lib/tribe/timers.ts"
+import { defangModelInput } from "../plugins/injection-envelope/src/defang.ts"
 
 const log = createLogger("tribe:stdio-adapter")
 
@@ -77,10 +78,31 @@ let peerServer: NetServer | null = null
 // oxlint-disable-next-line eslint(prefer-const) -- deferred init, assigned before use
 let mcp: Server
 
-/** Forward a channel notification to Claude Code */
+/**
+ * Forward a channel notification to Claude Code.
+ *
+ * The `content` is defanged via `defangModelInput` before reaching the
+ * MCP wire. This is the third leg of the autocatalytic-trigger fix
+ * (alongside the hook-stdio muzzle in `lib/tribe/hook-dispatch.ts` and
+ * the envelope-defang in `injection-envelope/src/emit.ts`):
+ *
+ *   - Hooks → handled by hook-dispatch muzzle.
+ *   - additionalContext payloads → handled by emit.ts defang.
+ *   - **Tribe channel notifications** (this path) → handled here.
+ *     These travel through the MCP server's notification channel,
+ *     which Claude Code wraps as `<system-reminder>A message arrived
+ *     from plugin:tribe:tribe ...</system-reminder>`. Without this
+ *     defang, content like `agent7 | claimed: ... last commit: <SHA>`
+ *     reads as transcript-shaped to the model — same trigger surface
+ *     as additionalContext but a different transport.
+ *
+ * `meta` is harness/tribe routing metadata (from / type / bead /
+ * message_id) — not user-visible content — so it's left as-is.
+ */
 function sendChannel(content: string, meta: Record<string, string | undefined>): void {
   if (!mcp) return // Not yet initialized
-  mcp.notification({ method: "notifications/claude/channel", params: { content, meta } }).catch(() => {})
+  const safeContent = defangModelInput(content)
+  mcp.notification({ method: "notifications/claude/channel", params: { content: safeContent, meta } }).catch(() => {})
 }
 
 function startPeerServer(): NetServer {
