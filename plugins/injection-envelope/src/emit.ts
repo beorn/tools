@@ -22,6 +22,7 @@
 
 import type { RegisteredSource } from "./registry.ts"
 import { rewriteImperativeAsReported, sanitize } from "./sanitize.ts"
+import { defangModelInput } from "./defang.ts"
 import { emitInjectionDebugEvent } from "./debug.ts"
 import {
   extractEntities,
@@ -172,7 +173,14 @@ export function wrapInjectedContext(opts: WrapOptions): string {
     `\n` +
     `</injected_context>`
 
-  const out = `${envelope}\n\n${CONTEXT_PROTOCOL_FOOTER}`
+  // Final pass: defang transcript-shape + role-prefix literals across the
+  // whole envelope. Item-level sanitize() already strips XML breakouts and
+  // collapses whitespace inside each <item>, but the envelope's structural
+  // wrappers + the appended footer still surround it. defangModelInput is
+  // idempotent and handles role-prefix literals introduced by item content
+  // (e.g. a tribe channel forwarding a session transcript). See
+  // `defang.ts` for the full rationale.
+  const out = defangModelInput(`${envelope}\n\n${CONTEXT_PROTOCOL_FOOTER}`)
 
   emitInjectionDebugEvent({
     source,
@@ -291,10 +299,22 @@ function persistManifestFromWrap(opts: WrapOptions): void {
  */
 export function emitHookJson(eventName: string, additionalContext?: string, userPrompt?: string): string {
   if (eventName === "UserPromptSubmit" && additionalContext !== undefined && additionalContext.length > 0) {
+    // Defang the additionalContext payload only — never the userPrompt.
+    // userPrompt is the user's verbatim text and is high-trust by
+    // definition; defanging it would distort code samples or other
+    // literal content the user intends. additionalContext, by contrast,
+    // is ALWAYS injected reference material (recall snippets, tribe
+    // channel forwarding, system-reminder content) and goes through
+    // defangModelInput to strip transcript-shape patterns and ZWSP-defang
+    // role-prefix literals before reaching user-role context. See
+    // `defang.ts` for full rationale; without this, tribe-MCP-forwarded
+    // channel content was triggering the autocatalytic `Human:`
+    // hallucination at the rate of channel broadcasts.
+    const safeContext = defangModelInput(additionalContext)
     const finalContext =
       userPrompt !== undefined && userPrompt.length > 0
-        ? `<user_prompt>${escapeUserPromptBody(userPrompt)}</user_prompt>\n\n${additionalContext}`
-        : additionalContext
+        ? `<user_prompt>${escapeUserPromptBody(userPrompt)}</user_prompt>\n\n${safeContext}`
+        : safeContext
     // Observability: record the injection into the unified tribe activity log
     // so `tail -f ~/.local/share/tribe/activity.jsonl` shows everything that
     // lands in the session's prompt stream. Best-effort; write failures never

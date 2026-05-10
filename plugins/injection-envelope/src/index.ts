@@ -14,6 +14,7 @@ export { wrapInjectedContext, emitHookJson, CONTEXT_PROTOCOL_FOOTER } from "./em
 export type { WrapOptions, InjectedItem, EmitMode } from "./emit.ts"
 
 export { rewriteImperativeAsReported, sanitize } from "./sanitize.ts"
+export { defangModelInput } from "./defang.ts"
 
 export type { RegisteredSource } from "./registry.ts"
 
