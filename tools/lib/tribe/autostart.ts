@@ -26,8 +26,15 @@ import { createConnection } from "node:net"
 import { existsSync, unlinkSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { dirname, resolve } from "node:path"
+import { createLogger } from "loggily"
 import { resolveAutostart, type TribeAutostart } from "./autostart-config.ts"
 import { resolveSocketPath as resolveTribeSocketPath } from "./socket.ts"
+
+// Diagnostic output goes through loggily — never `process.stderr.write`.
+// Hook entry points (`tools/lib/tribe/hook-dispatch.ts`) call
+// `setSuppressConsole(true)` to keep this off Claude Code's hook-stderr
+// capture path; see that file's docstring for the upstream bug context.
+const autostartLog = createLogger("tribe:autostart")
 
 // ---------------------------------------------------------------------------
 // Daemon liveness probe
@@ -145,12 +152,12 @@ export function spawnTribeDaemonDetached(
       return { ok: false, error: "spawn returned no pid" }
     }
     const logFn = opts.log ?? defaultLog
-    logFn(`[tribe] spawned ${label} daemon (pid=${pid})`)
+    logFn(`spawned ${label} daemon (pid=${pid})`)
     return { ok: true, pid }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const logFn = opts.log ?? defaultLog
-    logFn(`[tribe] ${label} daemon spawn failed: ${msg}`)
+    logFn(`${label} daemon spawn failed: ${msg}`)
     return { ok: false, error: msg }
   }
 }
@@ -162,11 +169,10 @@ export function spawnTribeDaemonDetached(
 export const spawnDaemonDetached = spawnTribeDaemonDetached
 
 function defaultLog(msg: string): void {
-  try {
-    process.stderr.write(`${msg}\n`)
-  } catch {
-    /* ignore — must never crash the hook */
-  }
+  // Routed through loggily so hook contexts can suppress + redirect via
+  // `setSuppressConsole(true)` + `addWriter({ ns: "tribe:*" }, …)`.
+  // Never write to stderr/stdout directly — see file-top docstring.
+  autostartLog.info?.(msg)
 }
 
 // ---------------------------------------------------------------------------

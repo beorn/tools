@@ -2286,8 +2286,7 @@ try {
   function sendOnboarding(role) {
     if (role === lastAnnouncedRole) return
     lastAnnouncedRole = role
-    const runbookFile =
-      role === "chief" ? ".claude/runbooks/tribe-chief.md" : ".claude/runbooks/agent-protocol.md"
+    const runbookFile = role === "chief" ? ".claude/runbooks/tribe-chief.md" : ".claude/runbooks/agent-protocol.md"
     const headlines =
       role === "chief"
         ? "Coordinate the tribe. Headlines: §3 integrate after every bead via chief-integrate.ts wtN; §13 detect + escalate + RESOLVE blocked work (most important job); §15 load-balance via /pm groom + tribe.send; §17 ping any agent silent >15 min."
@@ -2295,7 +2294,7 @@ try {
     const tools =
       role === "chief"
         ? "tribe.members() / tribe.send() / tribe.health() / tribe.broadcast() / tribe.history()"
-        : "tribe.send(to=\"*\", ...) for broadcast / tribe.send(to=\"chief\", ...) for chief DM"
+        : 'tribe.send(to="*", ...) for broadcast / tribe.send(to="chief", ...) for chief DM'
     sendChannel(
       `You are ${role.toUpperCase()}. Read ${runbookFile} for the full role contract (if it exists in this project). ${headlines}\n\nTools: ${tools}`,
       { from: "daemon", type: "onboarding:role-assignment" },

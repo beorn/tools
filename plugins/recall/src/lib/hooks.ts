@@ -1,12 +1,27 @@
 /**
  * Hook handlers for UserPromptSubmit and SessionEnd.
  * Called by Claude Code hooks, not directly by users.
+ *
+ * Diagnostic output goes through loggily — never `console.error` /
+ * `process.stderr.write`. Hook stdout/stderr is captured by Claude Code
+ * and surfaced to the model as `<system-reminder>UserPromptSubmit hook
+ * success: <captured></system-reminder>`, and transcript-shaped captured
+ * text triggers an autocatalytic role-prefix hallucination
+ * (`Human: <system-reminder>…`). The hook entry point in
+ * `tools/lib/tribe/hook-dispatch.ts` calls `setSuppressConsole(true)` and
+ * installs a JSONL writer for `injection:*`, plus a generic writer for
+ * `recall:*` here. See that file's docstring for the full mitigation.
+ *
+ * `console.log` is the *only* sanctioned stdout writer in this file —
+ * it's the hook's JSON response channel, read by Claude Code via
+ * `hookSpecificOutput`.
  */
 
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs"
 import { spawn } from "child_process"
+import { createLogger } from "loggily"
 import { hookRecall } from "../history/recall"
 import { getDb, closeDb, getIndexMeta } from "../history/db"
 import { summarizeUnprocessedDays } from "./summarize-daily"
@@ -16,6 +31,13 @@ import { TRIBE_METHODS, LORE_PROTOCOL_VERSION, type InjectDeltaResult } from "..
 // Route every UserPromptSubmit emission through the envelope so the unified
 // activity log catches it (km-tribe.activity-log phase 2).
 import { emitHookJson as envelopeEmitHookJson } from "../../../injection-envelope/src/emit.ts"
+
+// Loggily namespaces — kept narrow so a reader can grep `producer` /
+// namespace in the JSONL and attribute lines to the right hook event.
+const sessionStartLog = createLogger("recall:hook:session-start")
+const sessionEndLog = createLogger("recall:hook:session-end")
+const hookLog = createLogger("recall:hook:prompt")
+const rememberLog = createLogger("recall:hook:remember")
 
 // ============================================================================
 // Session sentinel (written by hook, read by `bun recall` subprocesses)
@@ -135,12 +157,15 @@ export async function cmdSessionStart(): Promise<void> {
     try {
       input = JSON.parse(stdin) as typeof input
     } catch (e) {
-      console.error(`[recall session-start] invalid JSON: ${String(e)}`)
+      sessionStartLog.warn?.("invalid JSON", { error: String(e) })
       process.exit(0) // don't block session startup
     }
 
     if (!input.session_id || !input.cwd) {
-      console.error(`[recall session-start] missing session_id or cwd — skipping`)
+      sessionStartLog.warn?.("missing session_id or cwd — skipping", {
+        has_session_id: Boolean(input.session_id),
+        has_cwd: Boolean(input.cwd),
+      })
       process.exit(0)
     }
 
@@ -168,11 +193,16 @@ export async function cmdSessionStart(): Promise<void> {
       indexStatus = "refreshing"
     }
 
-    console.error(
-      `[recall session-start] claude PID ${claudePid} session=${sessionId.slice(0, 8)} sentinel=ok daemon=${daemonStatus} index=${indexStatus} (${Date.now() - startTime}ms)`,
-    )
+    sessionStartLog.info?.("ok", {
+      claude_pid: claudePid,
+      session: sessionId.slice(0, 8),
+      sentinel: "ok",
+      daemon: daemonStatus,
+      index: indexStatus,
+      elapsed_ms: Date.now() - startTime,
+    })
   } catch (e) {
-    console.error(`[recall session-start] error: ${e instanceof Error ? e.message : String(e)}`)
+    sessionStartLog.error?.(e instanceof Error ? e : new Error(String(e)), "session-start handler error")
     // Never fail — session startup must not be blocked
   }
 }
@@ -208,9 +238,11 @@ export async function cmdSessionEnd(): Promise<void> {
     if (process.env.RECALL_NO_BG_INDEX !== "1") {
       spawnBackgroundIncrementalIndex("SessionEnd")
     }
-    console.error(`[recall session-end] background incremental index spawned (${Date.now() - startTime}ms)`)
+    sessionEndLog.info?.("background incremental index spawned", {
+      elapsed_ms: Date.now() - startTime,
+    })
   } catch (e) {
-    console.error(`[recall session-end] error: ${e instanceof Error ? e.message : String(e)}`)
+    sessionEndLog.error?.(e instanceof Error ? e : new Error(String(e)), "session-end handler error")
   }
 }
 
@@ -321,9 +353,10 @@ export async function cmdHook(): Promise<void> {
     try {
       input = JSON.parse(stdin) as { prompt?: string; session_id?: string; transcript_path?: string; cwd?: string }
     } catch (e) {
-      console.error(
-        `[recall hook] FATAL: invalid JSON on stdin (${Date.now() - startTime}ms): ${String(e)}\nstdin was: ${stdin.slice(0, 200)}`,
-      )
+      hookLog.error?.(e instanceof Error ? e : new Error(String(e)), "FATAL: invalid JSON on stdin", {
+        elapsed_ms: Date.now() - startTime,
+        stdin_preview: stdin.slice(0, 200),
+      })
       process.exit(1)
       return
     }
@@ -345,7 +378,7 @@ export async function cmdHook(): Promise<void> {
 
     const prompt = input.prompt
     if (!prompt) {
-      console.error(`[recall hook] no prompt in stdin (${Date.now() - startTime}ms)`)
+      hookLog.warn?.("no prompt in stdin", { elapsed_ms: Date.now() - startTime })
       process.exit(0)
     }
 
@@ -356,15 +389,22 @@ export async function cmdHook(): Promise<void> {
     if (process.env.TRIBE_NO_DAEMON !== "1") {
       const daemonOutput = await tryInjectDeltaViaDaemon(prompt, input.session_id)
       if (daemonOutput.kind === "skipped") {
-        console.error(
-          `[recall hook] daemon skipped: ${daemonOutput.reason} (${Date.now() - startTime}ms) prompt="${prompt.slice(0, 60)}"`,
-        )
+        hookLog.info?.("daemon skipped", {
+          reason: daemonOutput.reason,
+          elapsed_ms: Date.now() - startTime,
+          prompt_preview: prompt.slice(0, 60),
+        })
         process.exit(0)
       }
       if (daemonOutput.kind === "ok") {
-        console.error(
-          `[recall hook] daemon OK: ${daemonOutput.contextLen} chars synthesis (${Date.now() - startTime}ms, seen=${daemonOutput.seenCount} turn=${daemonOutput.turnNumber}) prompt="${prompt.slice(0, 60)}"`,
-        )
+        hookLog.info?.("daemon ok", {
+          context_len: daemonOutput.contextLen,
+          elapsed_ms: Date.now() - startTime,
+          seen_count: daemonOutput.seenCount,
+          turn_number: daemonOutput.turnNumber,
+          prompt_preview: prompt.slice(0, 60),
+        })
+        // The hook's JSON response: console.log is the sanctioned channel.
         console.log(envelopeEmitHookJson("UserPromptSubmit", daemonOutput.additionalContext, prompt))
         process.exit(0)
       }
@@ -374,19 +414,26 @@ export async function cmdHook(): Promise<void> {
     const result = await hookRecall(prompt)
     const elapsed = Date.now() - startTime
     if (result.skipped) {
-      console.error(`[recall hook] skipped: ${result.reason} (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`)
+      hookLog.info?.("library skipped", {
+        reason: result.reason,
+        elapsed_ms: elapsed,
+        prompt_preview: prompt.slice(0, 60),
+      })
       process.exit(0)
     }
     const additionalContext = result.hookOutput?.hookSpecificOutput.additionalContext ?? ""
-    console.error(
-      `[recall hook] OK: ${additionalContext.length} chars synthesis (${elapsed}ms) prompt="${prompt.slice(0, 60)}"`,
-    )
+    hookLog.info?.("library ok", {
+      context_len: additionalContext.length,
+      elapsed_ms: elapsed,
+      prompt_preview: prompt.slice(0, 60),
+    })
+    // The hook's JSON response: console.log is the sanctioned channel.
     console.log(envelopeEmitHookJson("UserPromptSubmit", additionalContext, prompt))
   } catch (e) {
     const elapsed = Date.now() - startTime
-    console.error(
-      `[recall hook] FATAL: unhandled error (${elapsed}ms): ${e instanceof Error ? `${e.message}\n${e.stack}` : String(e)}`,
-    )
+    hookLog.error?.(e instanceof Error ? e : new Error(String(e)), "FATAL: unhandled error", {
+      elapsed_ms: elapsed,
+    })
     process.exit(1)
   }
 }
@@ -418,21 +465,26 @@ export async function cmdRemember(opts: { json?: boolean }): Promise<void> {
 
     const summarized = results.filter((r) => !r.skipped)
     if (summarized.length > 0) {
-      console.error(
-        `[recall remember] summarized ${summarized.length} day(s): ${summarized.map((r) => r.date).join(", ")} (${elapsed}ms) session=${sessionId}`,
-      )
+      rememberLog.info?.("summarized", {
+        days_count: summarized.length,
+        days: summarized.map((r) => r.date),
+        elapsed_ms: elapsed,
+        session: sessionId,
+      })
     } else {
-      console.error(`[recall remember] no unprocessed days (${elapsed}ms) session=${sessionId}`)
+      rememberLog.info?.("no unprocessed days", { elapsed_ms: elapsed, session: sessionId })
     }
 
     if (opts.json) {
+      // --json CLI mode: print structured output on stdout for the user.
+      // Not invoked from the hook protocol path; safe to use console.log.
       console.log(JSON.stringify(results, null, 2))
     }
   } catch (e) {
     const elapsed = Date.now() - startTime
-    console.error(
-      `[recall remember] FATAL: unhandled error (${elapsed}ms): ${e instanceof Error ? `${e.message}\n${e.stack}` : String(e)}`,
-    )
+    rememberLog.error?.(e instanceof Error ? e : new Error(String(e)), "FATAL: unhandled error", {
+      elapsed_ms: elapsed,
+    })
     process.exit(1)
   }
 }
