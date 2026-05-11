@@ -17,13 +17,21 @@ import { sendMessage, logEvent } from "./messaging.ts"
 /** Thrown when a session can't register or rename because the desired name is
  *  held by another active session. `existing_names` enumerates the currently-
  *  connected names so callers can suggest alternatives without an extra
- *  `tribe.sessions` round-trip. */
+ *  `tribe.sessions` round-trip. `holder_pid` (when known) is the OS PID of
+ *  the live process currently holding the name — surfaces actionable info
+ *  for spawn-time identity-binding (the user can verify the conflict is a
+ *  real second instance, not a stale daemon-side ghost). */
 export class NameConflictError extends Error {
   constructor(
     readonly desiredName: string,
     readonly existing_names: string[],
+    readonly holder_pid: number | null = null,
   ) {
-    super(`Name "${desiredName}" is already taken`)
+    super(
+      holder_pid != null
+        ? `Name "${desiredName}" is already taken by live pid ${holder_pid}`
+        : `Name "${desiredName}" is already taken`,
+    )
     this.name = "NameConflictError"
   }
 }
@@ -34,6 +42,23 @@ function listSessionNames(ctx: TribeContext, isActive?: (sessionId: string) => b
     .filter((r) => (isActive ? isActive(r.id) : true))
     .map((r) => r.name)
     .sort()
+}
+
+/** True iff the given OS PID exists and we have permission to signal it.
+ *  Used by spawn-time identity binding to differentiate "zombie session
+ *  the daemon thinks is alive but whose owning process is gone" from
+ *  "real second instance of the same name". A zero PID means "unknown"
+ *  (we don't store PIDs for pre-pid-binding sessions) — be conservative
+ *  and treat it as alive so we don't accidentally evict a legitimate
+ *  holder whose pid we just don't know about. */
+export function isPidAlive(pid: number): boolean {
+  if (!pid || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -60,20 +85,36 @@ export function registerSession(
   projectId?: string,
   isActive?: (sessionId: string) => boolean,
   identityToken?: string | null,
+  clientPid?: number,
 ): void {
   const desiredName = ctx.getName()
   const now = Date.now()
+  // The client's OS PID is the source of truth for "is this session real?";
+  // process.pid here is the DAEMON's PID (we run inside the daemon process).
+  // Fall back to 0 (= unknown) if the caller didn't supply one.
+  const pid = clientPid && clientPid > 0 ? clientPid : 0
 
-  // If another row holds our desired name, and its session is NOT currently
-  // connected, drop the stale row so we can claim the name cleanly.
+  // If another row holds our desired name, drop it if either (a) its session
+  // is NOT currently connected, OR (b) the daemon thinks it's connected but
+  // the owning OS PID is actually dead (zombie session — socket-close handler
+  // hasn't fired yet, e.g. parent crashed with the socket inherited by a
+  // child shell that hasn't exited). PID liveness is the structural fence:
+  // L4 of @km/tribe/spawn-time-identity-binding requires that no two live
+  // PIDs share a persona at once, but a dead-pid placeholder must yield.
   const holder = ctx.db
-    .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
-    .get({ $name: desiredName, $id: ctx.sessionId }) as { id: string } | null
+    .prepare("SELECT id, pid FROM sessions WHERE name = $name AND id != $id")
+    .get({ $name: desiredName, $id: ctx.sessionId }) as { id: string; pid: number } | null
   if (holder) {
     const holderActive = isActive ? isActive(holder.id) : false
     if (!holderActive) {
       ctx.db.prepare("DELETE FROM sessions WHERE id = $id").run({ $id: holder.id })
       log.debug?.(`evicted stale session row holding name "${desiredName}"`)
+    } else if (!isPidAlive(holder.pid)) {
+      // Daemon's clients map still has this session, but its PID is dead.
+      // The socket-close handler will catch up eventually, but spawn-time
+      // identity binding can't wait for that. Take over now.
+      ctx.db.prepare("DELETE FROM sessions WHERE id = $id").run({ $id: holder.id })
+      log.info?.(`evicted zombie session row "${desiredName}" (stored pid ${holder.pid} dead)`)
     }
   }
 
@@ -83,7 +124,7 @@ export function registerSession(
       $name: desiredName,
       $role: ctx.sessionRole,
       $domains: JSON.stringify(ctx.domains),
-      $pid: process.pid,
+      $pid: pid,
       $cwd: process.cwd(),
       $project_id: projectId ?? null,
       $claude_session_id: ctx.claudeSessionId,
@@ -94,8 +135,10 @@ export function registerSession(
   } catch {
     // Name still taken (race or active holder). Surface as a typed error so
     // the caller decides — no silent auto-fallback. The user wants to know
-    // about name conflicts, not discover them later via a mutated name.
-    throw new NameConflictError(desiredName, listSessionNames(ctx, isActive))
+    // about name conflicts, not discover them later via a mutated name. The
+    // holder_pid (when we have one) makes the error actionable: the spawner
+    // can confirm the conflict is a real live process before retrying.
+    throw new NameConflictError(desiredName, listSessionNames(ctx, isActive), holder?.pid ?? null)
   }
 
   // Matrix-shape: every session is a member of its project's default room.

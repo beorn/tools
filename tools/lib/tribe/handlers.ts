@@ -10,6 +10,7 @@ import type { TribeRole } from "./config.ts"
 const log = createLogger("tribe:handlers")
 import { validateName, sanitizeMessage } from "./validation.ts"
 import { sendMessage, logEvent } from "./messaging.ts"
+import { isPidAlive as pidStillAlive } from "./session.ts"
 
 // ---------------------------------------------------------------------------
 // Canonical tribe-coordination daemon RPC method names.
@@ -479,11 +480,23 @@ function handleHealth(ctx: TribeContext, opts: HandlerOpts): ToolResult {
     }
     if (!lastMsg) warnings.push("never sent a message")
 
+    // Spawn-time identity binding (@km/tribe/spawn-time-identity-binding):
+    // a session whose stored PID is dead is a structural zombie — the
+    // daemon thinks it's connected but the owning OS process is gone.
+    // Surface this so health checks + chief reconciliation can detect
+    // and clean up before a second `claude --name @agent/N` collides.
+    const pidAlive = !s.pid || s.pid <= 0 ? true : pidStillAlive(s.pid)
+    if (s.pid > 0 && !pidAlive) {
+      warnings.push(`pid ${s.pid} is dead — session is a zombie`)
+    }
+
     return {
       name: s.name,
       role: s.role,
       domains: JSON.parse(s.domains),
+      pid: s.pid,
       alive,
+      pid_alive: pidAlive,
       last_message: lastMsgAge ? `${Math.round(lastMsgAge / 60_000)} min ago` : "never",
       warnings,
     }

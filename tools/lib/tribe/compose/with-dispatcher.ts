@@ -270,12 +270,16 @@ export function withDispatcher<
     void generateMemberName // currently unused but kept for parity
 
     function deduplicateName(name: string): string {
-      const connectedNames = Array.from(clients.values()).map((c) => c.name)
-      if (!connectedNames.includes(name)) return name
+      const live = Array.from(clients.values())
+      const holder = live.find((c) => c.name === name)
+      if (!holder) return name
       // No silent fallback. Surface the conflict so the caller picks a fresh
-      // name explicitly. The list of taken names goes on the error so the
-      // caller doesn't need a separate tribe.sessions round-trip.
-      throw new NameConflictError(name, [...connectedNames].sort())
+      // name explicitly. The list of taken names + the live PID of the holder
+      // go on the error so the caller doesn't need a separate
+      // tribe.sessions round-trip AND can verify the conflict is real
+      // (`isPidAlive(holder_pid)` on the caller side).
+      const connectedNames = live.map((c) => c.name).sort()
+      throw new NameConflictError(name, connectedNames, holder.pid || null)
     }
 
     function applyClient(
@@ -437,7 +441,7 @@ export function withDispatcher<
               onMessageInserted: broadcast.messageTap,
             })
 
-            registerSession(clientCtx, projectId, (sid) => registry.getActiveSessionIds().has(sid), identityToken)
+            registerSession(clientCtx, projectId, (sid) => registry.getActiveSessionIds().has(sid), identityToken, pid)
 
             const client = applyClient(connId, {
               name,
@@ -675,11 +679,18 @@ export function withDispatcher<
         }
       } catch (err) {
         if (err instanceof NameConflictError) {
-          // Surface the conflict + existing_names so the caller can pick a
-          // non-colliding alternative without a separate tribe.sessions query.
-          // JSON-RPC error code -32000 = "Server error" (application range).
-          log.info?.(`NameConflict on ${method}: "${err.desiredName}" taken (existing=${err.existing_names.length})`)
-          return makeError(id, -32000, err.message, { existing_names: err.existing_names })
+          // Surface the conflict + existing_names + holder_pid so the caller
+          // can pick a non-colliding alternative without a separate
+          // tribe.sessions query AND verify the holder is a real live
+          // process (vs. a stale daemon-side ghost). JSON-RPC error code
+          // -32000 = "Server error" (application range).
+          log.info?.(
+            `NameConflict on ${method}: "${err.desiredName}" taken (existing=${err.existing_names.length}, pid=${err.holder_pid ?? "?"})`,
+          )
+          return makeError(id, -32000, err.message, {
+            existing_names: err.existing_names,
+            holder_pid: err.holder_pid,
+          })
         }
         const msg = err instanceof Error ? err.message : String(err)
         log.info?.(`Error handling ${method}: ${msg}`)

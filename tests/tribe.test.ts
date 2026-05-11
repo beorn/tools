@@ -559,6 +559,143 @@ describe("registerSession (real impl)", () => {
     }
   })
 
+  test("stores the client's PID (not the daemon's) in the sessions row", () => {
+    // @km/tribe/spawn-time-identity-binding: previously sessions.pid was
+    // always `process.pid` (= the daemon's PID), making the column useless
+    // for "is the owning process alive?" checks. registerSession now accepts
+    // a clientPid arg and stores that.
+    const db = openDatabase(rsDbPath)
+    const stmts = createStatements(db)
+    try {
+      const fakeClientPid = 99_111 // distinct from process.pid for the test
+      const ctx = createTribeContext({
+        db,
+        stmts,
+        sessionId: randomUUID(),
+        sessionRole: "member",
+        initialName: "worker",
+        domains: [],
+        claudeSessionId: null,
+        claudeSessionName: null,
+      })
+      realRegisterSession(ctx, undefined, () => false, null, fakeClientPid)
+
+      const row = db.prepare("SELECT pid FROM sessions WHERE id = $id").get({ $id: ctx.sessionId }) as { pid: number }
+      expect(row.pid).toBe(fakeClientPid)
+      expect(row.pid).not.toBe(process.pid) // proves the prior bug-case is fixed
+    } finally {
+      db.close()
+    }
+  })
+
+  test("NameConflictError surfaces holder_pid for actionable spawn-time-binding", () => {
+    // The conflict error must name the live PID of the holder so the caller
+    // (stdio-adapter) can decide between "real second instance" and "stale
+    // daemon-side ghost" without an extra round trip.
+    const db = openDatabase(rsDbPath)
+    const stmts = createStatements(db)
+    try {
+      const livePid = process.pid // a PID we know is alive (us)
+      const ctxA = createTribeContext({
+        db,
+        stmts,
+        sessionId: randomUUID(),
+        sessionRole: "member",
+        initialName: "worker",
+        domains: [],
+        claudeSessionId: null,
+        claudeSessionName: null,
+      })
+      realRegisterSession(ctxA, undefined, () => false, null, livePid)
+
+      const ctxB = createTribeContext({
+        db,
+        stmts,
+        sessionId: randomUUID(),
+        sessionRole: "member",
+        initialName: "worker",
+        domains: [],
+        claudeSessionId: null,
+        claudeSessionName: null,
+      })
+      const activeIds = new Set([ctxA.sessionId])
+
+      let caught: unknown = null
+      try {
+        realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid), null, livePid + 1)
+      } catch (e) {
+        caught = e
+      }
+      expect(caught).toBeTruthy()
+      // Use shape-checks instead of `instanceof` so the test stays portable
+      // across the named-export boundary.
+      const err = caught as { name?: string; holder_pid?: number; existing_names?: string[]; message?: string }
+      expect(err.name).toBe("NameConflictError")
+      expect(err.holder_pid).toBe(livePid)
+      expect(err.existing_names).toContain("worker")
+      expect(err.message).toMatch(new RegExp(`pid ${livePid}`))
+    } finally {
+      db.close()
+    }
+  })
+
+  test("zombie holder (PID dead, daemon still thinks alive) is evicted", () => {
+    // The structural-invariant case: daemon's clients map still has the
+    // session (socket-close handler hasn't fired yet, e.g. parent crashed
+    // with an inherited socket), but the owning OS PID is gone. Spawn-time
+    // binding can't wait for the daemon to catch up — it must check PID
+    // liveness directly and take over.
+    const db = openDatabase(rsDbPath)
+    const stmts = createStatements(db)
+    try {
+      // Seed a row with a deliberately-dead PID. PID 1 is init/launchd and
+      // never not-running; we need the opposite. Use a very-high PID that
+      // is extremely unlikely to exist. (`kill -0 4_000_000` reliably fails
+      // since the kernel maxPid is typically 99_999 or 4_194_304 — even at
+      // 32-bit ceilings this PID is past most live ranges.)
+      const deadPid = 4_000_000
+      const ctxA = createTribeContext({
+        db,
+        stmts,
+        sessionId: randomUUID(),
+        sessionRole: "member",
+        initialName: "worker",
+        domains: [],
+        claudeSessionId: null,
+        claudeSessionName: null,
+      })
+      realRegisterSession(ctxA, undefined, () => false, null, deadPid)
+
+      // The daemon still thinks A is alive (isActive returns true for it),
+      // but its PID is dead. B should take over rather than collide.
+      const ctxB = createTribeContext({
+        db,
+        stmts,
+        sessionId: randomUUID(),
+        sessionRole: "member",
+        initialName: "worker",
+        domains: [],
+        claudeSessionId: null,
+        claudeSessionName: null,
+      })
+      const activeIds = new Set([ctxA.sessionId]) // daemon thinks A is alive
+      realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid), null, process.pid)
+
+      // B got the name, A's row was evicted.
+      expect(ctxB.getName()).toBe("worker")
+      const rows = db.prepare("SELECT id, name, pid FROM sessions").all() as Array<{
+        id: string
+        name: string
+        pid: number
+      }>
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.id).toBe(ctxB.sessionId)
+      expect(rows[0]!.pid).toBe(process.pid)
+    } finally {
+      db.close()
+    }
+  })
+
   test("colliding name from an INACTIVE holder is overwritten (name reclaimed)", () => {
     const db = openDatabase(rsDbPath)
     const stmts = createStatements(db)
