@@ -11,6 +11,32 @@ const log = createLogger("tribe:session")
 import { sendMessage, logEvent } from "./messaging.ts"
 
 // ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/** Thrown when a session can't register or rename because the desired name is
+ *  held by another active session. `existing_names` enumerates the currently-
+ *  connected names so callers can suggest alternatives without an extra
+ *  `tribe.sessions` round-trip. */
+export class NameConflictError extends Error {
+  constructor(
+    readonly desiredName: string,
+    readonly existing_names: string[],
+  ) {
+    super(`Name "${desiredName}" is already taken`)
+    this.name = "NameConflictError"
+  }
+}
+
+function listSessionNames(ctx: TribeContext, isActive?: (sessionId: string) => boolean): string[] {
+  const rows = ctx.db.prepare("SELECT id, name FROM sessions").all() as Array<{ id: string; name: string }>
+  return rows
+    .filter((r) => (isActive ? isActive(r.id) : true))
+    .map((r) => r.name)
+    .sort()
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -66,23 +92,10 @@ export function registerSession(
       $now: now,
     })
   } catch {
-    // Name still taken (race or active holder) — add random suffix
-    const fallbackName = `${desiredName}-${Math.random().toString(36).slice(2, 5)}`
-    log.debug?.(`name "${desiredName}" taken by active session, using "${fallbackName}"`)
-    ctx.setName(fallbackName)
-    ctx.stmts.upsertSession.run({
-      $id: ctx.sessionId,
-      $name: ctx.getName(),
-      $role: ctx.sessionRole,
-      $domains: JSON.stringify(ctx.domains),
-      $pid: process.pid,
-      $cwd: process.cwd(),
-      $project_id: projectId ?? null,
-      $claude_session_id: ctx.claudeSessionId,
-      $claude_session_name: ctx.claudeSessionName,
-      $identity_token: identityToken ?? null,
-      $now: now,
-    })
+    // Name still taken (race or active holder). Surface as a typed error so
+    // the caller decides — no silent auto-fallback. The user wants to know
+    // about name conflicts, not discover them later via a mutated name.
+    throw new NameConflictError(desiredName, listSessionNames(ctx, isActive))
   }
 
   // Matrix-shape: every session is a member of its project's default room.
