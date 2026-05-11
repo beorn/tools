@@ -1012,6 +1012,24 @@ export async function createWorktree(name: string, branch?: string, options: Cre
     process.exit(1)
   }
 
+  // Pool cap enforcement (km-tribe.worktree-pool-cap-lru, pillar C).
+  // Pool slots are wt0..wt(POOL_CAP-1). Refuse creation beyond cap unless the
+  // caller passes an out-of-pool name (feat/*, named scratch worktrees). When
+  // at-or-over cap, list the currently-claimed slots so the operator can pick
+  // a free one or wait for a release.
+  const poolMatch = /^wt(\d+)$/.exec(name)
+  if (poolMatch) {
+    const slotN = Number(poolMatch[1])
+    const POOL_CAP = 10
+    if (slotN >= POOL_CAP) {
+      error(`Pool slot wt${slotN} exceeds cap (${POOL_CAP} slots: wt0..wt${POOL_CAP - 1})`)
+      console.log("")
+      console.log(DIM + "  Canonical pool slots are wt0..wt9. Use one of those." + RESET)
+      console.log(DIM + "  For scratch worktrees, pick a non-pool name: bun worktree create my-feature" + RESET)
+      process.exit(1)
+    }
+  }
+
   const repoName = basename(gitRoot)
   const worktreePath = join(dirname(gitRoot), `${repoName}-${name}`)
   // Slot-pattern names (wt0, wt1, ..., wt9) get a plain branch matching the
