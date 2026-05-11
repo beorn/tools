@@ -172,10 +172,16 @@ export function withRuntime<T extends RuntimeShape>(opts: RuntimeOpts<T>): (t: T
       // file unlink + db close + watcher close all live in scope-deferred
       // disposers registered by their factories.
       void t.scope[Symbol.asyncDispose]().catch(() => {})
-      // Belt-and-braces: top-level exit. The dispose cascade is async; force
-      // exit guarantees the process terminates even if a defer hangs.
-      const exitTimer = setTimeout(() => process.exit(0), 250) as unknown as { unref?: () => void }
-      exitTimer.unref?.()
+      // Force-exit hammer: process.exit(0) WILL fire after 250ms regardless
+      // of what scope dispose is doing. The previous `.unref()` here was a
+      // bug — an unref'd timer doesn't keep the event loop alive long enough
+      // to fire its own callback if every other handle is also unref'd or if
+      // a sync-heavy task starves the loop. The donor-daemon zombie pattern
+      // tracked at @km/bearly/hot-reload-zombie-exit-not-forced (96% CPU
+      // ghost daemon after SIGHUP handoff) traces here: the exit hammer
+      // never landed. The 250ms cost vs. previous "maybe sub-250ms" is a
+      // worthwhile trade for guaranteed termination.
+      setTimeout(() => process.exit(0), 250)
     }
 
     opts.publishShutdown(shutdown)

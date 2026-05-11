@@ -115,12 +115,30 @@ export function withHotReload<T extends BaseTribe & WithSocketServer>(
       // Give new process time to start, then exit. Use a raw setTimeout here —
       // we WANT this timer to fire even after `triggerShutdown()` is initiated
       // by something else, because the new process needs the old one out of
-      // the way to take over the fd cleanly.
-      const exitTimer = setTimeout(() => {
+      // the way to take over the fd cleanly. Do NOT unref — if every other
+      // handle is also unref'd or the loop is sync-starved, the donor stays
+      // alive serving its now-dead state. See @km/bearly/hot-reload-zombie-
+      // exit-not-forced for the zombie-daemon incident.
+      setTimeout(() => {
         log.info?.("Hot-reload: old process exiting, new process taking over")
         opts.triggerShutdown()
-      }, spawnDelayMs) as unknown as { unref?: () => void }
-      exitTimer.unref?.()
+      }, spawnDelayMs)
+
+      // Belt-and-braces nuke: if triggerShutdown + withRuntime's force-exit
+      // hammer somehow still don't terminate this process — say a sync-heavy
+      // plugin starves both timers' callbacks — SIGKILL self at
+      // spawnDelayMs + 1500ms. Synchronous, kernel-enforced, can't be
+      // starved. This is the last line of defense; previous fixes (dropping
+      // .unref() on both timers) should make it unreachable in practice,
+      // but the historical zombie-daemon incident proved we need the hammer.
+      setTimeout(() => {
+        log.info?.("Hot-reload: belt-and-braces SIGKILL — clean shutdown did not terminate process")
+        try {
+          process.kill(process.pid, "SIGKILL")
+        } catch {
+          /* even the kill failed; nothing left to try */
+        }
+      }, spawnDelayMs + 1500)
     }
 
     // Source-file watcher — auto-SIGHUP on code changes.

@@ -506,7 +506,13 @@ describe("registerSession (real impl)", () => {
     }
   })
 
-  test("colliding name from an ACTIVE holder falls back to a suffixed name", () => {
+  test("colliding name from an ACTIVE holder throws NameConflictError (no silent fallback)", () => {
+    // Updated for @km/bearly/tribe-rename-no-fallback-and-allow-sigils: the
+    // registerSession path no longer silently suffixes names on collision.
+    // The caller (dispatcher / stdio-adapter) sees a typed conflict error
+    // with `existing_names` and decides how to recover. The previous "auto
+    // -N suffix" behavior masked legitimate duplication and made names
+    // unpredictable for the user; surfacing the conflict is the design.
     const db = openDatabase(rsDbPath)
     const stmts = createStatements(db)
     try {
@@ -534,20 +540,19 @@ describe("registerSession (real impl)", () => {
         claudeSessionId: null,
         claudeSessionName: null,
       })
-      // isActive reports A as currently connected — B cannot overwrite its row.
+      // isActive reports A as currently connected — B cannot overwrite its row,
+      // and the no-silent-fallback contract surfaces this as a typed error.
       const activeIds = new Set([ctxA.sessionId])
-      realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))
+      expect(() => realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))).toThrow(
+        /already taken|conflict/i,
+      )
 
-      // B got a random suffix; A's row (with its last_delivered_seq / cursor)
-      // is preserved for reconnection-time recovery.
-      expect(ctxB.getName()).not.toBe("worker")
-      expect(ctxB.getName().startsWith("worker-")).toBe(true)
-
+      // A's row is preserved untouched (no spurious suffixed row from B).
       const rows = db.prepare("SELECT id, name FROM sessions ORDER BY name").all() as Array<{
         id: string
         name: string
       }>
-      expect(rows.map((r) => r.name).sort()).toEqual([ctxB.getName(), "worker"].sort())
+      expect(rows.map((r) => r.name)).toEqual(["worker"])
       expect(rows.find((r) => r.name === "worker")!.id).toBe(ctxA.sessionId)
     } finally {
       db.close()
