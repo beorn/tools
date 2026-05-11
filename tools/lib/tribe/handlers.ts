@@ -8,9 +8,87 @@ import type { TribeContext } from "./context.ts"
 import type { TribeRole } from "./config.ts"
 
 const log = createLogger("tribe:handlers")
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { validateName, sanitizeMessage } from "./validation.ts"
 import { sendMessage, logEvent } from "./messaging.ts"
 import { isPidAlive as pidStillAlive } from "./session.ts"
+
+// ---------------------------------------------------------------------------
+// Reconciler snapshot — read-only view into chief-reconciler output, surfaced
+// inside tribe.health() so consumers see stale leases / dead sessions /
+// orphan worktrees in real-time without a separate `km tribe doctor` call.
+// Path comes from `TRIBE_RECONCILER_SNAPSHOT` so the daemon stays
+// km-agnostic (matches vendor/CLAUDE.md: no hardcoded km paths in vendor).
+// ---------------------------------------------------------------------------
+
+const RECONCILER_STALE_MS = 20 * 60 * 1000 // 20min
+
+interface ReconcilerFinding {
+  kind: string
+  severity?: "info" | "warn" | "action"
+  summary?: string
+  bead?: string
+  agent?: string
+  worktree?: string
+  pid?: number
+  fix?: string
+}
+
+interface ReconcilerSnapshotShape {
+  ts: number
+  findings: ReconcilerFinding[]
+}
+
+interface ReconcilerSection {
+  lastTickAt?: number
+  ageMs?: number
+  findings?: Record<string, number>
+  actions?: ReconcilerFinding[]
+  error?: string
+  snapshotPath?: string
+}
+
+/** Read + summarize the chief-reconciler snapshot. Returns null when the
+ *  feature is opt-out (env var unset). All errors degrade gracefully into
+ *  an `error` field — never throws, because tribe.health() must keep
+ *  working when the snapshot file is missing, corrupt, or stale. */
+export function readReconcilerSnapshot(): ReconcilerSection | null {
+  const path = process.env.TRIBE_RECONCILER_SNAPSHOT
+  if (!path) return null
+  if (!existsSync(path)) {
+    return { error: "snapshot not found", snapshotPath: path }
+  }
+  try {
+    const raw = readFileSync(path, "utf8")
+    const report = JSON.parse(raw) as ReconcilerSnapshotShape
+    const lastTickAt = typeof report.ts === "number" ? report.ts : statSync(path).mtimeMs
+    // statSync's mtimeMs is fractional; clamp to nonneg so a snapshot
+    // written in the same tick doesn't surface a slightly-negative ageMs.
+    const ageMs = Math.max(0, Date.now() - lastTickAt)
+    const findings: Record<string, number> = {}
+    const actions: ReconcilerFinding[] = []
+    for (const f of Array.isArray(report.findings) ? report.findings : []) {
+      const kind = String(f.kind ?? "unknown")
+      findings[kind] = (findings[kind] ?? 0) + 1
+      if (f.severity === "action") {
+        actions.push({
+          kind,
+          ...(f.bead ? { bead: f.bead } : {}),
+          ...(f.agent ? { agent: f.agent } : {}),
+          ...(f.worktree ? { worktree: f.worktree } : {}),
+          ...(f.pid ? { pid: f.pid } : {}),
+          ...(f.fix ? { fix: f.fix } : {}),
+        })
+      }
+    }
+    if (ageMs > RECONCILER_STALE_MS) {
+      findings["stale-snapshot"] = (findings["stale-snapshot"] ?? 0) + 1
+    }
+    return { lastTickAt, ageMs, findings, actions }
+  } catch (err) {
+    return { error: `snapshot parse failed: ${err instanceof Error ? err.message : String(err)}`, snapshotPath: path }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Canonical tribe-coordination daemon RPC method names.
@@ -526,6 +604,13 @@ function handleHealth(ctx: TribeContext, opts: HandlerOpts): ToolResult {
   }
 
   const result: Record<string, unknown> = { members, unread, stats, checked_at: new Date().toISOString() }
+  // L4 of @km/tribe/stable-coordination: surface the chief-reconciler's
+  // four-source reconciliation (live processes / bead claims / worktrees /
+  // tribe sessions) inline so any session asking tribe.health() sees
+  // orphans in real-time. Opt-in via TRIBE_RECONCILER_SNAPSHOT env var so
+  // the bearly daemon stays km-agnostic for standalone deployments.
+  const reconciler = readReconcilerSnapshot()
+  if (reconciler) result.reconciler = reconciler
   return {
     content: [
       {
