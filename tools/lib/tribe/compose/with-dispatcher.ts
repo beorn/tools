@@ -43,7 +43,7 @@ import { detectRole, resolveProjectId, type TribeRole } from "../config.ts"
 import { createTribeContext, type TribeContext } from "../context.ts"
 import { handleToolCall, TRIBE_COORD_METHODS } from "../handlers.ts"
 import { logEvent, sendMessage } from "../messaging.ts"
-import { registerSession } from "../session.ts"
+import { registerSession, NameConflictError } from "../session.ts"
 import { type LoreConnState } from "../lore-handlers.ts"
 import type { BaseTribe } from "./base.ts"
 import type { WithBroadcast } from "./with-broadcast.ts"
@@ -270,12 +270,12 @@ export function withDispatcher<
     void generateMemberName // currently unused but kept for parity
 
     function deduplicateName(name: string): string {
-      const connectedNames = new Set(Array.from(clients.values()).map((c) => c.name))
-      if (!connectedNames.has(name)) return name
-      const base = name
-      let suffix = 2
-      while (connectedNames.has(`${base}-${suffix}`)) suffix++
-      return `${base}-${suffix}`
+      const connectedNames = Array.from(clients.values()).map((c) => c.name)
+      if (!connectedNames.includes(name)) return name
+      // No silent fallback. Surface the conflict so the caller picks a fresh
+      // name explicitly. The list of taken names goes on the error so the
+      // caller doesn't need a separate tribe.sessions round-trip.
+      throw new NameConflictError(name, [...connectedNames].sort())
     }
 
     function applyClient(
@@ -674,6 +674,13 @@ export function withDispatcher<
           }
         }
       } catch (err) {
+        if (err instanceof NameConflictError) {
+          // Surface the conflict + existing_names so the caller can pick a
+          // non-colliding alternative without a separate tribe.sessions query.
+          // JSON-RPC error code -32000 = "Server error" (application range).
+          log.info?.(`NameConflict on ${method}: "${err.desiredName}" taken (existing=${err.existing_names.length})`)
+          return makeError(id, -32000, err.message, { existing_names: err.existing_names })
+        }
         const msg = err instanceof Error ? err.message : String(err)
         log.info?.(`Error handling ${method}: ${msg}`)
         return makeError(id, -32603, msg)

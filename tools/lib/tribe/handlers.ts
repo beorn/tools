@@ -127,6 +127,18 @@ export function handleToolCall(
 // Implementation
 // ---------------------------------------------------------------------------
 
+/** Names of currently-active sessions, lexicographically sorted. Returned as
+ *  `existing_names` on conflict errors so the caller can pick a non-colliding
+ *  alternative without a separate `tribe.sessions` round-trip. */
+function listActiveSessionNames(ctx: TribeContext, activeIds?: Set<string>): string[] {
+  const rows = ctx.db.prepare("SELECT id, name FROM sessions").all() as Array<{ id: string; name: string }>
+  const active = activeIds ?? new Set(rows.map((r) => r.id))
+  return rows
+    .filter((r) => active.has(r.id))
+    .map((r) => r.name)
+    .sort()
+}
+
 function handleSend(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResult {
   const msgType = (a.type as string) ?? "notify"
   // Only the current chief can assign or verdict
@@ -294,6 +306,12 @@ function handleRename(
   },
 ): ToolResult {
   const newName = a.new_name as string
+  // Rename-to-self: silent no-op. Without this short-circuit, the rest of the
+  // handler still validates, broadcasts "Member X is now X", and emits a
+  // session.renamed event — pure noise.
+  if (newName === ctx.getName()) {
+    return { content: [{ type: "text", text: JSON.stringify({ renamed: false, name: newName }) }] }
+  }
   // Validate name format
   const nameError = validateName(newName)
   if (nameError) {
@@ -310,8 +328,14 @@ function handleRename(
     const activeIds = opts.getActiveSessionIds?.()
     const isActive = activeIds ? activeIds.has(existing.id) : true
     if (isActive) {
+      const existing_names = listActiveSessionNames(ctx, activeIds)
       return {
-        content: [{ type: "text", text: JSON.stringify({ error: `Name "${newName}" is already taken` }) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Name "${newName}" is already taken`, existing_names }),
+          },
+        ],
       }
     }
     // Tombstone the dead holder's name so the current session can claim it.

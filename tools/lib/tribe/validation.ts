@@ -7,8 +7,11 @@
 // ---------------------------------------------------------------------------
 
 export function validateName(name: string): string | null {
-  if (!/^[a-z0-9][a-z0-9_.-]{0,31}$/.test(name)) {
-    return "Name must be 1-32 chars: lowercase letters, digits, hyphens, underscores, dots. Must start with letter or digit."
+  // Sigil-prefixed agent names (e.g. `@agent/2`) match slot-bead lease IDs.
+  // The `@` is optional and only meaningful at position 0; the `/` is allowed
+  // inside the body alongside dots/dashes/underscores.
+  if (!/^@?[a-z0-9][a-z0-9_./-]{0,31}$/.test(name)) {
+    return "Name must be 1-32 chars: lowercase letters, digits, hyphens, underscores, dots, slashes. Optional `@` prefix. Must start with letter or digit."
   }
   return null
 }
