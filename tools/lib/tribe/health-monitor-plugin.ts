@@ -682,7 +682,31 @@ function formatLockHolder(lock: GitLockInfo, sessionName: string | null): string
  * Evaluate metrics against thresholds and return any new alerts.
  * Mutates `state` to track sustained conditions.
  */
-export function evaluateAlerts(metrics: HealthMetrics, thresholds: HealthThresholds, state: AlertState): HealthAlert[] {
+// Process-count baseline assumes ~10 bun/node child procs per active agent
+// (accountly wrapper + stdio-adapter + tribe MCP + claude proc + transient
+// bd-CLI invocations all add up) plus a fixed chief/daemon constant. Tunable
+// via env vars when a new agent shape changes the baseline.
+const N_PER_AGENT = parseInt(process.env.HEALTH_PROC_PER_AGENT ?? "10", 10)
+const CHIEF_CONSTANT = parseInt(process.env.HEALTH_PROC_CHIEF_CONST ?? "6", 10)
+const SAFETY_MARGIN = parseFloat(process.env.HEALTH_PROC_SAFETY_MARGIN ?? "1.5")
+
+/** Dynamic process-count threshold that scales with active-agent count.
+ *  When 0 active agents, falls back to the static `processCountWarning`
+ *  so the daemon still alerts in standalone deployments. When the dynamic
+ *  number exceeds the static floor, the dynamic one wins — alarms shouldn't
+ *  fire just because a healthy 4-agent baseline is over the old 50 bar. */
+export function dynamicProcessThreshold(staticThreshold: number, activeAgentCount: number): number {
+  if (activeAgentCount <= 0) return staticThreshold
+  const dynamic = Math.ceil(CHIEF_CONSTANT + N_PER_AGENT * activeAgentCount * SAFETY_MARGIN)
+  return Math.max(staticThreshold, dynamic)
+}
+
+export function evaluateAlerts(
+  metrics: HealthMetrics,
+  thresholds: HealthThresholds,
+  state: AlertState,
+  activeAgentCount = 0,
+): HealthAlert[] {
   const alerts: HealthAlert[] = []
   const cores = metrics.cpu.coreCount
   const load = metrics.cpu.loadAvg1m
@@ -771,13 +795,23 @@ export function evaluateAlerts(metrics: HealthMetrics, thresholds: HealthThresho
   }
 
   // --- Process count ---
-  if (metrics.bunProcesses > thresholds.processCountWarning) {
+  // Threshold scales with active agents — 4 agents × ~10 procs each + chief
+  // overhead easily exceeds a static 50 bar in normal operation. The
+  // dynamicProcessThreshold helper falls back to the static value when no
+  // agents are connected (standalone deployments), so the bar never goes
+  // BELOW the configured static threshold.
+  const processThreshold = dynamicProcessThreshold(thresholds.processCountWarning, activeAgentCount)
+  if (metrics.bunProcesses > processThreshold) {
     if (!state.firedAlerts.has("process-count:warning")) {
       state.firedAlerts.add("process-count:warning")
+      const thresholdDetail =
+        activeAgentCount > 0
+          ? `${processThreshold} dynamic for ${activeAgentCount} agents (static floor: ${thresholds.processCountWarning})`
+          : `${processThreshold}`
       alerts.push({
         type: "process-count",
         severity: "warning",
-        message: `Process count warning: ${metrics.bunProcesses} bun/node processes (threshold: ${thresholds.processCountWarning})`,
+        message: `Process count warning: ${metrics.bunProcesses} bun/node processes (threshold: ${thresholdDetail})`,
         metrics: { bunProcesses: metrics.bunProcesses },
         topOffenders: metrics.cpu.topProcesses.slice(0, 5),
       })
@@ -1185,8 +1219,11 @@ export const healthMonitorPlugin: TribePluginApi = {
     async function sample(): Promise<void> {
       try {
         const { metrics, pidToParent } = await collectFullMetrics()
-        const alerts = evaluateAlerts(metrics, thresholds, alertState)
         const sessions = api.getActiveSessions()
+        // Pass active-agent count so process-count threshold scales with the
+        // number of connected sessions; alarms tuned for solo dev shouldn't
+        // fire on a healthy 4-agent baseline.
+        const alerts = evaluateAlerts(metrics, thresholds, alertState, sessions.length)
 
         for (const alert of alerts) {
           // Group offenders by session

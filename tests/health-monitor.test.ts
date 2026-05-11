@@ -443,6 +443,60 @@ describe("evaluateAlerts — Process count", () => {
     const alerts = evaluateAlerts(metrics, thresholds, state)
     expect(alerts).toEqual([])
   })
+
+  // @km/bearly/health-process-count-dynamic-threshold: the static 50-proc
+  // bar is permanently exceeded in normal 4-agent operation (10 procs/agent
+  // baseline). Threshold now scales with active agent count so the alarm
+  // surfaces real leaks, not the expected baseline.
+
+  test("dynamic threshold absorbs the 4-agent baseline (no alarm at 55 procs)", () => {
+    const thresholds = makeThresholds({ processCountWarning: 50 })
+    const state = createAlertState()
+    const metrics = makeMetrics({ bunProcesses: 55 })
+
+    // 4 agents → dynamic threshold = 6 + 10*4*1.5 = 66 > 55 → no alarm.
+    const alerts = evaluateAlerts(metrics, thresholds, state, 4)
+    expect(alerts).toEqual([])
+  })
+
+  test("dynamic threshold still fires when an agent leaks", () => {
+    const thresholds = makeThresholds({ processCountWarning: 50 })
+    const state = createAlertState()
+    // 4-agent baseline (66 expected) + a 30-proc leak = 96, well above.
+    const metrics = makeMetrics({ bunProcesses: 96 })
+
+    const alerts = evaluateAlerts(metrics, thresholds, state, 4)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]!.type).toBe("process-count")
+    expect(alerts[0]!.message).toContain("96")
+    expect(alerts[0]!.message).toContain("dynamic for 4 agents")
+    expect(alerts[0]!.message).toContain("static floor: 50")
+  })
+
+  test("dynamic threshold falls back to static when no agents are connected", () => {
+    const thresholds = makeThresholds({ processCountWarning: 50 })
+    const state = createAlertState()
+    // 0 agents → use static (50). 65 procs → exceeds → alarm.
+    const metrics = makeMetrics({ bunProcesses: 65 })
+
+    const alerts = evaluateAlerts(metrics, thresholds, state, 0)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]!.message).toContain("threshold: 50")
+  })
+
+  test("dynamic threshold never goes below the static floor", () => {
+    // If a user explicitly bumps the static floor (HEALTH_PROC_WARNING=200),
+    // a small dynamic value can't undermine it. Floor + agent scaling
+    // combine via Math.max so the alarm stays muted only when BOTH
+    // thresholds clear.
+    const thresholds = makeThresholds({ processCountWarning: 200 })
+    const state = createAlertState()
+    const metrics = makeMetrics({ bunProcesses: 150 })
+
+    // Even with 4 agents, dynamic = 66, but floor = 200 wins → no alarm.
+    const alerts = evaluateAlerts(metrics, thresholds, state, 4)
+    expect(alerts).toEqual([])
+  })
 })
 
 // ---------------------------------------------------------------------------
