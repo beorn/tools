@@ -51,6 +51,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -64,8 +68,12 @@ jobs:
         run: bun run build
         working-directory: ${{ steps.parse.outputs.dir }}
 
+      # pnpm publish (not npm publish) so publishConfig.exports overrides apply.
+      # npm publish ignores publishConfig.exports; pnpm applies it. bearly
+      # packages keep `exports` pointing at ./src/* for Bun workspace local dev
+      # and `publishConfig.exports` pointing at ./dist/* for npm consumers.
       - name: Publish to npm
-        run: npm publish --access public --provenance
+        run: pnpm publish --access public --no-git-checks --provenance
         working-directory: ${{ steps.parse.outputs.dir }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
