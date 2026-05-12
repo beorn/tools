@@ -1267,6 +1267,12 @@ export async function removeWorktree(name: string, options: RemoveOptions = {}):
 export interface ResetOptions {
   /** Discard uncommitted changes and any commits ahead of origin/main. */
   force?: boolean
+  /**
+   * Before discarding, save the worktree's ahead-of-origin/main commits as
+   * `wip/<slug>` in the main repo. No-op when there are no ahead commits.
+   * Always runs before remove + create so the save survives the reset.
+   */
+  saveAheadAs?: string
   /** Skip dependency install on recreate. */
   install?: boolean
   /** Skip direnv allow on recreate. */
@@ -1290,7 +1296,7 @@ export interface ResetOptions {
  * leave the caller's shell in a removed directory).
  */
 export async function resetWorktree(name: string, options: ResetOptions = {}): Promise<void> {
-  const { force = false, install = true, direnv = true, hooks = true } = options
+  const { force = false, saveAheadAs, install = true, direnv = true, hooks = true } = options
 
   const gitRoot = findGitRoot(process.cwd())
   if (!gitRoot) {
@@ -1334,6 +1340,30 @@ export async function resetWorktree(name: string, options: ResetOptions = {}): P
       throw new Error(
         `Worktree ${name} is ${ahead} commit(s) ahead of origin/main. ` + `Use --force to discard, or push/save first.`,
       )
+    }
+  }
+
+  // Preflight save-ahead — if requested, snapshot the worktree's ahead-of-
+  // origin/main commits to `wip/<slug>` in the main repo before we discard.
+  // No-op when there are no ahead commits, so it's safe to set unconditionally.
+  if (saveAheadAs) {
+    const aheadResult = await safeExec($`cd ${worktreePath} && git rev-list --count origin/main..HEAD 2>/dev/null`)
+    const ahead = parseInt(aheadResult.stdout.trim(), 10) || 0
+    if (ahead > 0) {
+      const tipResult = await safeExec($`cd ${worktreePath} && git rev-parse HEAD`)
+      const tipSha = tipResult.stdout.trim()
+      const saveBranch = `wip/${saveAheadAs}`
+      info(`Saving ${ahead} ahead commit(s) to ${saveBranch}...`)
+      // `git branch <name> <sha> --force` overwrites if it exists. We prefer
+      // explicit overwrite over a partial save when the slug collides — the
+      // caller asked us to save THIS state, not the previous one.
+      const saveResult = await safeExec($`cd ${gitRoot} && git branch -f ${saveBranch} ${tipSha}`)
+      if (saveResult.exitCode !== 0) {
+        throw new Error(
+          `Failed to create save branch ${saveBranch} at ${tipSha}: ${saveResult.stdout || "unknown error"}`,
+        )
+      }
+      success(`Saved to ${saveBranch} (${tipSha.slice(0, 8)})`)
     }
   }
 
@@ -1811,10 +1841,11 @@ ${BOLD}REMOVE OPTIONS${RESET}
   -f, --force       Force removal even with uncommitted changes
 
 ${BOLD}RESET OPTIONS${RESET}
-  -f, --force       Discard uncommitted changes and ahead-of-main commits
-  --no-install      Skip dependency install on recreate
-  --no-direnv       Skip direnv allow on recreate
-  --no-hooks        Skip hook install on recreate
+  -f, --force            Discard uncommitted changes and ahead-of-main commits
+  --save-ahead-as <slug> Save ahead-of-main commits to wip/<slug> before reset
+  --no-install           Skip dependency install on recreate
+  --no-direnv            Skip direnv allow on recreate
+  --no-hooks             Skip hook install on recreate
 
 ${BOLD}GC OPTIONS${RESET}
   --root <dir>             Directory to scan (default: <gitRoot>/.claude/worktrees)
@@ -1922,12 +1953,22 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "reset": {
       const name = args[1]
       if (!name) {
-        error("Usage: bun worktree reset <name> [--force]")
+        error("Usage: bun worktree reset <name> [--force] [--save-ahead-as <slug>]")
         process.exit(1)
+      }
+      const saveAheadIdx = args.indexOf("--save-ahead-as")
+      let saveAheadAs: string | undefined
+      if (saveAheadIdx !== -1) {
+        saveAheadAs = args[saveAheadIdx + 1]
+        if (!saveAheadAs || saveAheadAs.startsWith("--")) {
+          error("--save-ahead-as requires a slug value")
+          process.exit(1)
+        }
       }
       try {
         await resetWorktree(name, {
           force: hasFlag("-f") || hasFlag("--force"),
+          saveAheadAs,
           install: !hasFlag("--no-install"),
           direnv: !hasFlag("--no-direnv"),
           hooks: !hasFlag("--no-hooks"),

@@ -144,4 +144,96 @@ describe("worktree reset round-trip", () => {
       process.chdir(origCwd)
     }
   }, 30_000)
+
+  test("reset --save-ahead-as <slug> saves ahead commits to wip/<slug> before discarding", async () => {
+    const mainRepo = join(sandbox, "main")
+
+    await initRepo(mainRepo)
+    writeFileSync(join(mainRepo, "README.md"), "main\n")
+    await commitAll(mainRepo, "main-init")
+    const upstreamRepo = join(sandbox, "origin.git")
+    await $`git init --bare -q -b main ${upstreamRepo}`.quiet()
+    await $`cd ${mainRepo} && git remote add origin ${upstreamRepo} && git push -q origin main`.quiet()
+
+    const worktreeName = "wt-save"
+    const worktreePath = join(sandbox, "main-wt-save")
+    const origCwd = process.cwd()
+    try {
+      process.chdir(mainRepo)
+
+      await createWorktree(worktreeName, undefined, { install: false, direnv: false, hooks: false })
+
+      // Add 2 ahead commits in the worktree
+      writeFileSync(join(worktreePath, "ahead1.txt"), "first\n")
+      await $`cd ${worktreePath} && git add ahead1.txt && git commit -qm "ahead-commit-1"`.quiet()
+      writeFileSync(join(worktreePath, "ahead2.txt"), "second\n")
+      await $`cd ${worktreePath} && git add ahead2.txt && git commit -qm "ahead-commit-2"`.quiet()
+
+      const aheadTipSha = (await $`cd ${worktreePath} && git rev-parse HEAD`.text()).trim()
+      expect(aheadTipSha.length).toBe(40)
+
+      // Reset with save-ahead — should preserve the 2 commits on wip/<slug>
+      await resetWorktree(worktreeName, {
+        force: true,
+        saveAheadAs: "demo",
+        install: false,
+        direnv: false,
+        hooks: false,
+      })
+
+      // Save branch exists in main repo and points at the pre-reset tip
+      const saveBranchSha = (await $`cd ${mainRepo} && git rev-parse refs/heads/wip/demo`.text()).trim()
+      expect(saveBranchSha).toBe(aheadTipSha)
+
+      // Save branch contains both ahead commits
+      const saveLog = await $`cd ${mainRepo} && git log refs/heads/wip/demo --format='%s' -3`.text()
+      expect(saveLog).toContain("ahead-commit-1")
+      expect(saveLog).toContain("ahead-commit-2")
+
+      // Worktree is fresh (0 ahead of origin/main, ahead files gone)
+      const aheadAfter = parseInt(
+        (await $`cd ${worktreePath} && git rev-list --count origin/main..HEAD`.text()).trim(),
+        10,
+      )
+      expect(aheadAfter).toBe(0)
+      expect(existsSync(join(worktreePath, "ahead1.txt"))).toBe(false)
+      expect(existsSync(join(worktreePath, "ahead2.txt"))).toBe(false)
+    } finally {
+      process.chdir(origCwd)
+    }
+  }, 60_000)
+
+  test("reset --save-ahead-as on a clean worktree is a no-op for the save branch", async () => {
+    const mainRepo = join(sandbox, "main")
+
+    await initRepo(mainRepo)
+    writeFileSync(join(mainRepo, "README.md"), "main\n")
+    await commitAll(mainRepo, "main-init")
+    const upstreamRepo = join(sandbox, "origin.git")
+    await $`git init --bare -q -b main ${upstreamRepo}`.quiet()
+    await $`cd ${mainRepo} && git remote add origin ${upstreamRepo} && git push -q origin main`.quiet()
+
+    const worktreeName = "wt-clean-save"
+    const origCwd = process.cwd()
+    try {
+      process.chdir(mainRepo)
+
+      await createWorktree(worktreeName, undefined, { install: false, direnv: false, hooks: false })
+
+      // No ahead commits, no dirt. Reset with --save-ahead-as should NOT create wip/clean.
+      await resetWorktree(worktreeName, {
+        force: true,
+        saveAheadAs: "clean",
+        install: false,
+        direnv: false,
+        hooks: false,
+      })
+
+      // Save branch should NOT exist — nothing was ahead, so nothing to save
+      const exists = await $`cd ${mainRepo} && git show-ref --verify refs/heads/wip/clean`.nothrow().quiet()
+      expect(exists.exitCode).not.toBe(0)
+    } finally {
+      process.chdir(origCwd)
+    }
+  }, 30_000)
 })
