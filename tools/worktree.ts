@@ -1273,6 +1273,17 @@ export interface ResetOptions {
    * Always runs before remove + create so the save survives the reset.
    */
   saveAheadAs?: string
+  /**
+   * After remove + before recreate, force-push origin/<name> back to
+   * origin/main. Useful when the remote branch has accumulated stale
+   * history (e.g. agents pushed slot commits to origin/wtN that were later
+   * cherry-picked under different SHAs). Without this, the recreate inherits
+   * the remote's stale tracking branch.
+   *
+   * No-op when there is no origin/<name> branch (the recreate will create
+   * fresh from main).
+   */
+  retargetOrigin?: boolean
   /** Skip dependency install on recreate. */
   install?: boolean
   /** Skip direnv allow on recreate. */
@@ -1296,7 +1307,7 @@ export interface ResetOptions {
  * leave the caller's shell in a removed directory).
  */
 export async function resetWorktree(name: string, options: ResetOptions = {}): Promise<void> {
-  const { force = false, saveAheadAs, install = true, direnv = true, hooks = true } = options
+  const { force = false, saveAheadAs, retargetOrigin = false, install = true, direnv = true, hooks = true } = options
 
   const gitRoot = findGitRoot(process.cwd())
   if (!gitRoot) {
@@ -1367,11 +1378,42 @@ export async function resetWorktree(name: string, options: ResetOptions = {}): P
     }
   }
 
+  // Query the worktree's branch name BEFORE remove — for slot patterns
+  // (wt0..wt9) it matches the slot name, but `feat/<name>` for non-pool names.
+  // We need this name for the optional retarget step below.
+  let branchName: string | undefined
+  if (retargetOrigin) {
+    const branchResult = await safeExec($`cd ${worktreePath} && git rev-parse --abbrev-ref HEAD 2>/dev/null`)
+    branchName = branchResult.stdout.trim() || undefined
+  }
+
   // Remove the worktree. Under --force, also delete the local branch so the
-  // recreate starts from origin/main (or origin/<name>) rather than picking
-  // up the existing ref with its ahead commits.
+  // recreate starts from origin/main (or origin/<branchName>) rather than
+  // picking up the existing ref with its ahead commits.
   info(`Resetting worktree ${name}...`)
   await removeWorktree(name, { force: true, deleteBranch: force })
+
+  // Retarget origin/<branch> to origin/main if requested. Done AFTER remove
+  // so the worktree's own ref doesn't get yanked out from under git's
+  // worktree bookkeeping; done BEFORE create so the recreate picks up the
+  // retargeted remote tracking branch. No-op when origin/<branch> doesn't exist.
+  if (retargetOrigin && branchName && branchName !== "HEAD") {
+    const remoteExists = await safeExec(
+      $`cd ${gitRoot} && git show-ref --verify refs/remotes/origin/${branchName} 2>/dev/null`,
+    )
+    if (remoteExists.exitCode === 0) {
+      info(`Retargeting origin/${branchName} to origin/main...`)
+      const pushResult = await safeExec(
+        $`cd ${gitRoot} && git push --force-with-lease=refs/heads/${branchName} origin refs/remotes/origin/main:refs/heads/${branchName}`,
+      )
+      if (pushResult.exitCode !== 0) {
+        throw new Error(
+          `Failed to retarget origin/${branchName}: ${pushResult.stdout || "force-with-lease rejected — refetch and retry"}`,
+        )
+      }
+      success(`origin/${branchName} now tracks origin/main`)
+    }
+  }
 
   // Recreate. allowDirty: true because main-repo state is the caller's
   // problem, not the reset's — reset is about restoring the slot, not
@@ -1843,6 +1885,7 @@ ${BOLD}REMOVE OPTIONS${RESET}
 ${BOLD}RESET OPTIONS${RESET}
   -f, --force            Discard uncommitted changes and ahead-of-main commits
   --save-ahead-as <slug> Save ahead-of-main commits to wip/<slug> before reset
+  --retarget-origin      Force-push origin/<name> back to origin/main before recreate
   --no-install           Skip dependency install on recreate
   --no-direnv            Skip direnv allow on recreate
   --no-hooks             Skip hook install on recreate
@@ -1969,6 +2012,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         await resetWorktree(name, {
           force: hasFlag("-f") || hasFlag("--force"),
           saveAheadAs,
+          retargetOrigin: hasFlag("--retarget-origin"),
           install: !hasFlag("--no-install"),
           direnv: !hasFlag("--no-direnv"),
           hooks: !hasFlag("--no-hooks"),

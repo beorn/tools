@@ -203,6 +203,69 @@ describe("worktree reset round-trip", () => {
     }
   }, 60_000)
 
+  test("reset --retarget-origin force-pushes origin/<name> back to origin/main before recreate", async () => {
+    const mainRepo = join(sandbox, "main")
+
+    await initRepo(mainRepo)
+    writeFileSync(join(mainRepo, "README.md"), "main\n")
+    await commitAll(mainRepo, "main-init")
+    const upstreamRepo = join(sandbox, "origin.git")
+    await $`git init --bare -q -b main ${upstreamRepo}`.quiet()
+    await $`cd ${mainRepo} && git remote add origin ${upstreamRepo} && git push -q origin main`.quiet()
+
+    const worktreeName = "wt-retarget"
+    const worktreePath = join(sandbox, "main-wt-retarget")
+    const origCwd = process.cwd()
+    try {
+      process.chdir(mainRepo)
+
+      await createWorktree(worktreeName, undefined, { install: false, direnv: false, hooks: false })
+
+      // Make a stale ahead commit in the worktree, then push it to origin/<name>
+      // so origin has divergent history. This is the scenario --retarget-origin
+      // is designed to resolve.
+      writeFileSync(join(worktreePath, "ahead.txt"), "stale\n")
+      await $`cd ${worktreePath} && git add ahead.txt && git commit -qm "stale ahead"`.quiet()
+      // The actual branch name depends on createWorktree's policy — pool slots
+      // (wtN) get a plain name, other names get `feat/<name>`. Read it back.
+      const branchName = (await $`cd ${worktreePath} && git rev-parse --abbrev-ref HEAD`.text()).trim()
+      await $`cd ${worktreePath} && git push -q origin HEAD:refs/heads/${branchName}`.quiet()
+
+      // Verify origin/<branch> is ahead of origin/main before reset
+      const aheadBefore = parseInt(
+        (await $`cd ${mainRepo} && git rev-list --count origin/main..origin/${branchName}`.text()).trim(),
+        10,
+      )
+      expect(aheadBefore).toBe(1)
+
+      // Reset with --retarget-origin
+      await resetWorktree(worktreeName, {
+        force: true,
+        retargetOrigin: true,
+        install: false,
+        direnv: false,
+        hooks: false,
+      })
+
+      // origin/<branch> now matches origin/main (zero ahead)
+      const aheadAfter = parseInt(
+        (await $`cd ${mainRepo} && git rev-list --count origin/main..origin/${branchName}`.text()).trim(),
+        10,
+      )
+      expect(aheadAfter).toBe(0)
+
+      // Worktree is fresh (no stale ahead)
+      const wtAhead = parseInt(
+        (await $`cd ${worktreePath} && git rev-list --count origin/main..HEAD`.text()).trim(),
+        10,
+      )
+      expect(wtAhead).toBe(0)
+      expect(existsSync(join(worktreePath, "ahead.txt"))).toBe(false)
+    } finally {
+      process.chdir(origCwd)
+    }
+  }, 60_000)
+
   test("reset --save-ahead-as on a clean worktree is a no-op for the save branch", async () => {
     const mainRepo = join(sandbox, "main")
 
