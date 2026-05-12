@@ -1264,6 +1264,93 @@ export async function removeWorktree(name: string, options: RemoveOptions = {}):
   success("Done")
 }
 
+export interface ResetOptions {
+  /** Discard uncommitted changes and any commits ahead of origin/main. */
+  force?: boolean
+  /** Skip dependency install on recreate. */
+  install?: boolean
+  /** Skip direnv allow on recreate. */
+  direnv?: boolean
+  /** Skip hook install on recreate. */
+  hooks?: boolean
+}
+
+/**
+ * Reset a worktree to a clean state at origin/main.
+ *
+ * Thin wrapper over `removeWorktree(force=true) + createWorktree()`. Used to
+ * recover a pool slot whose branch has drifted ahead of origin/main or whose
+ * working tree has accumulated uncommitted changes. DCG-safe — relies on
+ * git's worktree-remove plumbing rather than `git reset --hard`.
+ *
+ * Refuses without --force if the worktree is dirty or its branch is ahead of
+ * origin/main, so accidental data loss requires explicit opt-in.
+ *
+ * Refuses if invoked from inside the target worktree (the recreate would
+ * leave the caller's shell in a removed directory).
+ */
+export async function resetWorktree(name: string, options: ResetOptions = {}): Promise<void> {
+  const { force = false, install = true, direnv = true, hooks = true } = options
+
+  const gitRoot = findGitRoot(process.cwd())
+  if (!gitRoot) {
+    throw new Error("Not in a git repository")
+  }
+
+  const repoName = basename(gitRoot)
+  const worktreePath = join(dirname(gitRoot), `${repoName}-${name}`)
+
+  // Refuse to operate from inside the worktree being reset — the recreate
+  // would leave the shell with a missing cwd.
+  const cwd = process.cwd()
+  if (cwd === worktreePath || cwd.startsWith(worktreePath + "/")) {
+    throw new Error(`Refusing to reset worktree from inside it: ${worktreePath}. cd to the main repo first.`)
+  }
+  // Refuse to operate on the main repo itself.
+  if (worktreePath === gitRoot) {
+    throw new Error(`Refusing to reset main repo (${gitRoot}).`)
+  }
+
+  // If the directory doesn't exist, just create it fresh — `reset` is
+  // idempotent against a missing slot.
+  if (!existsSync(worktreePath)) {
+    info(`Worktree ${name} does not exist — creating fresh`)
+    await createWorktree(name, undefined, { install, direnv, hooks })
+    return
+  }
+
+  // Drift check (skipped under --force).
+  if (!force) {
+    const status = await getWorktreeStatus(worktreePath)
+    if (status.dirty) {
+      throw new Error(
+        `Worktree ${name} has uncommitted changes (${status.changes.length} file(s)). ` +
+          `Use --force to discard, or commit/save first.`,
+      )
+    }
+    const aheadResult = await safeExec($`cd ${worktreePath} && git rev-list --count origin/main..HEAD 2>/dev/null`)
+    const ahead = parseInt(aheadResult.stdout.trim(), 10) || 0
+    if (ahead > 0) {
+      throw new Error(
+        `Worktree ${name} is ${ahead} commit(s) ahead of origin/main. ` + `Use --force to discard, or push/save first.`,
+      )
+    }
+  }
+
+  // Remove the worktree. Under --force, also delete the local branch so the
+  // recreate starts from origin/main (or origin/<name>) rather than picking
+  // up the existing ref with its ahead commits.
+  info(`Resetting worktree ${name}...`)
+  await removeWorktree(name, { force: true, deleteBranch: force })
+
+  // Recreate. allowDirty: true because main-repo state is the caller's
+  // problem, not the reset's — reset is about restoring the slot, not
+  // cleaning the workspace.
+  await createWorktree(name, undefined, { install, direnv, hooks, allowDirty: true })
+
+  success(`Worktree ${name} reset`)
+}
+
 export interface MergeOptions {
   deleteBranch?: boolean
   fullTests?: boolean
@@ -1703,6 +1790,7 @@ ${BOLD}USAGE${RESET}
   bun worktree create --branch <branch> Create worktree using branch as name
   bun worktree merge <name>             Merge worktree branch into main and clean up
   bun worktree remove <name>            Remove worktree
+  bun worktree reset <name> [--force]   Recreate worktree at origin/main (DCG-safe slot recovery)
   bun worktree list                     Detailed worktree status
   bun worktree gc                       Prune stale agent-isolation clones (.claude/worktrees/agent-*)
 
@@ -1721,6 +1809,12 @@ ${BOLD}MERGE OPTIONS${RESET}
 ${BOLD}REMOVE OPTIONS${RESET}
   --delete-branch   Also delete the branch
   -f, --force       Force removal even with uncommitted changes
+
+${BOLD}RESET OPTIONS${RESET}
+  -f, --force       Discard uncommitted changes and ahead-of-main commits
+  --no-install      Skip dependency install on recreate
+  --no-direnv       Skip direnv allow on recreate
+  --no-hooks        Skip hook install on recreate
 
 ${BOLD}GC OPTIONS${RESET}
   --root <dir>             Directory to scan (default: <gitRoot>/.claude/worktrees)
@@ -1822,6 +1916,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         deleteBranch: hasFlag("--delete-branch"),
         force: hasFlag("-f") || hasFlag("--force"),
       })
+      break
+    }
+
+    case "reset": {
+      const name = args[1]
+      if (!name) {
+        error("Usage: bun worktree reset <name> [--force]")
+        process.exit(1)
+      }
+      try {
+        await resetWorktree(name, {
+          force: hasFlag("-f") || hasFlag("--force"),
+          install: !hasFlag("--no-install"),
+          direnv: !hasFlag("--no-direnv"),
+          hooks: !hasFlag("--no-hooks"),
+        })
+      } catch (e) {
+        error(e instanceof Error ? e.message : String(e))
+        process.exit(1)
+      }
       break
     }
 
