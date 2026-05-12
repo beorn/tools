@@ -84,5 +84,8 @@ function defangRolePrefix(_match: string, lead: string, role: string): string {
  */
 export function defangModelInput(text: string): string {
   if (text.length === 0) return text
-  return text.replace(LOG_LINE_RE, "[log-redacted]").replace(ROLE_PREFIX_RE, defangRolePrefix).replace(/\n{3,}/g, "\n\n")
+  return text
+    .replace(LOG_LINE_RE, "[log-redacted]")
+    .replace(ROLE_PREFIX_RE, defangRolePrefix)
+    .replace(/\n{3,}/g, "\n\n")
 }

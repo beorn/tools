@@ -44,7 +44,10 @@
     "llm": "bun tools/llm.ts",
     "recall": "bun tools/recall.ts",
     "tribe": "bun tools/tribe-cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check .",
+    "fix": "oxfmt --write ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",
@@ -68,6 +71,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.11",
+    "oxfmt": "^0.38.0",
     "typescript": "^5.9.3"
   },
   "engines": {

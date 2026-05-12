@@ -543,9 +543,7 @@ describe("registerSession (real impl)", () => {
       // isActive reports A as currently connected — B cannot overwrite its row,
       // and the no-silent-fallback contract surfaces this as a typed error.
       const activeIds = new Set([ctxA.sessionId])
-      expect(() => realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))).toThrow(
-        /already taken|conflict/i,
-      )
+      expect(() => realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))).toThrow(/already taken|conflict/i)
 
       // A's row is preserved untouched (no spurious suffixed row from B).
       const rows = db.prepare("SELECT id, name FROM sessions ORDER BY name").all() as Array<{
