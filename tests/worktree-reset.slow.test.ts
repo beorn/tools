@@ -266,6 +266,82 @@ describe("worktree reset round-trip", () => {
     }
   }, 60_000)
 
+  test("reset --force on a slot-pattern name (wtN) lands at origin/main even when origin/wtN is ahead", async () => {
+    // Pins @km/all/bun-worktree-reset-silent-no-op. Earlier behavior: when
+    // origin/wtN had stale commits ahead of origin/main (left over from a
+    // prior agent's push), `bun worktree reset wtN --force` silently
+    // inherited that state on recreate — the slot stayed at the pre-reset
+    // SHA despite the success banner. The createWorktree branch-resolution
+    // fell into the "Tracking remote branch" path because refs/remotes/
+    // origin/wtN existed.
+    //
+    // Slot-pattern names (wt0..wt9) are anonymous pool resources, not
+    // stable shared branches. A reset must always land at origin/main
+    // regardless of origin/wtN tracking state. --retarget-origin is the
+    // explicit knob for force-pushing origin/wtN back; this test is the
+    // default-path invariant.
+    //
+    // Cross-link: @agent/1's wt1 reset 2026-05-12 hit this same root cause
+    // (origin/wt1 carried stale state); chief recreated manually after the
+    // tooling failed silently.
+    const mainRepo = join(sandbox, "main")
+
+    await initRepo(mainRepo)
+    writeFileSync(join(mainRepo, "README.md"), "main\n")
+    await commitAll(mainRepo, "main-init")
+    const upstreamRepo = join(sandbox, "origin.git")
+    await $`git init --bare -q -b main ${upstreamRepo}`.quiet()
+    await $`cd ${mainRepo} && git remote add origin ${upstreamRepo} && git push -q origin main`.quiet()
+
+    const worktreeName = "wt3" // /^wt\d+$/ — slot pattern triggers the bug
+    const worktreePath = join(sandbox, "main-wt3")
+    const origCwd = process.cwd()
+    try {
+      process.chdir(mainRepo)
+
+      // Create slot wt3 once and pollute origin/wt3 with an ahead commit,
+      // simulating a prior agent that pushed slot WIP. This is what causes
+      // the silent-no-op on a future reset.
+      await createWorktree(worktreeName, undefined, { install: false, direnv: false, hooks: false })
+      writeFileSync(join(worktreePath, "stale.txt"), "ahead-from-prior-agent\n")
+      await $`cd ${worktreePath} && git add stale.txt && git commit -qm "stale prior-agent commit"`.quiet()
+      await $`cd ${worktreePath} && git push -q origin HEAD:refs/heads/${worktreeName}`.quiet()
+
+      // Confirm the stale state on origin/wt3 (one commit ahead of origin/main).
+      const originAhead = parseInt(
+        (await $`cd ${mainRepo} && git rev-list --count origin/main..origin/${worktreeName}`.text()).trim(),
+        10,
+      )
+      expect(originAhead).toBe(1)
+
+      // Reset --force WITHOUT --retarget-origin. The slot pattern alone
+      // should force the recreate to start from origin/main; the user has
+      // not asked us to mutate origin/wt3.
+      await resetWorktree(worktreeName, { force: true, install: false, direnv: false, hooks: false })
+
+      // Slot is at origin/main (zero ahead) — NOT inheriting origin/wt3.
+      const wtAhead = parseInt(
+        (await $`cd ${worktreePath} && git rev-list --count origin/main..HEAD`.text()).trim(),
+        10,
+      )
+      expect(wtAhead, "slot wt3 should land at origin/main, not origin/wt3").toBe(0)
+
+      // The stale ahead file from the prior agent's push is gone.
+      expect(existsSync(join(worktreePath, "stale.txt"))).toBe(false)
+
+      // origin/wt3 is left untouched — the test pins the recreate-side
+      // invariant. `--retarget-origin` is still the opt-in for force-
+      // pushing origin/wt3 back to origin/main (covered by the test above).
+      const originAheadAfter = parseInt(
+        (await $`cd ${mainRepo} && git rev-list --count origin/main..origin/${worktreeName}`.text()).trim(),
+        10,
+      )
+      expect(originAheadAfter).toBe(1)
+    } finally {
+      process.chdir(origCwd)
+    }
+  }, 60_000)
+
   test("reset --save-ahead-as on a clean worktree is a no-op for the save branch", async () => {
     const mainRepo = join(sandbox, "main")
 

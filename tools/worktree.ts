@@ -1078,13 +1078,26 @@ export async function createWorktree(name: string, branch?: string, options: Cre
     $`cd ${gitRoot} && git show-ref --verify refs/remotes/origin/${branchName} 2>/dev/null`,
   )
 
+  // Slot-pattern names (wtN, where the branch is also `wtN`) are anonymous
+  // pool resources, not stable shared branches. A `bun worktree reset` cycle
+  // removes the local branch + recreates the slot — if origin/wtN happens to
+  // carry stale ahead commits from a prior agent's push, the recreate must
+  // start fresh at origin/main, not inherit that state. Without this gate the
+  // reset silently lands at the pre-reset SHA (`@km/all/bun-worktree-reset-
+  // silent-no-op`). Non-slot names keep the original behavior — they ARE
+  // tracking a stable upstream.
+  const isPoolSlot = /^wt\d+$/.test(name) && branchName === name
+
   let branchArg: string[]
   if (branchExists.exitCode === 0) {
     info(`Using existing branch: ${branchName}`)
     branchArg = [branchName]
-  } else if (remoteBranchExists.exitCode === 0) {
+  } else if (remoteBranchExists.exitCode === 0 && !isPoolSlot) {
     info(`Tracking remote branch: origin/${branchName}`)
     branchArg = [branchName]
+  } else if (isPoolSlot) {
+    info(`Creating slot branch ${branchName} at origin/main`)
+    branchArg = ["-b", branchName, "origin/main"]
   } else {
     info(`Creating new branch: ${branchName}`)
     branchArg = ["-b", branchName]
