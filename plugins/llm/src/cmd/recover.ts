@@ -231,6 +231,17 @@ export function classifyRecovery(
 export async function checkAndRecoverPartials(skipRecover: boolean, skipConfirm: boolean): Promise<boolean> {
   if (skipRecover) return true
 
+  // Passive cleanup: drop partials older than 7d before listing. This is the
+  // only auto-cleanup path; without it, the don't-delete-on-completion fix
+  // (which keeps the partial as a recovery cache) accumulates indefinitely.
+  // 7d matches `cleanupPartials`'s historical default. Users who need fresher
+  // sweeps can run `bun llm partials --clean-stale` manually.
+  try {
+    cleanupPartials(7 * 24 * 60 * 60 * 1000)
+  } catch {
+    // best-effort; cleanup failure shouldn't block recovery
+  }
+
   const partials = listPartials()
   if (partials.length === 0) return true
 
