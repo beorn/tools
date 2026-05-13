@@ -241,8 +241,14 @@ export async function queryOpenAIDeepResearch(options: DeepResearchOptions): Pro
       if (stream && onToken) onToken(pollResult.content)
       if (partialPath) {
         appendPartial(partialPath, pollResult.content)
+        // Don't delete on completion — the partial doubles as a content cache
+        // so `bun llm recover <id>` works even if the caller (dual-pro, ask)
+        // is SIGKILLed between leg-completion and final output. The OpenAI
+        // response object can re-enter `queued` if the background task is
+        // requeued, leaving on-disk partials as the only durable record.
+        // `cleanupPartials(24h)` sweeps completed entries automatically.
         completePartial(partialPath, {
-          delete: true,
+          delete: false,
           usage: {
             promptTokens: pollResult.usage?.promptTokens ?? 0,
             completionTokens: pollResult.usage?.completionTokens ?? 0,
@@ -367,8 +373,11 @@ export async function queryOpenAIBackground(options: BackgroundQueryOptions): Pr
       if (onToken) onToken(pollResult.content)
       if (partialPath) {
         appendPartial(partialPath, pollResult.content)
+        // See deep-research path above for the don't-delete-on-completion
+        // rationale: keeps partial as a recovery cache for SIGKILL between
+        // leg-completion and dispatcher's final-output write.
         completePartial(partialPath, {
-          delete: true,
+          delete: false,
           usage: {
             promptTokens: pollResult.usage?.promptTokens ?? 0,
             completionTokens: pollResult.usage?.completionTokens ?? 0,

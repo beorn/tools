@@ -258,7 +258,8 @@ export async function checkAndRecoverPartials(skipRecover: boolean, skipConfirm:
           // single JSON envelope line is the only thing on stdout).
           emitContent(outcome.content)
           if (outcome.usage) console.error(`\n[Recovered: ${outcome.usage.totalTokens} tokens]`)
-          completePartial(partial.path, { delete: true })
+          // Keep partial on disk as a recovery cache. cleanupPartials(24h) ages out.
+          completePartial(partial.path, { delete: false, usage: outcome.usage })
           console.error(`\n--- End Recovered Response ---\n`)
           break
         }
@@ -334,6 +335,27 @@ export async function runRecover(options: {
     // First check local partials
     const localPartial = findPartialByResponseId(responseId)
     if (localPartial) {
+      // Fast path: local partial is already completed (header has completed_at
+      // AND we have body content). Skip the OpenAI re-poll — the provider
+      // response object can re-enter `queued`/`expired` after the leg
+      // completed, which would otherwise turn a recoverable success into a
+      // poll-until-timeout failure. The local partial is canonical for the
+      // "succeeded once, recover the same content again" case.
+      if (localPartial.metadata.completedAt && localPartial.content.trim().length > 0) {
+        console.error(`Found completed partial (${localPartial.content.length} chars) — returning cached content.\n`)
+        emitContent(localPartial.content)
+        if (localPartial.metadata.usage) {
+          console.error(`\n[${localPartial.metadata.usage.totalTokens} tokens, recovered from local cache]`)
+        }
+        await writeRecoveredResponse(
+          localPartial.content,
+          responseId,
+          localPartial.metadata.topic,
+          localPartial.metadata.usage,
+        )
+        return
+      }
+
       console.error(`Found local partial (${localPartial.content.length} chars):\n`)
       emitContent(localPartial.content)
 
@@ -361,7 +383,11 @@ export async function runRecover(options: {
         // path line to stderr — skip the redundant "Recovered output written
         // to:" that used to print a near-identical second line.
         await writeRecoveredResponse(outcome.content, responseId, localPartial?.metadata.topic, outcome.usage)
-        if (localPartial) completePartial(localPartial.path, { delete: true })
+        // Mark completed but don't delete — re-runs of `bun llm recover <id>`
+        // should keep working from local cache. cleanupPartials(24h) ages out.
+        if (localPartial) {
+          completePartial(localPartial.path, { delete: false, usage: outcome.usage })
+        }
         break
       }
       case "failed": {
@@ -482,7 +508,8 @@ export async function runAwait(options: { responseId: string | undefined }): Pro
     await writeRecoveredResponse(result.content, responseId, localPartial?.metadata.topic, result.usage)
     if (localPartial) {
       const { completePartial } = await import("../lib/persistence")
-      completePartial(localPartial.path, { delete: true })
+      // Keep on disk for re-recovery; cleanupPartials(24h) ages out.
+      completePartial(localPartial.path, { delete: false, usage: result.usage })
     }
     return
   }

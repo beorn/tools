@@ -77,8 +77,17 @@ describe("queryOpenAIBackground — persistence and recovery", () => {
 
     expect(result.responseId).toBe(responseId)
     expect(result.content).toBe("hello from pro")
-    // Happy path deletes the partial on success — partials dir should be empty.
-    // (It's under HOME/.cache/tools/llm-partials; makeTestEnv isolates HOME.)
+    // Happy path KEEPS the partial on disk as a recovery cache — the caller
+    // (dual-pro / ask) may be SIGKILLed between leg-completion and final
+    // output write, and the OpenAI response object can re-enter `queued`,
+    // making fresh API recovery impossible. The on-disk partial is the only
+    // durable record. cleanupPartials(24h) ages out completed entries.
+    const { findPartialByResponseId } = await import("../src/lib/persistence")
+    const cachedPartial = findPartialByResponseId(responseId)
+    expect(cachedPartial).not.toBeNull()
+    expect(cachedPartial!.content).toContain("hello from pro")
+    expect(cachedPartial!.metadata.completedAt).toBeDefined()
+    expect(cachedPartial!.metadata.usage?.totalTokens).toBe(15)
     expect(responsesCreateMock).toHaveBeenCalledTimes(1)
     // create() must have requested background mode — that's the whole reason
     // we're on this path. Without it the ID isn't captured before polling and
@@ -235,6 +244,62 @@ describe("recover <id> works for pro-mode responseIds", () => {
     expect(ours!.metadata.modelId).toBe("gpt-5.4-pro")
     expect(ours!.metadata.topic).toBe("listable query")
     expect(existsSync(ours!.path)).toBe(true)
+  })
+})
+
+describe("recover <id> fast-path: completed local partial bypasses OpenAI re-poll", () => {
+  // Regression: dual-pro 2026-05-13 SIGKILL incident. Workflow ran:
+  //   1. queryOpenAIBackground completes Pro leg → content in memory.
+  //   2. Wrapper SIGKILLed mid-judging → in-memory content lost.
+  //   3. `bun llm recover <id>` finds the partial (now persisted by my fix),
+  //      but PRE-fix would still re-poll OpenAI which had requeued the
+  //      response object (status=queued, output=[]) — recovery hangs and
+  //      ultimately fails. Fast-path: return the cached partial directly,
+  //      skip the re-poll. The OpenAI response object's lifecycle is its own
+  //      problem; the local cache is canonical.
+  it("returns cached content from completed partial without calling OpenAI", async () => {
+    makeTestEnv()
+    const responseId = "resp_pro_cached_recovery"
+
+    // Seed a completed partial on disk as queryOpenAIBackground would now write.
+    vi.resetModules()
+    const persistence = await import("../src/lib/persistence")
+    const path = persistence.getPartialPath(responseId)
+    persistence.writePartialHeader(path, {
+      responseId,
+      model: "GPT-5.4 Pro",
+      modelId: "gpt-5.4-pro",
+      topic: "cached-recovery-test",
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    persistence.appendPartial(path, "cached pro response body")
+    persistence.completePartial(path, {
+      delete: false,
+      usage: { promptTokens: 42, completionTokens: 100, totalTokens: 142 },
+    })
+
+    // Both OpenAI mock paths MUST stay unused. If runRecover re-polls
+    // OpenAI for a partial we already have, that's the bug.
+    responsesCreateMock.mockReset()
+    responsesRetrieveMock.mockReset()
+    responsesRetrieveMock.mockRejectedValue(new Error("SHOULD NOT BE CALLED"))
+
+    const { runRecover } = await import("../src/cmd/recover")
+    await runRecover({
+      responseId,
+      clean: false,
+      cleanStale: false,
+      includeAll: false,
+    })
+
+    expect(responsesRetrieveMock).not.toHaveBeenCalled()
+    expect(responsesCreateMock).not.toHaveBeenCalled()
+
+    // Partial stays on disk for the NEXT recovery — re-runs of `bun llm
+    // recover <id>` should keep working from the same cache.
+    const stillCached = persistence.findPartialByResponseId(responseId)
+    expect(stillCached).not.toBeNull()
+    expect(stillCached!.content).toContain("cached pro response body")
   })
 })
 

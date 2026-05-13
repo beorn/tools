@@ -223,7 +223,10 @@ async function queryWithPolling(
   if (initial.status === "completed") {
     const content = extractText(initial)
     if (onToken && content) onToken(content)
-    if (partialPath) completePartial(partialPath, { delete: true, usage: extractUsage(initial) })
+    // Keep completed partials on disk as a recovery cache. See openai-deep.ts
+    // for the SIGKILL-between-leg-completion-and-final-output rationale.
+    // cleanupPartials(24h) ages them out.
+    if (partialPath) completePartial(partialPath, { delete: false, usage: extractUsage(initial) })
 
     return {
       model,
@@ -264,7 +267,8 @@ async function queryWithPolling(
   }
 
   if (onToken && result.content) onToken(result.content)
-  if (partialPath) completePartial(partialPath, { delete: true, usage: result.usage })
+  // Keep completed partials on disk; SIGKILL-recovery cache. See above.
+  if (partialPath) completePartial(partialPath, { delete: false, usage: result.usage })
 
   return {
     model,
