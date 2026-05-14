@@ -120,27 +120,32 @@ export function registerSession(
     }
   }
 
-  // If the name is still taken after eviction attempts (active + alive holder),
-  // auto-suffix instead of rejecting. Registration should always succeed —
-  // name conflicts during initial connect are a transport artifact (e.g.,
-  // silvercode's tribe-mcp opening a second socket from the same host session),
-  // not a user error. The session can rename later via tribe.join or tribe.rename.
+  // If the name is still taken after eviction attempts, check PID liveness
+  // one more time (the holder's socket may linger after process exit). If the
+  // holder's PID is genuinely alive, auto-suffix so registration always succeeds.
   let finalName = desiredName
   const takenCheck = ctx.db
-    .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
-    .get({ $name: finalName, $id: ctx.sessionId }) as { id: string } | null
+    .prepare("SELECT id, pid FROM sessions WHERE name = $name AND id != $id")
+    .get({ $name: finalName, $id: ctx.sessionId }) as { id: string; pid: number } | null
   if (takenCheck && isActive?.(takenCheck.id)) {
-    // Find a free name by appending -2, -3, ...
-    for (let n = 2; n <= 100; n++) {
-      const candidate = `${desiredName}-${n}`
-      const taken = ctx.db
-        .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
-        .get({ $name: candidate, $id: ctx.sessionId }) as { id: string } | null
-      if (!taken || !isActive(taken.id)) {
-        finalName = candidate
-        log.info?.(`name "${desiredName}" taken by active session; auto-assigned "${finalName}"`)
-        ctx.setName(finalName)
-        break
+    // One more PID liveness check — catches the common restart case where
+    // the old process exited but the socket-close handler hasn't fired yet.
+    if (takenCheck.pid > 0 && !isPidAlive(takenCheck.pid)) {
+      ctx.db.prepare("DELETE FROM sessions WHERE id = $id").run({ $id: takenCheck.id })
+      log.info?.(`evicted zombie holder "${desiredName}" (pid ${takenCheck.pid} dead) during registration`)
+    } else {
+      // Genuinely two live sessions want the same name — auto-suffix.
+      for (let n = 2; n <= 100; n++) {
+        const candidate = `${desiredName}-${n}`
+        const taken = ctx.db
+          .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
+          .get({ $name: candidate, $id: ctx.sessionId }) as { id: string } | null
+        if (!taken || !isActive(taken.id)) {
+          finalName = candidate
+          log.info?.(`name "${desiredName}" taken by active session; auto-assigned "${finalName}"`)
+          ctx.setName(finalName)
+          break
+        }
       }
     }
   }

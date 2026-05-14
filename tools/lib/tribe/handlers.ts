@@ -452,33 +452,24 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
     | { id: string }
     | undefined
   if (taken) {
-    const isActive = opts.getActiveSessionIds().has(taken.id)
-    if (isActive) {
-      // Auto-suffix instead of rejecting — sessions should always be able to join.
-      // The caller can rename later via tribe.rename if the suffixed name isn't ideal.
-      for (let n = 2; n <= 100; n++) {
-        const candidate = `${joinName}-${n}`
-        const candidateTaken = ctx.stmts.checkNameTaken.get({ $name: candidate, $session_id: ctx.sessionId }) as
-          | { id: string }
-          | undefined
-        if (!candidateTaken || !opts.getActiveSessionIds().has(candidateTaken.id)) {
-          if (candidateTaken) {
-            const tombName = `${candidate}-dead-${candidateTaken.id.slice(0, 8)}`
-            ctx.db
-              .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
-              .run({ $tomb: tombName, $now: Date.now(), $id: candidateTaken.id })
-          }
-          log.info?.(`name "${joinName}" taken by active session; auto-assigned "${candidate}"`)
-          joinName = candidate
-          break
-        }
-      }
-    } else {
+    const holderIsActive = opts.getActiveSessionIds().has(taken.id)
+    if (!holderIsActive) {
+      // Dead session — tombstone and reclaim.
       const tombstoneName = `${joinName}-dead-${taken.id.slice(0, 8)}`
       ctx.db
         .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
         .run({ $tomb: tombstoneName, $now: Date.now(), $id: taken.id })
       log.info?.(`reclaimed name "${joinName}" from dead session ${taken.id} (tombstoned as "${tombstoneName}")`)
+    } else {
+      // Active holder — tribe.join is an explicit identity assertion ("I am
+      // @agent/3"). The old holder is a stale adapter process from a previous
+      // session that Claude Code didn't kill. Tombstone and take over — the
+      // user's explicit name wins over a lingering socket.
+      const tombstoneName = `${joinName}-dead-${taken.id.slice(0, 8)}`
+      ctx.db
+        .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
+        .run({ $tomb: tombstoneName, $now: Date.now(), $id: taken.id })
+      log.info?.(`tribe.join takeover: "${joinName}" reclaimed from active session ${taken.id} (tombstoned as "${tombstoneName}")`)
     }
   }
 
