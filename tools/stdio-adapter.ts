@@ -262,6 +262,28 @@ const daemon = await createReconnectingClient({
     myRole = reg.role
     log.info?.(`Registered as ${myName} (${myRole})`)
     void client.call("subscribe").catch(() => {})
+
+    // Startup banner — emit tribe state to the channel so the agent (and user) sees the setup
+    try {
+      const membersResult = (await client.call("tribe.members", {})) as { content: Array<{ text: string }> }
+      const membersData = JSON.parse(membersResult.content?.[0]?.text ?? "{}") as { sessions?: Array<{ name: string; role: string; alive: boolean; uptime_min: number; delivery?: string }> }
+      const sessions = (membersData.sessions ?? []).filter((s: { alive: boolean }) => s.alive)
+      const chief = reg.chief || sessions.find((s: { role: string }) => s.role === "chief")?.name || "(none)"
+      const peers = sessions.filter((s: { name: string }) => s.name !== myName).map((s: { name: string; role: string }) => `${s.name} (${s.role})`).join(", ") || "(solo)"
+
+      const banner = [
+        `tribe connected`,
+        `  daemon: ${SOCKET_PATH}`,
+        `  name: ${myName} (${myRole})`,
+        `  chief: ${chief}`,
+        `  delivery: ${DELIVERY}`,
+        `  online: ${peers}`,
+      ].join("\n")
+      sendChannel(banner, { from: "tribe-startup", type: "system" })
+    } catch {
+      // Non-fatal — banner is diagnostic, don't block startup
+      log.debug?.("Startup banner failed (non-fatal)")
+    }
   },
   onDisconnect() {
     log.debug?.(`Daemon connection lost`)

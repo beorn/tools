@@ -2376,6 +2376,25 @@ try {
       myRole = reg.role;
       log5.info?.(`Registered as ${myName} (${myRole})`);
       client.call("subscribe").catch(() => {});
+      try {
+        const membersResult = await client.call("tribe.members", {});
+        const membersData = JSON.parse(membersResult.content?.[0]?.text ?? "{}");
+        const sessions = (membersData.sessions ?? []).filter((s) => s.alive);
+        const chief = reg.chief || sessions.find((s) => s.role === "chief")?.name || "(none)";
+        const peers = sessions.filter((s) => s.name !== myName).map((s) => `${s.name} (${s.role})`).join(", ") || "(solo)";
+        const banner = [
+          `tribe connected`,
+          `  daemon: ${SOCKET_PATH}`,
+          `  name: ${myName} (${myRole})`,
+          `  chief: ${chief}`,
+          `  delivery: ${DELIVERY}`,
+          `  online: ${peers}`
+        ].join(`
+`);
+        sendChannel(banner, { from: "tribe-startup", type: "system" });
+      } catch {
+        log5.debug?.("Startup banner failed (non-fatal)");
+      }
     },
     onDisconnect() {
       log5.debug?.(`Daemon connection lost`);
