@@ -87,6 +87,7 @@ export function registerSession(
   identityToken?: string | null,
   clientPid?: number,
   delivery?: "push" | "pull",
+  clientCwd?: string,
 ): void {
   const desiredName = ctx.getName()
   const now = Date.now()
@@ -151,7 +152,7 @@ export function registerSession(
       $role: ctx.sessionRole,
       $domains: JSON.stringify(ctx.domains),
       $pid: pid,
-      $cwd: process.cwd(),
+      $cwd: clientCwd || process.cwd(),
       $project_id: projectId ?? null,
       $claude_session_id: ctx.claudeSessionId,
       $claude_session_name: ctx.claudeSessionName,

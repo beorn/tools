@@ -370,6 +370,7 @@ export function withDispatcher<
               identityToken,
               pid,
               delivery,
+              project,
             )
 
             const client = applyClient(connId, {
