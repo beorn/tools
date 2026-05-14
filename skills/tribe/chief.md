@@ -7,12 +7,11 @@ Your job is routing work, tracking progress, detecting problems, and keeping the
 
 | Tool              | Use                                                         |
 | ----------------- | ----------------------------------------------------------- |
+| `tribe.send`      | Message a specific member or all (`to: "*"`)                |
+| `tribe.fetch`     | Drain pending messages / view history                       |
 | `tribe.members`   | See who's online, their roles and domains                   |
-| `tribe.send`      | Direct message to a specific member                         |
-| `tribe.broadcast` | Message all members                                         |
-| `tribe.health`    | Check for stale heartbeats, silent members, unread messages |
-| `tribe.history`   | View recent message log                                     |
-| `tribe.rename`    | Rename this session                                         |
+| `tribe.filter`    | Set subscription filter (topics, mute)                      |
+| `tribe.join`      | Re-announce name/role/domains                               |
 
 ## Routing & Delegation
 
@@ -39,7 +38,7 @@ tribe.send(to="tui", type="notify", bead="km-silvery.bar", message="silvery is l
 Periodically check on the tribe and summarize for the user:
 
 1. **Proactive checks.** Every ~10-15 minutes (or when the user asks), run `tribe.health()` and `tribe.members()`.
-2. **Sync requests.** Use `tribe.broadcast(type="query", message="Status check: what are you working on, any blockers?")` to gather updates.
+2. **Sync requests.** Use `tribe.send({to: "*", type: "query", message: "Status check: what are you working on, any blockers?"})` to gather updates.
 3. **Summarize.** Aggregate responses into a compact table for the user (via Telegram reply or direct output):
 
 ```
@@ -77,7 +76,7 @@ Certain files cause merge conflicts when edited concurrently:
 
 **Before assigning work** that will touch these files, check if another member is already editing them:
 
-1. Run `tribe.broadcast(type="query", message="Anyone currently editing package.json or tsconfig?")`.
+1. Run `tribe.send({to: "*", type: "query", message: "Anyone currently editing package.json or tsconfig?"})`.
 2. If yes, serialize: tell the second member to wait, or do the shared-file edit yourself as chief.
 3. For `bun.lock` changes (adding dependencies), have one member do all dependency additions in a batch.
 
@@ -92,7 +91,7 @@ tribe.send(to="silvery", type="assign", bead="km-silvery.foo", message="Fix Virt
 ### Requesting status
 
 ```
-tribe.broadcast(type="query", message="Status check: current work, blockers, ETA?")
+tribe.send({to: "*", type: "query", message: "Status check: current work, blockers, ETA?"})
 ```
 
 ### Approving a request
@@ -127,6 +126,6 @@ tribe.send(to="silvery", type="assign", message="User reports the fix didn't wor
 ## Anti-Patterns
 
 - **Don't do the work yourself.** You coordinate. If there's no member for a domain, tell the user to spawn one.
-- **Don't guess member status.** Use `tribe.health()` and `tribe.broadcast(type="query")` -- don't assume.
+- **Don't guess member status.** Use `tribe.health()` and `tribe.send({to: "*", type: "query"})` -- don't assume.
 - **Don't batch-assign everything at once.** Members have limited context. Assign 1-2 beads at a time, wait for completion.
 - **Don't forget bead tracking.** Every piece of work needs a bead. If a member reports finishing something that has no bead, create one retroactively and close it.

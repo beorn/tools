@@ -7,12 +7,11 @@ Your job is doing assigned work, reporting status, and coordinating shared resou
 
 | Tool              | Use                                       |
 | ----------------- | ----------------------------------------- |
-| `tribe.send`      | Send a message to chief or another member |
-| `tribe.broadcast` | Message everyone (rare -- prefer direct)  |
-| `tribe.members`   | See who's online                          |
-| `tribe.health`    | Check tribe health (usually chief's job)  |
-| `tribe.history`   | View recent message log                   |
-| `tribe.rename`    | Rename this session                       |
+| `tribe.send`      | Send a message to chief or another member (use `to: "*"` for broadcast) |
+| `tribe.fetch`     | Drain pending messages / view history                                   |
+| `tribe.members`   | See who's online                                                        |
+| `tribe.filter`    | Set subscription filter (topics, mute)                                  |
+| `tribe.join`      | Re-announce name/role/domains                                           |
 
 ## Coordination Protocol
 
