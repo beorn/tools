@@ -76,19 +76,19 @@ describe("tribe API minimal surface", () => {
     const names = TOOLS_LIST.map((t) => t.name).sort()
     expect(names).toEqual(
       [
-        "tribe.chief",
-        "tribe.claim-chief",
-        "tribe.debug",
-        "tribe.fetch",
-        "tribe.filter",
-        "tribe.health",
-        "tribe.join",
-        "tribe.members",
-        "tribe.release-chief",
-        "tribe.reload",
-        "tribe.rename",
-        "tribe.retro",
-        "tribe.send",
+        "chief",
+        "claim-chief",
+        "debug",
+        "fetch",
+        "filter",
+        "health",
+        "join",
+        "members",
+        "release-chief",
+        "reload",
+        "rename",
+        "retro",
+        "send",
       ].sort(),
     )
     expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.broadcast")
@@ -102,7 +102,7 @@ describe("tribe API minimal surface", () => {
     const ctx = ctxFor(f.db, f.stmts, "alice")
     for (const method of ["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read"]) {
       expect(() => handleToolCall(ctx, method, {}, makeOpts())).toThrow(
-        `${method} removed; use tribe.send/fetch/filter`,
+        `${method} removed; use send/fetch/filter`,
       )
     }
     f.cleanup()

@@ -380,7 +380,7 @@ describe("recall integration", () => {
         expect(typeof item.rank).toBe("number")
         expect(typeof item.snippet).toBe("string")
         expect(typeof item.sessionId).toBe("string")
-        expect(["message", "plan", "summary", "todo", "first_prompt"]).toContain(item.type)
+        expect(["message", "plan", "summary", "todo", "first_prompt", "vault"]).toContain(item.type)
       }
     },
     15_000,
