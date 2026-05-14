@@ -271,14 +271,8 @@ const daemon = await createReconnectingClient({
       const chief = reg.chief || sessions.find((s: { role: string }) => s.role === "chief")?.name || "(none)"
       const peers = sessions.filter((s: { name: string }) => s.name !== myName).map((s: { name: string; role: string }) => `${s.name} (${s.role})`).join(", ") || "(solo)"
 
-      const banner = [
-        `tribe connected`,
-        `  daemon: ${SOCKET_PATH}`,
-        `  name: ${myName} (${myRole})`,
-        `  chief: ${chief}`,
-        `  delivery: ${DELIVERY}`,
-        `  online: ${peers}`,
-      ].join("\n")
+      const shortSocket = SOCKET_PATH.replace(process.env.HOME ?? "", "~")
+      const banner = `**tribe** ${myName} (${myRole}) · chief: ${chief} · ${DELIVERY} · peers: ${peers} · ${shortSocket}`
       sendChannel(banner, { from: "tribe-startup", type: "system" })
     } catch {
       // Non-fatal — banner is diagnostic, don't block startup

@@ -2382,15 +2382,8 @@ try {
         const sessions = (membersData.sessions ?? []).filter((s) => s.alive);
         const chief = reg.chief || sessions.find((s) => s.role === "chief")?.name || "(none)";
         const peers = sessions.filter((s) => s.name !== myName).map((s) => `${s.name} (${s.role})`).join(", ") || "(solo)";
-        const banner = [
-          `tribe connected`,
-          `  daemon: ${SOCKET_PATH}`,
-          `  name: ${myName} (${myRole})`,
-          `  chief: ${chief}`,
-          `  delivery: ${DELIVERY}`,
-          `  online: ${peers}`
-        ].join(`
-`);
+        const shortSocket = SOCKET_PATH.replace(process.env.HOME ?? "", "~");
+        const banner = `**tribe** ${myName} (${myRole}) \xB7 chief: ${chief} \xB7 ${DELIVERY} \xB7 peers: ${peers} \xB7 ${shortSocket}`;
         sendChannel(banner, { from: "tribe-startup", type: "system" });
       } catch {
         log5.debug?.("Startup banner failed (non-fatal)");
