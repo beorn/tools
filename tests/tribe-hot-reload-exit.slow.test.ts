@@ -23,7 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -112,6 +112,27 @@ describe("tribe-daemon hot-reload exit", () => {
     }
     orphans.length = 0
     daemon = null
+    // Belt-and-braces: any tribe-daemon whose --socket argument references
+    // THIS run's tmpDir is leaked successor — the test's daemon.on("spawn")
+    // handler doesn't track them. Scan + reap by CLI-arg match. Fixes
+    // @km/bearly/hot-reload-test-leaks-cpu-spinning-successors.
+    try {
+      const out = spawnSync("pgrep", ["-af", `tribe-daemon.*${tmpDir}`], { encoding: "utf8" })
+      const stdout = (out.stdout ?? "").toString()
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) continue
+        const pid = parseInt(line.trim().split(/\s+/)[0]!, 10)
+        if (Number.isFinite(pid) && pid > 0 && pidAlive(pid)) {
+          try {
+            process.kill(pid, "SIGKILL")
+          } catch {
+            /* already dead or not ours */
+          }
+        }
+      }
+    } catch {
+      /* pgrep unavailable on this platform — defensive only, never fatal */
+    }
     unlinkIfExists(socketPath)
     rmSync(tmpDir, { recursive: true, force: true })
   })
