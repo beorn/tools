@@ -95,19 +95,19 @@ export function readReconcilerSnapshot(): ReconcilerSection | null {
 // ---------------------------------------------------------------------------
 
 export const TRIBE_COORD_METHODS = {
-  send: "send",
-  fetch: "fetch",
-  members: "members",
-  rename: "rename",
-  health: "health",
-  join: "join",
-  reload: "reload",
-  retro: "retro",
-  chief: "chief",
-  claimChief: "claim-chief",
-  releaseChief: "release-chief",
-  debug: "debug",
-  filter: "filter",
+  send: "tribe.send",
+  fetch: "tribe.fetch",
+  members: "tribe.members",
+  rename: "tribe.rename",
+  health: "tribe.health",
+  join: "tribe.join",
+  reload: "tribe.reload",
+  retro: "tribe.retro",
+  chief: "tribe.chief",
+  claimChief: "tribe.claim-chief",
+  releaseChief: "tribe.release-chief",
+  debug: "tribe.debug",
+  filter: "tribe.filter",
 } as const
 
 export type TribeCoordMethod = (typeof TRIBE_COORD_METHODS)[keyof typeof TRIBE_COORD_METHODS]
