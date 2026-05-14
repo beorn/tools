@@ -336,6 +336,7 @@ export function withDispatcher<
                 isActive,
                 projectId,
                 takenNames,
+                clientPid: Number(p.pid ?? 0),
               }),
             )
             const domains = (p.domains as string[]) ?? []

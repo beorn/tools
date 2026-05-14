@@ -287,7 +287,10 @@ describe("resolveName", () => {
     expect(name).toBe("chief")
   })
 
-  it("defaults to claude1 when no name signal and role=member", () => {
+  it("defaults to agent1 when no name signal and role=member", () => {
+    // Was "claude1" before — changed to "agent1" because we can't reliably
+    // tell which flavor (codex/claude/kimi) is connecting from the register
+    // call. Sessions rename to a meaningful name from inside.
     const name = resolveName({
       db,
       p: {},
@@ -299,7 +302,7 @@ describe("resolveName", () => {
       projectId: "proj",
       takenNames: new Set(),
     })
-    expect(name).toBe("claude1")
+    expect(name).toBe("agent1")
   })
 
   it("defaults to chief when role=chief and no other signal", () => {
@@ -332,7 +335,9 @@ describe("resolveName", () => {
     expect(name).toBe("my-named-session")
   })
 
-  it("uses adopted.name when no p.name and no claudeSessionName", () => {
+  it("ignores adopted.name — adoption removed 2026-05-14, sessions rename from inside", () => {
+    // The adoption logic was removed because it caused a chief session to
+    // register as "@agent/4" via stale claude_session_id matching.
     const name = resolveName({
       db,
       p: {},
@@ -344,10 +349,10 @@ describe("resolveName", () => {
       projectId: "proj",
       takenNames: new Set(),
     })
-    expect(name).toBe("ghost")
+    expect(name).toBe("agent1")
   })
 
-  it("adopts a prior name for the same claude_session_id when role is member", () => {
+  it("ignores prior claude_session_id matches — adoption removed", () => {
     insertSession(db, {
       id: "p1",
       name: "research-spike",
@@ -365,28 +370,7 @@ describe("resolveName", () => {
       projectId: "proj",
       takenNames: new Set(),
     })
-    expect(name).toBe("research-spike")
-  })
-
-  it("falls back to claudeN when prior claude_session_id row has auto-name", () => {
-    insertSession(db, {
-      id: "p1",
-      name: "codex1", // auto-name, not adoptable
-      role: "member",
-      claude_session_id: "sess-abc",
-    })
-    const name = resolveName({
-      db,
-      p: {},
-      adopted: null,
-      claudeSessionName: null,
-      claudeSessionId: "sess-abc",
-      role: "member",
-      isActive: noActive,
-      projectId: "proj",
-      takenNames: new Set(),
-    })
-    expect(name).toBe("claude1")
+    expect(name).toBe("agent1")
   })
 })
 
@@ -558,7 +542,10 @@ describe("scenario: three sequential codex spawns", () => {
       }),
     )
 
-    expect(taken).toEqual(new Set(["codex1", "kimi1", "claude1"]))
+    // Fallback (no p.name) now produces "agent1" instead of "claude1" — the
+    // daemon can't reliably tell which flavor it's talking to from the
+    // register call. Sessions rename to a meaningful name from inside.
+    expect(taken).toEqual(new Set(["codex1", "kimi1", "agent1"]))
   })
 
   it("TRIBE_NAME=foo overrides everything; flavor-numbering doesn't run", () => {
