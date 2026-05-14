@@ -5,6 +5,17 @@ All notable changes to `@bearly/tribe` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this package adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.14.1 — MCP server identity cleanup
+
+### Changed
+
+- Renamed MCP server identities to avoid double-prefix tool names in Claude Code:
+  the tribe daemon advertises as `daemon`, lore advertises as `lore`, and the
+  GitHub event bridge advertises as `events`.
+- Aligned visible tribe plugin/server versions across `package.json`, the Claude
+  plugin manifest, stdio adapter, built server bundle, and lore client/server
+  handshakes.
+
 ## Unreleased — Default session names identify the agent flavor (km-bearly.tribe-default-session-names)
 
 Standalone codex sessions used to register as `codex-${PPID}-$$` (e.g. `codex-56775-56857`) — unique but useless. Chief looking at `tribe.members` couldn't tell which agent was running or whether it was the first or seventeenth spawn. Default names now auto-number per-flavor: first codex is `codex1`, second is `codex2`, first claude (no `TRIBE_NAME`) is `claude1`, and so on. When `codex1` disconnects, the next codex spawn reclaims `codex1` — numbers track who's connected RIGHT NOW, not historical churn.

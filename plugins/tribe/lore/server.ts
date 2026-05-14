@@ -101,7 +101,7 @@ async function getDaemon(): Promise<LoreClient | null> {
     const client = await createReconnectingClient({ socketPath, maxAttempts: 5 })
     await client.call(TRIBE_METHODS.hello, {
       clientName: "/tribe/lore",
-      clientVersion: "0.12.0",
+      clientVersion: "0.14.1",
       protocolVersion: LORE_PROTOCOL_VERSION,
     })
     daemonClient = client
@@ -485,7 +485,7 @@ async function handleSessionState(args: Record<string, unknown>): Promise<string
 // MCP server wiring
 // ============================================================================
 
-const server = new Server({ name: "lore", version: "0.12.0" }, { capabilities: { tools: {} } })
+const server = new Server({ name: "lore", version: "0.14.1" }, { capabilities: { tools: {} } })
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: TOOLS }
