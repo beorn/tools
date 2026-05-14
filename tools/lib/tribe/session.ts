@@ -86,6 +86,7 @@ export function registerSession(
   isActive?: (sessionId: string) => boolean,
   identityToken?: string | null,
   clientPid?: number,
+  delivery?: "push" | "pull",
 ): void {
   const desiredName = ctx.getName()
   const now = Date.now()
@@ -131,6 +132,7 @@ export function registerSession(
       $claude_session_name: ctx.claudeSessionName,
       $identity_token: identityToken ?? null,
       $now: now,
+      $delivery: delivery ?? "push",
     })
   } catch {
     // Name still taken (race or active holder). Surface as a typed error so

@@ -29,7 +29,8 @@ export function openDatabase(path: string): Database {
 		last_inbox_pull_seq INTEGER NOT NULL DEFAULT 0,
 		filter_mode  TEXT NOT NULL DEFAULT 'normal',
 		filter_until INTEGER,
-		filter_kinds TEXT
+		filter_kinds TEXT,
+		delivery     TEXT NOT NULL DEFAULT 'push'
 	)`)
 
   // Migrations table — tracks schema version so we can evolve the DB without
@@ -505,6 +506,29 @@ const MIGRATIONS: readonly Migration[] = [
       db.run("DROP TABLE IF EXISTS dismissals")
     },
   },
+  {
+    version: 12,
+    name: "session-delivery-mode",
+    up(db) {
+      // km-bearly.tribe-dm-delivery-gap: each session declares how it consumes
+      // messages — `push` (channel fanout, default for stdio clients with a
+      // notification reader) or `pull` (queued; drained via tribe.ping /
+      // tribe.inbox). The daemon's broadcast pipeline skips socket fanout for
+      // pull-mode recipients so MCP-only clients (codex, etc.) don't lose DMs
+      // to /dev/null.
+      const hasSessions = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").get() as {
+        name: string
+      } | null
+      if (hasSessions) {
+        const cols = new Set(
+          (db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((r) => r.name),
+        )
+        if (!cols.has("delivery")) {
+          db.run("ALTER TABLE sessions ADD COLUMN delivery TEXT NOT NULL DEFAULT 'push'")
+        }
+      }
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -516,12 +540,13 @@ export type TribeStatements = ReturnType<typeof createStatements>
 export function createStatements(db: Database) {
   return {
     upsertSession: db.prepare(`
-		INSERT INTO sessions (id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, identity_token, started_at, updated_at)
-		VALUES ($id, $name, $role, $domains, $pid, $cwd, $project_id, $claude_session_id, $claude_session_name, $identity_token, $now, $now)
+		INSERT INTO sessions (id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, identity_token, started_at, updated_at, delivery)
+		VALUES ($id, $name, $role, $domains, $pid, $cwd, $project_id, $claude_session_id, $claude_session_name, $identity_token, $now, $now, $delivery)
 		ON CONFLICT(id) DO UPDATE SET
 			name = $name, role = $role, domains = $domains,
 			pid = $pid, cwd = $cwd, project_id = $project_id, claude_session_id = $claude_session_id,
-			claude_session_name = $claude_session_name, identity_token = $identity_token, started_at = $now, updated_at = $now
+			claude_session_name = $claude_session_name, identity_token = $identity_token, started_at = $now, updated_at = $now,
+			delivery = $delivery
 	`),
 
     insertMessage: db.prepare(`
@@ -532,8 +557,15 @@ export function createStatements(db: Database) {
 	`),
 
     allSessions: db.prepare(
-      "SELECT id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, started_at, updated_at, filter_mode, filter_until, filter_kinds, last_inbox_pull_seq FROM sessions",
+      "SELECT id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, started_at, updated_at, filter_mode, filter_until, filter_kinds, last_inbox_pull_seq, delivery FROM sessions",
     ),
+
+    /** Look up a session's delivery mode by name. Used by the broadcast pipeline
+     *  to skip socket fanout for pull-mode recipients (km-bearly.tribe-dm-delivery-gap). */
+    getSessionDeliveryByName: db.prepare("SELECT delivery FROM sessions WHERE name = $name LIMIT 1"),
+
+    /** Update a session's delivery mode in place. */
+    setSessionDelivery: db.prepare("UPDATE sessions SET delivery = $delivery, updated_at = $now WHERE id = $id"),
 
     messageHistory: db.prepare(`
 		SELECT * FROM messages

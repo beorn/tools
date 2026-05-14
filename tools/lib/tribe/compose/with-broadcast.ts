@@ -335,6 +335,18 @@ export function withBroadcast<
         }
         if (client.role === "pending") continue
 
+        // km-bearly.tribe-dm-delivery-gap: pull-mode recipients drain via
+        // tribe.ping / tribe.inbox. Skip socket fanout — the message row is
+        // already durable in SQLite from the sendMessage tap. `watch` clients
+        // (TUI dashboards) always get push regardless of recipient mode so the
+        // live view stays current.
+        if (!isWatch) {
+          const recipientDelivery = stmts.getSessionDeliveryByName.get({ $name: client.name }) as
+            | { delivery: string }
+            | undefined
+          if (recipientDelivery?.delivery === "pull") continue
+        }
+
         // km-tribe.filter-collapse: per-session unified filter
         // (mode + time-bounded mute + per-kind globs). Direct messages bypass
         // the kinds/until dimensions — only `mode: focus` filters DMs.

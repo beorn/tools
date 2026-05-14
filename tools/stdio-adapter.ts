@@ -212,6 +212,13 @@ const identityToken = createHash("sha256")
   .digest("hex")
   .slice(0, 16)
 
+// km-bearly.tribe-dm-delivery-gap: declare delivery mode. MCP-only clients
+// without a notification reader (codex, gemini, etc.) should run with
+// TRIBE_DELIVERY=pull so the daemon queues events for tribe.ping instead of
+// fanning them out down a channel that has no consumer. Default 'push' keeps
+// Claude Code behavior unchanged.
+const DELIVERY = process.env.TRIBE_DELIVERY === "pull" ? "pull" : "push"
+
 const registerParams = {
   ...(args.name ? { name: args.name } : {}),
   ...(args.role ? { role: args.role } : {}),
@@ -225,6 +232,7 @@ const registerParams = {
   claudeSessionId: CLAUDE_SESSION_ID,
   claudeSessionName: CLAUDE_SESSION_NAME,
   identityToken,
+  delivery: DELIVERY,
 }
 
 const daemon = await createReconnectingClient({

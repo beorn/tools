@@ -441,7 +441,16 @@ export function withDispatcher<
               onMessageInserted: broadcast.messageTap,
             })
 
-            registerSession(clientCtx, projectId, (sid) => registry.getActiveSessionIds().has(sid), identityToken, pid)
+            const deliveryRaw = (p.delivery as string) ?? "push"
+            const delivery: "push" | "pull" = deliveryRaw === "pull" ? "pull" : "push"
+            registerSession(
+              clientCtx,
+              projectId,
+              (sid) => registry.getActiveSessionIds().has(sid),
+              identityToken,
+              pid,
+              delivery,
+            )
 
             const client = applyClient(connId, {
               name,
@@ -491,6 +500,7 @@ export function withDispatcher<
           case TRIBE_COORD_METHODS.releaseChief:
           case TRIBE_COORD_METHODS.debug:
           case TRIBE_COORD_METHODS.inbox:
+          case TRIBE_COORD_METHODS.ping:
           case TRIBE_COORD_METHODS.filter: {
             const client = clients.get(connId)
             const ctx = client?.ctx ?? daemonCtx

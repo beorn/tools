@@ -110,6 +110,7 @@ export const TRIBE_COORD_METHODS = {
   debug: "tribe.debug",
   inbox: "tribe.inbox",
   filter: "tribe.filter",
+  ping: "tribe.ping",
 } as const
 
 export type TribeCoordMethod = (typeof TRIBE_COORD_METHODS)[keyof typeof TRIBE_COORD_METHODS]
@@ -195,11 +196,27 @@ export function handleToolCall(
       return handleDebug(ctx, a, opts)
     case TRIBE_COORD_METHODS.inbox:
       return handleInbox(ctx, a)
+    case TRIBE_COORD_METHODS.ping:
+      return handlePing(ctx, a)
     case TRIBE_COORD_METHODS.filter:
       return handleFilter(ctx, a)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
+}
+
+/**
+ * tribe.ping — drain pending events for this session (broadcasts + DMs).
+ *
+ * Semantically equivalent to tribe.inbox today, but documented as the
+ * canonical "give me my events" call for pull-mode clients. Pull-mode
+ * sessions (MCP-only clients like codex) call this to receive messages
+ * the daemon couldn't push to a notification channel.
+ *
+ * See km-bearly.tribe-dm-delivery-gap-for-mcp-only-clients.
+ */
+function handlePing(ctx: TribeContext, a: ToolArgs): ToolResult {
+  return handleInbox(ctx, a)
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +525,32 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
   ctx.setName(joinName)
   ctx.setRole(joinRole as TribeRole)
 
-  logEvent(ctx, "session.joined", undefined, { name: joinName, role: joinRole, domains: joinDomains, rejoin: true })
+  // km-bearly.tribe-dm-delivery-gap: declare delivery mode. `push` (default)
+  // means the daemon fans events out on the MCP channel; `pull` queues them
+  // and the agent drains via tribe.ping / tribe.inbox. MCP-only clients (codex,
+  // gemini, etc.) without a notification reader should join with `pull`.
+  const deliveryRaw = a.delivery
+  if (deliveryRaw === "push" || deliveryRaw === "pull") {
+    ctx.stmts.setSessionDelivery.run({
+      $id: ctx.sessionId,
+      $delivery: deliveryRaw,
+      $now: Date.now(),
+    })
+  }
+  const delivery =
+    deliveryRaw === "push" || deliveryRaw === "pull"
+      ? deliveryRaw
+      : (ctx.db.prepare("SELECT delivery FROM sessions WHERE id = $id").get({ $id: ctx.sessionId }) as
+          | { delivery: string }
+          | undefined)?.delivery ?? "push"
+
+  logEvent(ctx, "session.joined", undefined, {
+    name: joinName,
+    role: joinRole,
+    domains: joinDomains,
+    delivery,
+    rejoin: true,
+  })
 
   return {
     content: [
@@ -519,6 +561,7 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
           name: joinName,
           role: joinRole,
           domains: joinDomains,
+          delivery,
           previous_name: joinName !== prevName ? prevName : undefined,
         }),
       },

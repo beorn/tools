@@ -106,6 +106,12 @@ export const TOOLS_LIST = [
           items: { type: "string" },
           description: "Domain expertise areas (e.g. ['silvery', 'flexily'])",
         },
+        delivery: {
+          type: "string",
+          description:
+            "How this session consumes messages. 'push' (default) = daemon fans events out on the MCP notification channel (Claude Code, Claude Agent SDK with a channel reader). 'pull' = events queue in SQLite; drain via tribe.ping or tribe.inbox (MCP-only clients without a notification handler — codex, gemini, custom MCP). Sender is transport-blind: tribe.send routes by the recipient's registered mode.",
+          enum: ["push", "pull"],
+        },
       },
       required: ["name", "role"],
     },
@@ -184,6 +190,26 @@ export const TOOLS_LIST = [
     description:
       "Pull pending tribe events that did NOT push to the channel (ambient: commits, joins/leaves, routine github events, low-severity health warnings). Returns events newer than the per-session pull cursor; advances the cursor on call. " +
       "Empty response is the correct behavior for most tribe channel events you do see — the tool returns inbox data; you decide whether to act. Do not generate acknowledgement text just because a message arrived.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        since: {
+          type: "number",
+          description: "Pull rows with rowid > since. Default: per-session cursor.",
+        },
+        kinds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit']).",
+        },
+        limit: { type: "number", description: "Max rows to return (default: 50)." },
+      },
+    },
+  },
+  {
+    name: "tribe.ping",
+    description:
+      "Drain pending tribe events for this session — broadcasts AND direct messages since the per-session cursor. The canonical 'give me my events' call for pull-mode clients (MCP-only sessions that can't receive channel-push notifications). Semantically equivalent to tribe.inbox today; use tribe.ping when polling on a turn boundary, tribe.inbox when filtering by plugin_kind globs. Advances the cursor on call. Empty response = nothing pending.",
     inputSchema: {
       type: "object" as const,
       properties: {
