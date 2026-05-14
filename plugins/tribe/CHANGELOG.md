@@ -5,7 +5,48 @@ All notable changes to `@bearly/tribe` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this package adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## Unreleased — Per-session delivery routing + tribe.ping (Option G, km-bearly.tribe-dm-delivery-gap-for-mcp-only-clients)
+
+Closes the DM-delivery gap for MCP-only clients (codex, gemini, and any future
+adapter without a long-lived socket subscription). Senders stay transport-blind:
+the daemon decides per-recipient whether to push over the socket or hold for a
+client-initiated pull.
+
+### Added
+
+- **Per-session delivery mode** — `tribe.join` now accepts a `delivery` field
+  (`'push' | 'pull'`, default `'push'`). Push-mode sessions receive broadcasts
+  and DMs via socket fanout, as today. Pull-mode sessions skip the socket fanout
+  entirely; messages stay durable in SQLite and drain on demand.
+- **`tribe.ping`** — canonical pull-mode drain tool. Returns broadcasts and DMs
+  delivered since the caller's cursor, in a single call. Designed for clients
+  that can't keep a socket subscription open (MCP stdio adapters with no
+  long-lived event channel).
+- **`TRIBE_DELIVERY` env var** — read by `stdio-adapter` and propagated to
+  `tribe.join`. Defaults to `'push'`. MCP-only clients (codex, gemini) should
+  set `TRIBE_DELIVERY=pull` in their MCP server config.
+
+### Changed
+
+- **`with-broadcast.toConnected`** — broadcast pipeline now consults the
+  recipient's `delivery` mode before fanning out over the socket. Pull-mode
+  recipients are skipped on the push path; their messages remain in the SQLite
+  message table and are drained on the next `tribe.ping`.
+
+### Schema (migration v12)
+
+- `sessions`: add `delivery TEXT NOT NULL DEFAULT 'push'`. Existing rows
+  inherit the default — no behavioural change for current push-mode sessions.
+
+### Migration guide
+
+- **Existing sessions**: no-op. The new column defaults to `'push'`, preserving
+  current socket-fanout behaviour for everyone already connected.
+- **MCP-only clients (codex, gemini, …)**: set `TRIBE_DELIVERY=pull` in the
+  MCP server entry. The stdio adapter forwards it to `tribe.join`, and the
+  client should periodically call `tribe.ping` to drain pending traffic.
+- **Push-mode clients (Claude Code, watch TUI)**: unchanged — no config edit
+  required.
 
 ## 0.14.0 — Assign envelope enrichment (km-tribe.task-assignment-stale-snapshot)
 
