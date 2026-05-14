@@ -228,7 +228,7 @@ const identityToken = createHash("sha256")
 
 // km-bearly.tribe-dm-delivery-gap: declare delivery mode. MCP-only clients
 // without a notification reader (codex, gemini, etc.) should run with
-// TRIBE_DELIVERY=pull so the daemon queues events for tribe.ping instead of
+// TRIBE_DELIVERY=pull so the daemon queues events for tribe.fetch instead of
 // fanning them out down a channel that has no consumer. Default 'push' keeps
 // Claude Code behavior unchanged.
 const DELIVERY = process.env.TRIBE_DELIVERY === "pull" ? "pull" : "push"
@@ -275,7 +275,7 @@ const daemon = await createReconnectingClient({
 // MCP Server
 // ---------------------------------------------------------------------------
 
-const joinInstruction = `If you receive a stdio-adapter auto-identify message, just call tribe.join with a short name for your focus area. Omit the role parameter — the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.history afterward — just join silently and continue.`
+const joinInstruction = `If you receive a stdio-adapter auto-identify message, just call tribe.join with a short name for your focus area. Omit the role parameter — the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.fetch afterward — just join silently and continue.`
 
 const chiefInstructions = `Messages from other Claude Code sessions arrive as <channel source="tribe" from="..." type="..." bead="...">.
 
@@ -284,15 +284,15 @@ You are the chief of a tribe — a coordinator for multiple Claude Code sessions
 ${joinInstruction}
 
 Turn-start inbox check:
-- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
-- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- At the start of each user turn, call tribe.fetch({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.fetch({ with: <your session name>, limit: 20 }).
 - Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
 - Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
 Coordination protocol:
 - Use tribe.members() to see who's online and their domains
 - Use tribe.send(to, message, type) to assign work, answer queries, or approve requests
-- Use tribe.broadcast(message) to announce changes that affect everyone
+- Use tribe.send(to="*", message, type) to announce changes that affect everyone
 - Use tribe.health() to check for silent members or conflicts
 - When CI alerts arrive, coordinate the fix — assign the responsible session to investigate
 
@@ -311,8 +311,8 @@ You are a tribe member — a worker session coordinated by the chief.
 ${joinInstruction}
 
 Turn-start inbox check:
-- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
-- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- At the start of each user turn, call tribe.fetch({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.fetch({ with: <your session name>, limit: 20 }).
 - Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
 - Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
@@ -370,7 +370,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => {
     nudgeSent = true
     timers.setTimeout(() => {
       sendChannel(
-        `Auto-identify: call tribe.join(name="${myName}") with a short name for your focus area. Omit the role parameter — the daemon auto-assigns it. Do not call tribe.members or tribe.history — just join silently and continue.`,
+        `Auto-identify: call tribe.join(name="${myName}") with a short name for your focus area. Omit the role parameter — the daemon auto-assigns it. Do not call tribe.members or tribe.fetch — just join silently and continue.`,
         { from: "stdio-adapter", type: "system" },
       )
     }, 500)
@@ -507,7 +507,7 @@ if (CWD_EVAL.kind === "warn" || CWD_EVAL.kind === "refuse") {
   const prefix = CWD_EVAL.kind === "refuse" ? "system" : "warning"
   timers.setTimeout(() => {
     sendChannel(CWD_EVAL.message, { from: "stdio-adapter", type: prefix })
-    // Also log to the daemon's activity stream so `tribe.history` surfaces it.
+    // Also log to the daemon's activity stream so diagnostics can surface it.
     daemon
       .call("log_event", {
         type: CWD_EVAL.kind === "refuse" ? "cwd_guardrail_refuse" : "cwd_guardrail_warn",

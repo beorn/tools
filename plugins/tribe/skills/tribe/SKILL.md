@@ -1,6 +1,6 @@
 ---
 description: "Tribe coordination — check sessions, send messages, view health/history. Use when user says /tribe."
-allowed-tools: mcp__tribe__tribe.members, mcp__tribe__tribe.send, mcp__tribe__tribe.broadcast, mcp__tribe__tribe.history, mcp__tribe__tribe.rename, mcp__tribe__tribe.health, Bash(sqlite3:*)
+allowed-tools: mcp__tribe__tribe.members, mcp__tribe__tribe.send, mcp__tribe__tribe.fetch, mcp__tribe__tribe.rename, mcp__tribe__tribe.health, Bash(sqlite3:*)
 ---
 
 # Tribe
@@ -19,9 +19,9 @@ Cross-session coordination. Parse the subcommand from ARGUMENTS.
 | `/tribe send <to> <message>`   | `tribe.send(to, message)` — send notify message                                                                                                                     |
 | `/tribe assign <to> <message>` | `tribe.send(to, message, type="assign")` — assign work                                                                                                              |
 | `/tribe query <to> <message>`  | `tribe.send(to, message, type="query")` — ask a question                                                                                                            |
-| `/tribe broadcast <message>`   | `tribe.broadcast(message)` — message everyone                                                                                                                       |
-| `/tribe history`               | `tribe.history(limit=20)` — recent messages                                                                                                                         |
-| `/tribe history <name>`        | `tribe.history(with=name, limit=20)` — messages with specific session                                                                                               |
+| `/tribe broadcast <message>`   | `tribe.send(to="*", message)` — message everyone                                                                                                                    |
+| `/tribe history`               | `tribe.fetch(since=0, limit=20)` — recent visible messages                                                                                                          |
+| `/tribe history <name>`        | `tribe.fetch(with=name, limit=20)` — messages with specific session                                                                                                 |
 | `/tribe rename <new_name>`     | `tribe.rename(new_name)` — rename this session                                                                                                                      |
 | `/tribe whoami`                | Show this session's name, role, and domains                                                                                                                         |
 | `/tribe db <sql>`              | `sqlite3 <tribe-db-path> "<sql>"` — raw query                                                                                                                       |
@@ -32,7 +32,7 @@ Cross-session coordination. Parse the subcommand from ARGUMENTS.
 
 ## Output Format
 
-Keep output concise. For `tribe.members`, format as a table. For `tribe.health`, highlight warnings. For `tribe.history`, show as a chat log with timestamps.
+Keep output concise. For `tribe.members`, format as a table. For `tribe.health`, highlight warnings. For `tribe.fetch`, show as a chat log with timestamps.
 
 ## `/tribe sync` Protocol
 
@@ -81,7 +81,7 @@ Each session declares a delivery mode at join time. The daemon routes broadcasts
 | Mode       | When to declare                                                                              | How it works                                                                               |
 | ---------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | **push**   | Default. Claude Code, Agent SDK, or any client with an MCP notification-channel reader.      | Daemon fans events out on the MCP channel; client sees them as `<channel source="tribe">`. |
-| **pull**   | Codex, Gemini, or any MCP-only client without a notification reader.                         | Events queue in SQLite; client drains via `tribe.ping` or `tribe.inbox`.                   |
+| **pull**   | Codex, Gemini, or any MCP-only client without a notification reader.                         | Events queue in SQLite; client drains via `tribe.fetch`.                                   |
 
 **How to declare on join.** Pass `delivery: "push" | "pull"` to `tribe.join`. The stdio-adapter reads the `TRIBE_DELIVERY` env var and threads it into the join call automatically — pull-mode clients usually never call `tribe.join` directly; setting the env on the MCP server entry is enough.
 
@@ -92,7 +92,7 @@ Each session declares a delivery mode at join time. The daemon routes broadcasts
 TRIBE_DELIVERY = "pull"
 ```
 
-**Draining in pull mode.** `tribe.ping()` is the canonical "give me my events" call — returns all broadcasts + DMs received since the session's last cursor. `tribe.inbox()` is semantically equivalent (both return the queued events and advance the cursor) and remains available for callers that already use it. Pick `tribe.ping` for new code.
+**Draining in pull mode.** `tribe.fetch()` is the canonical "give me my events" call — returns all broadcasts + DMs received since the session's last cursor and advances that cursor in default drain mode.
 
 **Watch clients** (`tribe-watch`, `tribe-cli` log/events) always receive push regardless of the recipient's declared mode — the per-session toggle only gates _agent-bound_ fanout.
 

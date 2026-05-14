@@ -1010,7 +1010,7 @@ export async function checkReaper(
       log.info?.(`reaper: asking about PID ${pid}`)
       api.broadcast(msg, "health:reaper:query", undefined, {
         delivery: "push",
-        pluginKind: "health:reaper:query",
+        topic: "health:reaper:query",
       })
     }
 
@@ -1067,7 +1067,7 @@ export async function checkReaper(
       const killMsg = `health:reaper: killed PID ${pid} (${suspect.command}) — unclaimed after ${thresholds.reaperGraceSamples * 10}s, ${suspect.cpu}% CPU for ${suspect.etime}`
       api.broadcast(killMsg, "health:reaper:killed", undefined, {
         delivery: "pull",
-        pluginKind: "health:reaper:killed",
+        topic: "health:reaper:killed",
       })
       state.reaperSuspects.delete(pid)
     }
@@ -1252,11 +1252,11 @@ export const healthMonitorPlugin: TribePluginApi = {
           const isCritical = alert.severity === "critical"
           const dmClass = {
             delivery: "push",
-            pluginKind: `health:${alert.type}:${alert.severity}`,
+            topic: `health:${alert.type}:${alert.severity}`,
           } as const
           const broadcastClass = {
             delivery: isCritical ? "push" : "pull",
-            pluginKind: `health:${alert.type}:${alert.severity}`,
+            topic: `health:${alert.type}:${alert.severity}`,
           } as const
           // Route: DM each responsible session
           const attributedSessions = new Set<string>()
@@ -1341,12 +1341,12 @@ export const healthMonitorPlugin: TribePluginApi = {
             if (sessionName) {
               api.send(sessionName, lockMsg, "health:git-lock:warning", undefined, {
                 delivery: "push",
-                pluginKind: "health:git-lock:warning",
+                topic: "health:git-lock:warning",
               })
             }
             api.broadcast(lockMsg, "health:git-lock:warning", undefined, {
               delivery: "pull",
-              pluginKind: "health:git-lock:warning",
+              topic: "health:git-lock:warning",
             })
           }
 
@@ -1357,7 +1357,7 @@ export const healthMonitorPlugin: TribePluginApi = {
             log.info?.(`alert: ${staleMsg}`)
             api.broadcast(staleMsg, "health:git-lock:warning", undefined, {
               delivery: "push",
-              pluginKind: "health:git-lock:stale",
+              topic: "health:git-lock:stale",
             })
           }
         }
@@ -1389,7 +1389,7 @@ export const healthMonitorPlugin: TribePluginApi = {
                 log.info?.(`alert: ${msg}`)
                 api.broadcast(msg, "health:disk-io:warning", undefined, {
                   delivery: "pull",
-                  pluginKind: "health:disk-io:warning",
+                  topic: "health:disk-io:warning",
                 })
               }
             } else {
@@ -1421,7 +1421,7 @@ export const healthMonitorPlugin: TribePluginApi = {
                 log.info?.(`alert: ${msg}`)
                 api.broadcast(msg, "health:gh-rate-limit:warning", undefined, {
                   delivery: "push",
-                  pluginKind: "health:gh-rate-limit:warning",
+                  topic: "health:gh-rate-limit:warning",
                 })
               } else if (remainingPercent >= thresholds.ghRateLimitWarning) {
                 alertState.firedAlerts.delete("gh-rate-limit:warning")

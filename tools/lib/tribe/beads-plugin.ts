@@ -105,7 +105,7 @@ export const beadsPlugin: TribePluginApi = {
                   entry.id,
                   {
                     delivery: escalate ? "push" : "pull",
-                    pluginKind: "bead:new",
+                    topic: "bead:new",
                   },
                 )
               }
@@ -114,28 +114,28 @@ export const beadsPlugin: TribePluginApi = {
                 const actor = entry.claimed_by ?? ""
                 api.broadcast(`Claimed: ${entry.id} — ${entry.title} [by:${actor}]`, "bead:claimed", entry.id, {
                   ...ambient,
-                  pluginKind: "bead:claimed",
+                  topic: "bead:claimed",
                 })
               }
             } else if (entry.status === "closed") {
               if (api.claimDedup(`closed:${entry.id}`)) {
                 api.broadcast(`Closed: ${entry.id} — ${entry.title}`, "bead:closed", entry.id, {
                   ...ambient,
-                  pluginKind: "bead:closed",
+                  topic: "bead:closed",
                 })
               }
             } else if (entry.status === "in_progress") {
               if (api.claimDedup(`progress:${entry.id}`)) {
                 api.broadcast(`In progress: ${entry.id} — ${entry.title}`, "bead:progress", entry.id, {
                   ...ambient,
-                  pluginKind: "bead:progress",
+                  topic: "bead:progress",
                 })
               }
             } else {
               if (api.claimDedup(`status:${entry.id}:${entry.status}`)) {
                 api.broadcast(`Bead ${entry.id} → ${entry.status}`, "bead:status", entry.id, {
                   ...ambient,
-                  pluginKind: "bead:status",
+                  topic: "bead:status",
                 })
               }
             }

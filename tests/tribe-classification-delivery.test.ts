@@ -2,13 +2,13 @@
  * km-tribe.event-classification — daemon-spawn delivery-filter integration.
  *
  * Spawns a real daemon and verifies:
- *   - `plugin_kind` appears on channel notifications (replyHint is no longer
- *     surfaced on the wire — derived at delivery time, see v4 protocol bump)
+ *   - `topic` appears on channel notifications (replyHint is no longer
+ *     surfaced on the wire — derived at delivery time, see v5 protocol bump)
  *   - tribe.filter mode='focus' suppresses broadcasts (which derive to
  *     replyHint='optional') but still delivers direct DMs (which derive to
  *     replyHint='yes')
- *   - tribe.filter with kinds + until silences matching plugin_kind broadcasts
- *     and bypasses kinds/until for direct DMs
+ *   - tribe.filter with mute + until silences broadcasts and bypasses
+ *     mute/until for direct DMs
  *
  * tribe.filter unit-level coverage (validation, schema writes) lives in
  * tribe-filter.test.ts.
@@ -90,7 +90,7 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
     return c
   }
 
-  it("channel envelope carries plugin_kind on push notifications (no replyHint on wire)", async () => {
+  it("channel envelope carries topic on push notifications (no replyHint on wire)", async () => {
     daemon = await spawnDaemon(socketPath)
     const receiver = await connect()
     const notifs: Array<{ method: string; params?: Record<string, unknown> }> = []
@@ -104,10 +104,10 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
 
     await waitFor(() => notifs.some((n) => n.method === "channel" && String(n.params?.from) === "bob"), 5000)
     const env = notifs.find((n) => n.method === "channel" && String(n.params?.from) === "bob")!
-    // v4 wire: the replyHint is no longer surfaced on the channel envelope.
+    // v5 wire: the replyHint is no longer surfaced on the channel envelope.
     expect(env.params?.responseExpected).toBeUndefined()
-    // plugin_kind is null for human DMs (no plugin originated it)
-    expect(env.params?.plugin_kind).toBeNull()
+    // topic is null for human DMs (no plugin originated it)
+    expect(env.params?.topic).toBeNull()
   }, 15_000)
 
   it("tribe.filter mode=focus suppresses broadcasts but still delivers DMs", async () => {
@@ -124,7 +124,7 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
     await sender.call("register", { name: "bob", role: "member" })
 
     // Broadcast — derived replyHint='optional' → suppressed under focus mode.
-    await sender.call("tribe.broadcast", { message: "FYI", type: "status" })
+    await sender.call("tribe.send", { to: "*", message: "FYI", type: "status" })
     await new Promise((r) => setTimeout(r, 700)) // give time for fanout
     const optionalReceived = focusedNotifs.find((n) => String(n.params?.content ?? "").includes("FYI"))
     expect(optionalReceived).toBeUndefined()
@@ -134,7 +134,7 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
     await waitFor(() => focusedNotifs.some((n) => String(n.params?.content ?? "").includes("blocker")), 3000)
   }, 15_000)
 
-  it("tribe.filter with kinds + until suppresses matching broadcasts; DMs bypass", async () => {
+  it("tribe.filter with mute + until suppresses matching broadcasts; DMs bypass", async () => {
     daemon = await spawnDaemon(socketPath)
     const reader = await connect()
     const readerNotifs: Array<{ method: string; params?: Record<string, unknown> }> = []
@@ -142,19 +142,24 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
       if (method === "channel") readerNotifs.push({ method, params })
     })
     await reader.call("register", { name: "alice", role: "chief" })
-    // Mute github:* for 200ms.
-    await reader.call("tribe.filter", { kinds: ["github:*"], until: Date.now() + 200 })
+    // Mute all broadcasts for 200ms.
+    await reader.call("tribe.filter", { until: Date.now() + 200 })
 
     const sender = await connect()
     await sender.call("register", { name: "bob", role: "member" })
 
-    // Direct DM bypasses the kinds/until dimensions — should arrive.
+    // Broadcast during the mute window should be suppressed.
+    await sender.call("tribe.send", { to: "*", message: "muted fyi", type: "notify" })
+    await new Promise((r) => setTimeout(r, 700))
+    expect(readerNotifs.some((n) => String(n.params?.content ?? "").includes("muted fyi"))).toBe(false)
+
+    // Direct DM bypasses the mute/until dimensions — should arrive.
     await sender.call("tribe.send", { to: "alice", message: "direct", type: "notify" })
     await waitFor(() => readerNotifs.some((n) => String(n.params?.content ?? "").includes("direct")), 3000)
 
     // Wait past the mute window, then verify a fresh broadcast goes through.
     await new Promise((r) => setTimeout(r, 250))
-    await sender.call("tribe.broadcast", { message: "post-filter fyi", type: "notify" })
+    await sender.call("tribe.send", { to: "*", message: "post-filter fyi", type: "notify" })
     await waitFor(() => readerNotifs.some((n) => String(n.params?.content ?? "").includes("post-filter")), 3000)
   }, 15_000)
 
@@ -163,11 +168,11 @@ describe("tribe.filter — daemon-spawn delivery integration", () => {
     const c = await connect()
     await c.call("register", { name: "alice", role: "chief" })
     // Set, then clear.
-    await c.call("tribe.filter", { mode: "focus", kinds: ["bead:*"] })
+    await c.call("tribe.filter", { mode: "focus", mute: ["bead:*"] })
     const cleared = (await c.call("tribe.filter", {})) as { content: Array<{ type: string; text: string }> }
-    const parsed = JSON.parse(cleared.content[0]!.text) as { mode: string; kinds: unknown; until: unknown }
+    const parsed = JSON.parse(cleared.content[0]!.text) as { mode: string; mute: unknown; until: unknown }
     expect(parsed.mode).toBe("normal")
-    expect(parsed.kinds).toBeNull()
+    expect(parsed.mute).toBeNull()
     expect(parsed.until).toBeNull()
   }, 10_000)
 })

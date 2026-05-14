@@ -29,7 +29,7 @@ export function openDatabase(path: string): Database {
 		last_inbox_pull_seq INTEGER NOT NULL DEFAULT 0,
 		filter_mode  TEXT NOT NULL DEFAULT 'normal',
 		filter_until INTEGER,
-		filter_kinds TEXT,
+		filter_mute TEXT,
 		delivery     TEXT NOT NULL DEFAULT 'push'
 	)`)
 
@@ -72,7 +72,7 @@ export function openDatabase(path: string): Database {
 		ref        TEXT,
 		ts         INTEGER NOT NULL,
 		delivery   TEXT NOT NULL DEFAULT 'push',
-		plugin_kind TEXT,
+		topic      TEXT,
 		room_id    TEXT
 	)`)
 
@@ -143,7 +143,8 @@ export function openDatabase(path: string): Database {
   db.run("CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts)")
   db.run("CREATE INDEX IF NOT EXISTS idx_coordination_project ON coordination(project_id)")
   db.run("CREATE INDEX IF NOT EXISTS idx_messages_delivery_ts ON messages(delivery, ts)")
-  db.run("CREATE INDEX IF NOT EXISTS idx_messages_plugin_kind_ts ON messages(plugin_kind, ts)")
+  db.run("DROP INDEX IF EXISTS idx_messages_plugin_kind_ts")
+  db.run("CREATE INDEX IF NOT EXISTS idx_messages_topic_ts ON messages(topic, ts)")
   db.run("CREATE INDEX IF NOT EXISTS idx_messages_room_ts ON messages(room_id, ts)")
 
   return db
@@ -376,8 +377,8 @@ const MIGRATIONS: readonly Migration[] = [
       if (!messageCols.has("delivery")) {
         db.run("ALTER TABLE messages ADD COLUMN delivery TEXT NOT NULL DEFAULT 'push'")
       }
-      if (!messageCols.has("plugin_kind")) {
-        db.run("ALTER TABLE messages ADD COLUMN plugin_kind TEXT")
+      if (!messageCols.has("topic")) {
+        db.run("ALTER TABLE messages ADD COLUMN topic TEXT")
       }
       if (!messageCols.has("room_id")) {
         db.run("ALTER TABLE messages ADD COLUMN room_id TEXT")
@@ -459,7 +460,7 @@ const MIGRATIONS: readonly Migration[] = [
     name: "filter-collapse",
     up(db) {
       // km-tribe.filter-collapse: rename sessions.mode/snooze_until/snooze_kinds
-      // → filter_mode/filter_until/filter_kinds; drop messages.response_expected
+      // → filter_mode/filter_until/filter_mute; drop messages.response_expected
       // (the hint is derived from kind + sender at delivery time); drop the
       // dismissals table outright. The unified tribe.filter tool replaces the
       // prior trio — see plugins/tribe/CHANGELOG.md for the migration guide.
@@ -481,8 +482,8 @@ const MIGRATIONS: readonly Migration[] = [
         if (sessionCols.has("snooze_until") && !sessionCols.has("filter_until")) {
           db.run("ALTER TABLE sessions RENAME COLUMN snooze_until TO filter_until")
         }
-        if (sessionCols.has("snooze_kinds") && !sessionCols.has("filter_kinds")) {
-          db.run("ALTER TABLE sessions RENAME COLUMN snooze_kinds TO filter_kinds")
+        if (sessionCols.has("snooze_kinds") && !sessionCols.has("filter_mute")) {
+          db.run("ALTER TABLE sessions RENAME COLUMN snooze_kinds TO filter_mute")
         }
       }
 
@@ -512,8 +513,8 @@ const MIGRATIONS: readonly Migration[] = [
     up(db) {
       // km-bearly.tribe-dm-delivery-gap: each session declares how it consumes
       // messages — `push` (channel fanout, default for stdio clients with a
-      // notification reader) or `pull` (queued; drained via tribe.ping /
-      // tribe.inbox). The daemon's broadcast pipeline skips socket fanout for
+      // notification reader) or `pull` (queued; drained via tribe.fetch).
+      // The daemon's broadcast pipeline skips socket fanout for
       // pull-mode recipients so MCP-only clients (codex, etc.) don't lose DMs
       // to /dev/null.
       const hasSessions = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").get() as {
@@ -525,6 +526,47 @@ const MIGRATIONS: readonly Migration[] = [
         )
         if (!cols.has("delivery")) {
           db.run("ALTER TABLE sessions ADD COLUMN delivery TEXT NOT NULL DEFAULT 'push'")
+        }
+      }
+    },
+  },
+  {
+    version: 13,
+    name: "topic-and-filter-mute",
+    up(db) {
+      const hasMessages = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'").get() as {
+        name: string
+      } | null
+      if (hasMessages) {
+        db.run("DROP INDEX IF EXISTS idx_messages_plugin_kind_ts")
+        const messageCols = new Set(
+          (db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>).map((r) => r.name),
+        )
+        if (messageCols.has("plugin_kind") && !messageCols.has("topic")) {
+          db.run("ALTER TABLE messages RENAME COLUMN plugin_kind TO topic")
+        } else if (!messageCols.has("topic")) {
+          db.run("ALTER TABLE messages ADD COLUMN topic TEXT")
+        } else if (messageCols.has("plugin_kind")) {
+          db.run("UPDATE messages SET topic = plugin_kind WHERE topic IS NULL AND plugin_kind IS NOT NULL")
+          db.run("ALTER TABLE messages DROP COLUMN plugin_kind")
+        }
+        db.run("CREATE INDEX IF NOT EXISTS idx_messages_topic_ts ON messages(topic, ts)")
+      }
+
+      const hasSessions = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").get() as {
+        name: string
+      } | null
+      if (hasSessions) {
+        const sessionCols = new Set(
+          (db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((r) => r.name),
+        )
+        if (sessionCols.has("filter_kinds") && !sessionCols.has("filter_mute")) {
+          db.run("ALTER TABLE sessions RENAME COLUMN filter_kinds TO filter_mute")
+        } else if (!sessionCols.has("filter_mute")) {
+          db.run("ALTER TABLE sessions ADD COLUMN filter_mute TEXT")
+        } else if (sessionCols.has("filter_kinds")) {
+          db.run("UPDATE sessions SET filter_mute = filter_kinds WHERE filter_mute IS NULL AND filter_kinds IS NOT NULL")
+          db.run("ALTER TABLE sessions DROP COLUMN filter_kinds")
         }
       }
     },
@@ -541,23 +583,23 @@ export function createStatements(db: Database) {
   return {
     upsertSession: db.prepare(`
 		INSERT INTO sessions (id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, identity_token, started_at, updated_at, delivery)
-		VALUES ($id, $name, $role, $domains, $pid, $cwd, $project_id, $claude_session_id, $claude_session_name, $identity_token, $now, $now, $delivery)
+		VALUES ($id, $name, $role, $domains, $pid, $cwd, $project_id, $claude_session_id, $claude_session_name, $identity_token, $now, $now, COALESCE($delivery, 'push'))
 		ON CONFLICT(id) DO UPDATE SET
 			name = $name, role = $role, domains = $domains,
 			pid = $pid, cwd = $cwd, project_id = $project_id, claude_session_id = $claude_session_id,
 			claude_session_name = $claude_session_name, identity_token = $identity_token, started_at = $now, updated_at = $now,
-			delivery = $delivery
+			delivery = COALESCE($delivery, delivery, 'push')
 	`),
 
     insertMessage: db.prepare(`
 		INSERT INTO messages (id, type, sender, recipient, kind, content, bead_id, ref, ts,
-			delivery, plugin_kind, room_id)
+			delivery, topic, room_id)
 		VALUES ($id, $type, $sender, $recipient, $kind, $content, $bead_id, $ref, $ts,
-			$delivery, $plugin_kind, $room_id)
+			$delivery, $topic, $room_id)
 	`),
 
     allSessions: db.prepare(
-      "SELECT id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, started_at, updated_at, filter_mode, filter_until, filter_kinds, last_inbox_pull_seq, delivery FROM sessions",
+      "SELECT id, name, role, domains, pid, cwd, project_id, claude_session_id, claude_session_name, started_at, updated_at, filter_mode, filter_until, filter_mute, last_inbox_pull_seq, delivery FROM sessions",
     ),
 
     /** Look up a session's delivery mode by name. Used by the broadcast pipeline
@@ -606,7 +648,7 @@ export function createStatements(db: Database) {
      *  exceeds the session's pull cursor and whose recipient matches. */
     getInboxRows: db.prepare(`
 		SELECT id, rowid, type, sender, recipient, content, bead_id, ref, ts,
-			delivery, plugin_kind, room_id
+			delivery, topic, room_id
 		FROM messages
 		WHERE rowid > $since
 			AND (recipient = $name OR recipient = '*')
@@ -626,19 +668,19 @@ export function createStatements(db: Database) {
 
     /**
      * Apply a session's filter — single update covering persistent mode +
-     * time-bounded mute + per-kind glob list. Replaces the old
+     * time-bounded mute + per-topic glob list. Replaces the old
      * setSessionMode / setSessionSnooze pair.
      *
      * Pass any field as null to clear that dimension: `$until = null` makes the
-     * filter persistent, `$kinds = null` silences everything (when a snooze is
+     * filter persistent, `$mute = null` silences everything (when a snooze is
      * active), `$mode = 'normal'` returns to default behavior.
      */
     setSessionFilter: db.prepare(
-      "UPDATE sessions SET filter_mode = $mode, filter_until = $until, filter_kinds = $kinds, updated_at = $now WHERE id = $id",
+      "UPDATE sessions SET filter_mode = $mode, filter_until = $until, filter_mute = $mute, updated_at = $now WHERE id = $id",
     ),
 
-    /** Read the session's current filter (mode + optional until + optional kinds). */
-    getSessionFilter: db.prepare("SELECT filter_mode, filter_until, filter_kinds FROM sessions WHERE id = $id"),
+    /** Read the session's current filter (mode + optional until + optional muted topics). */
+    getSessionFilter: db.prepare("SELECT filter_mode, filter_until, filter_mute FROM sessions WHERE id = $id"),
 
     /**
      * Count prior `type='assign'` messages with the same sender → recipient →

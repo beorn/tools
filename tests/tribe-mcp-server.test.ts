@@ -156,7 +156,8 @@ describe("withMCPServer — initialize", () => {
     expect(t.mcpServer.serverInfo.name).toBe("tribe")
     expect(t.mcpServer.protocolVersion).toBe("2025-03-26")
     expect(t.mcpServer.toolNames).toContain("tribe.send")
-    expect(t.mcpServer.toolNames).toContain("tribe.broadcast")
+    expect(t.mcpServer.toolNames).toContain("tribe.fetch")
+    expect(t.mcpServer.toolNames).not.toContain("tribe.broadcast")
     await t.scope[Symbol.asyncDispose]()
   })
 })
@@ -172,7 +173,8 @@ describe("withMCPServer — tools/list", () => {
     const tools = (resp.result as { tools: Array<{ name: string; inputSchema: unknown }> }).tools
     const names = tools.map((entry) => entry.name)
     expect(names).toContain("tribe.send")
-    expect(names).toContain("tribe.broadcast")
+    expect(names).toContain("tribe.fetch")
+    expect(names).not.toContain("tribe.broadcast")
     // Every entry must carry an inputSchema object.
     for (const entry of tools) {
       expect(entry.inputSchema).toBeDefined()
@@ -251,14 +253,14 @@ describe("withMCPServer — tools/call", () => {
     })(stack)
 
     const resp = await callJsonRpc(t.dispatcher, "tools/call", {
-      name: "tribe.broadcast",
-      arguments: { message: "hello" },
+      name: "tribe.fetch",
+      arguments: { limit: 1 },
     })
 
     expect(dispatchCalls).toHaveLength(1)
-    expect(dispatchCalls[0]).toEqual({ name: "tribe.broadcast", args: { message: "hello" } })
+    expect(dispatchCalls[0]).toEqual({ name: "tribe.fetch", args: { limit: 1 } })
     const result = resp.result as { content: Array<{ type: string; text: string }> }
-    expect(result.content[0]?.text).toBe("dispatched-tribe.broadcast")
+    expect(result.content[0]?.text).toBe("dispatched-tribe.fetch")
     await t.scope[Symbol.asyncDispose]()
   })
 

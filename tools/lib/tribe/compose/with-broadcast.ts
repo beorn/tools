@@ -64,7 +64,7 @@ function singleEventNotification(ev: PendingBroadcast): string {
     content: ev.content,
     bead_id: ev.bead_id,
     message_id: ev.id,
-    plugin_kind: ev.pluginKind,
+    topic: ev.topic,
   }
   // km-tribe.task-assignment-stale-snapshot: surface fresh bead state +
   // re-issue counter on assign envelopes so the receiver can see current
@@ -90,7 +90,7 @@ function batchedNotification(events: PendingBroadcast[], dropped: number): strin
     bead_id: null,
     message_id: last?.id ?? null,
     events_count: total,
-    plugin_kind: null,
+    topic: null,
   })
 }
 
@@ -103,18 +103,18 @@ function broadcastBatchMs(): number {
 
 // ---------------------------------------------------------------------------
 // Per-session delivery filter — unified focus mode + time-bounded mute +
-// per-kind glob list (km-tribe.filter-collapse). Reads the filter shape that
-// `tribe.filter` writes (sessions.filter_mode/filter_until/filter_kinds).
+// per-topic glob list. Reads the filter shape that
+// `tribe.filter` writes (sessions.filter_mode/filter_until/filter_mute).
 // ---------------------------------------------------------------------------
 
 type SessionFilter = {
   filter_mode: string
   filter_until: number | null
-  filter_kinds: string | null
+  filter_mute: string | null
 }
 
 function shouldDeliver(
-  info: { replyHint: ReplyHint; pluginKind: string | null },
+  info: { replyHint: ReplyHint; topic: string | null },
   filter: SessionFilter | undefined,
 ): boolean {
   if (!filter) return true // No session row yet — default-allow
@@ -126,10 +126,10 @@ function shouldDeliver(
   // mode === 'normal' — apply the time-bounded mute when active
   const now = Date.now()
   if (!filter.filter_until || filter.filter_until <= now) return true
-  const kinds = filter.filter_kinds ? safeJsonArray(filter.filter_kinds) : null
-  if (!kinds || kinds.length === 0) return false // mute covers all kinds
-  if (!info.pluginKind) return true
-  return !kinds.some((g) => globMatch(g, info.pluginKind!))
+  const muted = filter.filter_mute ? safeJsonArray(filter.filter_mute) : null
+  if (!muted || muted.length === 0) return false // mute covers all topics
+  if (!info.topic) return true
+  return !muted.some((g) => globMatch(g, info.topic!))
 }
 
 function safeJsonArray(s: string): string[] | null {
@@ -321,7 +321,7 @@ export function withBroadcast<
         content: cleaned,
         bead_id: info.bead_id,
         replyHint,
-        pluginKind: info.pluginKind,
+        topic: info.topic,
         beadState,
         reissueCount,
       }
@@ -336,7 +336,7 @@ export function withBroadcast<
         if (client.role === "pending") continue
 
         // km-bearly.tribe-dm-delivery-gap: pull-mode recipients drain via
-        // tribe.ping / tribe.inbox. Skip socket fanout — the message row is
+        // tribe.fetch. Skip socket fanout — the message row is
         // already durable in SQLite from the sendMessage tap. `watch` clients
         // (TUI dashboards) always get push regardless of recipient mode so the
         // live view stays current.
@@ -348,11 +348,11 @@ export function withBroadcast<
         }
 
         // km-tribe.filter-collapse: per-session unified filter
-        // (mode + time-bounded mute + per-kind globs). Direct messages bypass
-        // the kinds/until dimensions — only `mode: focus` filters DMs.
+        // (mode + time-bounded mute + per-topic globs). Direct messages bypass
+        // the mute/until dimensions — only `mode: focus` filters DMs.
         if (info.kind !== "direct" && !isWatch) {
           const sessionFilter = stmts.getSessionFilter.get({ $id: client.ctx.sessionId }) as SessionFilter | undefined
-          if (!shouldDeliver({ replyHint, pluginKind: info.pluginKind }, sessionFilter)) continue
+          if (!shouldDeliver({ replyHint, topic: info.topic }, sessionFilter)) continue
         }
 
         // Direct messages bypass coalescing — they're time-sensitive.
@@ -373,7 +373,7 @@ export function withBroadcast<
     const broadcastLogFn = (msg: string, type: string): void => {
       sendMessage(daemonCtx, "*", msg, type, undefined, undefined, "broadcast", {
         delivery: "pull",
-        pluginKind: type,
+        topic: type,
       })
     }
 

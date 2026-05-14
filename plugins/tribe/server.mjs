@@ -417,9 +417,8 @@ function serializeCause(cause, maxDepth = 3) {
       message: cause.message,
       stack: cause.stack
     };
-    if (cause.code) {
+    if (cause.code)
       result.code = cause.code;
-    }
     if (cause.cause !== undefined) {
       result.cause = serializeCause(cause.cause, maxDepth - 1);
     }
@@ -440,9 +439,8 @@ function safeStringify(value) {
         stack: val.stack,
         name: val.name
       };
-      if (val.code) {
+      if (val.code)
         result.code = val.code;
-      }
       if (val.cause !== undefined)
         result.cause = serializeCause(val.cause);
       return result;
@@ -660,19 +658,16 @@ function buildPipeline(elements, parentConfig) {
       }
       if (isValidLogLevel(obj.level))
         config.level = obj.level;
-      if (obj.ns !== undefined) {
+      if (obj.ns !== undefined)
         config.ns = parseNsFilter(obj.ns);
-      }
-      if (obj.format === "console" || obj.format === "json") {
+      if (obj.format === "console" || obj.format === "json")
         config.format = obj.format;
-      }
       if (obj.spans === true)
         spansEnabled = true;
       if (obj.spans === false)
         spansEnabled = false;
-      if (obj.idFormat === "simple" || obj.idFormat === "w3c") {
+      if (obj.idFormat === "simple" || obj.idFormat === "w3c")
         setIdFormat(obj.idFormat);
-      }
       if (typeof obj.sampleRate === "number")
         setSampleRate(obj.sampleRate);
       continue;
@@ -699,9 +694,8 @@ function buildPipeline(elements, parentConfig) {
         e = result;
     }
     for (const output of outputs) {
-      if (e.kind === "log" && LOG_LEVEL_PRIORITY[e.level] < output.levelPriority) {
+      if (e.kind === "log" && LOG_LEVEL_PRIORITY[e.level] < output.levelPriority)
         continue;
-      }
       if (output.nsFilter && !output.nsFilter(e.namespace))
         continue;
       output.write(e);
@@ -764,9 +758,8 @@ function readEnvTrace() {
   const traceEnv = getEnv("TRACE");
   if (!traceEnv)
     return { enabled: false, filter: null };
-  if (traceEnv === "1" || traceEnv === "true") {
+  if (traceEnv === "1" || traceEnv === "true")
     return { enabled: true, filter: null };
-  }
   const prefixes = traceEnv.split(",").map((s) => s.trim());
   return {
     enabled: true,
@@ -1271,9 +1264,8 @@ function createEnvPipeline() {
     disposables.push(() => writer.close());
   }
   const dispatch = (event) => {
-    if (event.kind === "log" && LOG_LEVEL_PRIORITY[event.level] < LOG_LEVEL_PRIORITY[currentLevel()]) {
+    if (event.kind === "log" && LOG_LEVEL_PRIORITY[event.level] < LOG_LEVEL_PRIORITY[currentLevel()])
       return;
-    }
     if (event.kind === "span") {
       const trace = currentTrace();
       if (!trace.enabled)
@@ -1436,9 +1428,9 @@ function connectToDaemon(socketPath, opts) {
         const p = pending.get(msg.id);
         if (p) {
           pending.delete(msg.id);
-          if (msg.error) {
+          if (msg.error)
             p.reject(Object.assign(new Error(msg.error.message), { code: msg.error.code, data: msg.error.data }));
-          } else
+          else
             p.resolve(msg.result);
         }
       } else if (isNotification(msg)) {
@@ -1593,20 +1585,18 @@ async function createReconnectingClient(opts) {
   setupReconnect();
   return new Proxy(current, {
     get(_, prop) {
-      if (prop === "close") {
+      if (prop === "close")
         return () => {
           closed = true;
           reconnectAc?.abort();
           current.close();
           current.socket.unref();
         };
-      }
-      if (prop === "onNotification") {
+      if (prop === "onNotification")
         return (handler) => {
           notificationHandlers.push(handler);
           current.onNotification(handler);
         };
-      }
       return current[prop];
     }
   });
@@ -1687,7 +1677,7 @@ class Scope extends AsyncDisposableStack {
   }
 }
 // tools/lib/tribe/socket.ts
-var TRIBE_PROTOCOL_VERSION = 4;
+var TRIBE_PROTOCOL_VERSION = 5;
 function defaultDaemonScript() {
   return resolve3(dirname3(new URL(import.meta.url).pathname), "../../tribe-daemon.ts");
 }
@@ -1709,11 +1699,11 @@ function createReconnectingClient2(opts) {
 var TOOLS_LIST = [
   {
     name: "tribe.send",
-    description: "Send a message to a specific tribe member",
+    description: 'Send a message to one tribe member, or to everyone with to: "*".',
     inputSchema: {
       type: "object",
       properties: {
-        to: { type: "string", description: "Recipient session name" },
+        to: { type: "string", description: 'Recipient session name, or "*" for broadcast' },
         message: { type: "string", description: "Message content" },
         type: {
           type: "string",
@@ -1728,21 +1718,34 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.broadcast",
-    description: "Broadcast a message to all tribe members",
+    name: "tribe.fetch",
+    description: "Read tribe messages. Default drains this session's pending queue and advances its cursor. ids/with/from/to reads are snapshots. since scans the journal and advances only with advance:true.",
     inputSchema: {
       type: "object",
       properties: {
-        message: { type: "string", description: "Message content" },
-        type: {
-          type: "string",
-          description: "Message type",
-          enum: ["notify", "status"],
-          default: "notify"
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Fetch specific message IDs without advancing the cursor."
         },
-        bead: { type: "string", description: "Associated bead ID (optional)" }
-      },
-      required: ["message"]
+        topics: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional topic globs, e.g. ['github:*', 'git:commit']."
+        },
+        since: {
+          type: "number",
+          description: "Scan rows with rowid > since. Default mode uses the session cursor."
+        },
+        with: { type: "string", description: "Bilateral history with this session name." },
+        from: { type: "string", description: "One-sided history from this sender." },
+        to: { type: "string", description: "One-sided history to this recipient." },
+        limit: { type: "number", description: "Max rows to return (default 50, max 500)." },
+        advance: {
+          type: "boolean",
+          description: "Advance the session cursor after a since/default scan. Default: true only for default drain."
+        }
+      }
     }
   },
   {
@@ -1752,17 +1755,6 @@ var TOOLS_LIST = [
       type: "object",
       properties: {
         all: { type: "boolean", description: "Include dead sessions (default: false)" }
-      }
-    }
-  },
-  {
-    name: "tribe.history",
-    description: "View recent message history",
-    inputSchema: {
-      type: "object",
-      properties: {
-        with: { type: "string", description: "Filter to messages involving this session" },
-        limit: { type: "number", description: "Max messages to return (default: 20)" }
       }
     }
   },
@@ -1787,24 +1779,24 @@ var TOOLS_LIST = [
   },
   {
     name: "tribe.join",
-    description: "Re-announce this session's name, role, and domains (e.g. after compaction/rejoin)",
+    description: "Re-announce this session's name, role, and domains after compaction or rejoin.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Session name" },
         role: {
           type: "string",
-          description: "Session role. 'chief' = coordinator, 'member' = default worker, 'watch' = read-only observer (never chief-eligible).",
+          description: "Session role. 'chief' = coordinator, 'member' = default worker, 'watch' = read-only observer.",
           enum: ["chief", "member", "watch"]
         },
         domains: {
           type: "array",
           items: { type: "string" },
-          description: "Domain expertise areas (e.g. ['silvery', 'flexily'])"
+          description: "Domain expertise areas, e.g. ['silvery', 'flexily']."
         },
         delivery: {
           type: "string",
-          description: "How this session consumes messages. 'push' (default) = daemon fans events out on the MCP notification channel (Claude Code, Claude Agent SDK with a channel reader). 'pull' = events queue in SQLite; drain via tribe.ping or tribe.inbox (MCP-only clients without a notification handler \u2014 codex, gemini, custom MCP). Sender is transport-blind: tribe.send routes by the recipient's registered mode.",
+          description: "How this session consumes messages. 'push' sends channel notifications. 'pull' queues rows for tribe.fetch. Sender is transport-blind.",
           enum: ["push", "pull"]
         }
       },
@@ -1817,10 +1809,7 @@ var TOOLS_LIST = [
     inputSchema: {
       type: "object",
       properties: {
-        reason: {
-          type: "string",
-          description: "Why the reload is needed (logged to events)"
-        }
+        reason: { type: "string", description: "Why the reload is needed (logged to events)" }
       }
     }
   },
@@ -1861,7 +1850,7 @@ var TOOLS_LIST = [
   },
   {
     name: "tribe.claim-chief",
-    description: "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released (or this session disconnects).",
+    description: "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -1869,69 +1858,31 @@ var TOOLS_LIST = [
   },
   {
     name: "tribe.release-chief",
-    description: "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent \u2014 no-op if this session did not hold an explicit claim.",
+    description: "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent.",
     inputSchema: {
       type: "object",
       properties: {}
     }
   },
   {
-    name: "tribe.inbox",
-    description: "Pull pending tribe events that did NOT push to the channel (ambient: commits, joins/leaves, routine github events, low-severity health warnings). Returns events newer than the per-session pull cursor; advances the cursor on call. " + "Empty response is the correct behavior for most tribe channel events you do see \u2014 the tool returns inbox data; you decide whether to act. Do not generate acknowledgement text just because a message arrived.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        since: {
-          type: "number",
-          description: "Pull rows with rowid > since. Default: per-session cursor."
-        },
-        kinds: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit'])."
-        },
-        limit: { type: "number", description: "Max rows to return (default: 50)." }
-      }
-    }
-  },
-  {
-    name: "tribe.ping",
-    description: "Drain pending tribe events for this session \u2014 broadcasts AND direct messages since the per-session cursor. The canonical 'give me my events' call for pull-mode clients (MCP-only sessions that can't receive channel-push notifications). Semantically equivalent to tribe.inbox today; use tribe.ping when polling on a turn boundary, tribe.inbox when filtering by plugin_kind globs. Advances the cursor on call. Empty response = nothing pending.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        since: {
-          type: "number",
-          description: "Pull rows with rowid > since. Default: per-session cursor."
-        },
-        kinds: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit'])."
-        },
-        limit: { type: "number", description: "Max rows to return (default: 50)." }
-      }
-    }
-  },
-  {
     name: "tribe.filter",
-    description: "Per-session filter for incoming events. Combines persistent mode + time-bounded mute + per-kind glob matching into a single tool. " + "`mode` sets the persistent focus level (`focus` = only direct DMs reach the channel, `normal` = kind-based default, `ambient` = everything). " + "`kinds` matches `plugin_kind` globs (e.g. `['github:*', 'git:commit']`) to silence selectively. " + "`until` is an optional unix-ms timestamp expiring the kind filter; absent = persistent. " + "Empty args clears the filter (mode resets to `normal`, kinds + until cleared). Direct messages always bypass kinds/until \u2014 only `mode: focus` filters DMs.",
+    description: "Per-session filter for incoming channel events. mode controls focus level; mute stores topic globs to silence until the optional timestamp. Empty args clears the filter.",
     inputSchema: {
       type: "object",
       properties: {
         mode: {
           type: "string",
           enum: ["focus", "normal", "ambient"],
-          description: "Persistent filter mode (optional). Defaults to 'normal' when args are empty."
+          description: "Persistent filter mode. Defaults to 'normal' when args are empty."
         },
-        kinds: {
+        mute: {
           type: "array",
           items: { type: "string" },
-          description: "Optional plugin_kind globs to silence (e.g. ['github:*'])."
+          description: "Optional topic globs to silence, e.g. ['github:*']."
         },
         until: {
           type: "number",
-          description: "Optional unix-ms timestamp at which the kind/mute filter expires. Absent = persistent."
+          description: "Optional unix-ms timestamp at which mute expires. Absent = persistent."
         }
       },
       required: []
@@ -2433,7 +2384,7 @@ try {
       log5.info?.(`Reconnected to daemon`);
     }
   });
-  var joinInstruction = `If you receive a stdio-adapter auto-identify message, just call tribe.join with a short name for your focus area. Omit the role parameter \u2014 the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.history afterward \u2014 just join silently and continue.`;
+  var joinInstruction = `If you receive a stdio-adapter auto-identify message, just call tribe.join with a short name for your focus area. Omit the role parameter \u2014 the daemon auto-assigns chief to the first session and member to the rest. No need to call tribe.members or tribe.fetch afterward \u2014 just join silently and continue.`;
   var chiefInstructions = `Messages from other Claude Code sessions arrive as <channel source="tribe" from="..." type="..." bead="...">.
 
 You are the chief of a tribe \u2014 a coordinator for multiple Claude Code sessions working on the same project.
@@ -2441,15 +2392,15 @@ You are the chief of a tribe \u2014 a coordinator for multiple Claude Code sessi
 ${joinInstruction}
 
 Turn-start inbox check:
-- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
-- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- At the start of each user turn, call tribe.fetch({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.fetch({ with: <your session name>, limit: 20 }).
 - Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
 - Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
 Coordination protocol:
 - Use tribe.members() to see who's online and their domains
 - Use tribe.send(to, message, type) to assign work, answer queries, or approve requests
-- Use tribe.broadcast(message) to announce changes that affect everyone
+- Use tribe.send(to="*", message, type) to announce changes that affect everyone
 - Use tribe.health() to check for silent members or conflicts
 - When CI alerts arrive, coordinate the fix \u2014 assign the responsible session to investigate
 
@@ -2467,8 +2418,8 @@ You are a tribe member \u2014 a worker session coordinated by the chief.
 ${joinInstruction}
 
 Turn-start inbox check:
-- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
-- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- At the start of each user turn, call tribe.fetch({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.fetch({ with: <your session name>, limit: 20 }).
 - Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
 - Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
@@ -2511,7 +2462,7 @@ Tribe messages:
     if (!nudgeSent && isAutoName(myName)) {
       nudgeSent = true;
       timers.setTimeout(() => {
-        sendChannel(`Auto-identify: call tribe.join(name="${myName}") with a short name for your focus area. Omit the role parameter \u2014 the daemon auto-assigns it. Do not call tribe.members or tribe.history \u2014 just join silently and continue.`, { from: "stdio-adapter", type: "system" });
+        sendChannel(`Auto-identify: call tribe.join(name="${myName}") with a short name for your focus area. Omit the role parameter \u2014 the daemon auto-assigns it. Do not call tribe.members or tribe.fetch \u2014 just join silently and continue.`, { from: "stdio-adapter", type: "system" });
       }, 500);
     }
     return { tools: TOOLS_LIST };

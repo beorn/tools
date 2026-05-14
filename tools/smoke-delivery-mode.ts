@@ -9,7 +9,7 @@
  *     reads this to skip socket fanout for pull-mode recipients)
  *   - handleJoin updates delivery in place
  *   - default delivery is 'push' (back-compat invariant)
- *   - tribe.ping is registered and dispatches like tribe.inbox
+ *   - tribe.fetch is registered and drains an empty pull-mode queue
  *
  * Runs under bun (real bun:sqlite). Vitest can't host these checks because
  * the repo aliases bun:sqlite to a no-op shim (see plugins/llm/tests/stubs/
@@ -134,15 +134,15 @@ const eq = (name: string, got: unknown, want: unknown) => {
   eq("rejoin persists pull", row.delivery, "pull")
 }
 
-// 7. tribe.ping is registered and dispatches like tribe.inbox
+// 7. tribe.fetch is registered and drains an empty pull-mode queue
 {
-  const { ctx } = makeCtx("pull", "codex-ping")
-  const result = handleToolCall(ctx, TRIBE_COORD_METHODS.ping, {}, HANDLER_OPTS) as {
+  const { ctx } = makeCtx("pull", "codex-fetch")
+  const result = handleToolCall(ctx, TRIBE_COORD_METHODS.fetch, {}, HANDLER_OPTS) as {
     content: Array<{ text: string }>
   }
   const parsed = JSON.parse(result.content[0]!.text) as { events: unknown[] }
-  eq("ping returns events array", Array.isArray(parsed.events), true)
-  eq("ping fresh session = 0 events", parsed.events.length, 0)
+  eq("fetch returns events array", Array.isArray(parsed.events), true)
+  eq("fetch fresh session = 0 events", parsed.events.length, 0)
 }
 
 const failed = assertions.filter((a) => !a.ok)

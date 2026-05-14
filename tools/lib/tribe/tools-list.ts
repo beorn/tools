@@ -1,22 +1,19 @@
 /**
  * Tribe MCP tools list — tool definitions for ListToolsRequest.
  *
- * Names live in the canonical `tribe.*` namespace. The legacy `tribe_*`
- * forms were removed in @bearly/tribe 0.10.0.
+ * Public coordination surface:
+ *   tribe.send, tribe.fetch, tribe.members, tribe.filter, tribe.join.
+ * Admin/diagnostic verbs remain separate.
  */
-
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
 
 export const TOOLS_LIST = [
   {
     name: "tribe.send",
-    description: "Send a message to a specific tribe member",
+    description: 'Send a message to one tribe member, or to everyone with to: "*".',
     inputSchema: {
       type: "object" as const,
       properties: {
-        to: { type: "string", description: "Recipient session name" },
+        to: { type: "string", description: 'Recipient session name, or "*" for broadcast' },
         message: { type: "string", description: "Message content" },
         type: {
           type: "string",
@@ -31,21 +28,35 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.broadcast",
-    description: "Broadcast a message to all tribe members",
+    name: "tribe.fetch",
+    description:
+      "Read tribe messages. Default drains this session's pending queue and advances its cursor. ids/with/from/to reads are snapshots. since scans the journal and advances only with advance:true.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        message: { type: "string", description: "Message content" },
-        type: {
-          type: "string",
-          description: "Message type",
-          enum: ["notify", "status"],
-          default: "notify",
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Fetch specific message IDs without advancing the cursor.",
         },
-        bead: { type: "string", description: "Associated bead ID (optional)" },
+        topics: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional topic globs, e.g. ['github:*', 'git:commit'].",
+        },
+        since: {
+          type: "number",
+          description: "Scan rows with rowid > since. Default mode uses the session cursor.",
+        },
+        with: { type: "string", description: "Bilateral history with this session name." },
+        from: { type: "string", description: "One-sided history from this sender." },
+        to: { type: "string", description: "One-sided history to this recipient." },
+        limit: { type: "number", description: "Max rows to return (default 50, max 500)." },
+        advance: {
+          type: "boolean",
+          description: "Advance the session cursor after a since/default scan. Default: true only for default drain.",
+        },
       },
-      required: ["message"],
     },
   },
   {
@@ -55,17 +66,6 @@ export const TOOLS_LIST = [
       type: "object" as const,
       properties: {
         all: { type: "boolean", description: "Include dead sessions (default: false)" },
-      },
-    },
-  },
-  {
-    name: "tribe.history",
-    description: "View recent message history",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        with: { type: "string", description: "Filter to messages involving this session" },
-        limit: { type: "number", description: "Max messages to return (default: 20)" },
       },
     },
   },
@@ -90,7 +90,7 @@ export const TOOLS_LIST = [
   },
   {
     name: "tribe.join",
-    description: "Re-announce this session's name, role, and domains (e.g. after compaction/rejoin)",
+    description: "Re-announce this session's name, role, and domains after compaction or rejoin.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -98,18 +98,18 @@ export const TOOLS_LIST = [
         role: {
           type: "string",
           description:
-            "Session role. 'chief' = coordinator, 'member' = default worker, 'watch' = read-only observer (never chief-eligible).",
+            "Session role. 'chief' = coordinator, 'member' = default worker, 'watch' = read-only observer.",
           enum: ["chief", "member", "watch"],
         },
         domains: {
           type: "array",
           items: { type: "string" },
-          description: "Domain expertise areas (e.g. ['silvery', 'flexily'])",
+          description: "Domain expertise areas, e.g. ['silvery', 'flexily'].",
         },
         delivery: {
           type: "string",
           description:
-            "How this session consumes messages. 'push' (default) = daemon fans events out on the MCP notification channel (Claude Code, Claude Agent SDK with a channel reader). 'pull' = events queue in SQLite; drain via tribe.ping or tribe.inbox (MCP-only clients without a notification handler — codex, gemini, custom MCP). Sender is transport-blind: tribe.send routes by the recipient's registered mode.",
+            "How this session consumes messages. 'push' sends channel notifications. 'pull' queues rows for tribe.fetch. Sender is transport-blind.",
           enum: ["push", "pull"],
         },
       },
@@ -123,10 +123,7 @@ export const TOOLS_LIST = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        reason: {
-          type: "string",
-          description: "Why the reload is needed (logged to events)",
-        },
+        reason: { type: "string", description: "Why the reload is needed (logged to events)" },
       },
     },
   },
@@ -170,7 +167,7 @@ export const TOOLS_LIST = [
   {
     name: "tribe.claim-chief",
     description:
-      "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released (or this session disconnects).",
+      "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released.",
     inputSchema: {
       type: "object" as const,
       properties: {},
@@ -179,77 +176,32 @@ export const TOOLS_LIST = [
   {
     name: "tribe.release-chief",
     description:
-      "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent — no-op if this session did not hold an explicit claim.",
+      "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent.",
     inputSchema: {
       type: "object" as const,
       properties: {},
     },
   },
   {
-    name: "tribe.inbox",
-    description:
-      "Pull pending tribe events that did NOT push to the channel (ambient: commits, joins/leaves, routine github events, low-severity health warnings). Returns events newer than the per-session pull cursor; advances the cursor on call. " +
-      "Empty response is the correct behavior for most tribe channel events you do see — the tool returns inbox data; you decide whether to act. Do not generate acknowledgement text just because a message arrived.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        since: {
-          type: "number",
-          description: "Pull rows with rowid > since. Default: per-session cursor.",
-        },
-        kinds: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit']).",
-        },
-        limit: { type: "number", description: "Max rows to return (default: 50)." },
-      },
-    },
-  },
-  {
-    name: "tribe.ping",
-    description:
-      "Drain pending tribe events for this session — broadcasts AND direct messages since the per-session cursor. The canonical 'give me my events' call for pull-mode clients (MCP-only sessions that can't receive channel-push notifications). Semantically equivalent to tribe.inbox today; use tribe.ping when polling on a turn boundary, tribe.inbox when filtering by plugin_kind globs. Advances the cursor on call. Empty response = nothing pending.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        since: {
-          type: "number",
-          description: "Pull rows with rowid > since. Default: per-session cursor.",
-        },
-        kinds: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit']).",
-        },
-        limit: { type: "number", description: "Max rows to return (default: 50)." },
-      },
-    },
-  },
-  {
     name: "tribe.filter",
     description:
-      "Per-session filter for incoming events. Combines persistent mode + time-bounded mute + per-kind glob matching into a single tool. " +
-      "`mode` sets the persistent focus level (`focus` = only direct DMs reach the channel, `normal` = kind-based default, `ambient` = everything). " +
-      "`kinds` matches `plugin_kind` globs (e.g. `['github:*', 'git:commit']`) to silence selectively. " +
-      "`until` is an optional unix-ms timestamp expiring the kind filter; absent = persistent. " +
-      "Empty args clears the filter (mode resets to `normal`, kinds + until cleared). Direct messages always bypass kinds/until — only `mode: focus` filters DMs.",
+      "Per-session filter for incoming channel events. mode controls focus level; mute stores topic globs to silence until the optional timestamp. Empty args clears the filter.",
     inputSchema: {
       type: "object" as const,
       properties: {
         mode: {
           type: "string",
           enum: ["focus", "normal", "ambient"],
-          description: "Persistent filter mode (optional). Defaults to 'normal' when args are empty.",
+          description: "Persistent filter mode. Defaults to 'normal' when args are empty.",
         },
-        kinds: {
+        mute: {
           type: "array",
           items: { type: "string" },
-          description: "Optional plugin_kind globs to silence (e.g. ['github:*']).",
+          description: "Optional topic globs to silence, e.g. ['github:*'].",
         },
         until: {
           type: "number",
-          description: "Optional unix-ms timestamp at which the kind/mute filter expires. Absent = persistent.",
+          description: "Optional unix-ms timestamp at which mute expires. Absent = persistent.",
         },
       },
       required: [],

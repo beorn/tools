@@ -41,7 +41,7 @@ import {
 } from "../socket.ts"
 import { detectRole, resolveProjectId, type TribeRole } from "../config.ts"
 import { createTribeContext, type TribeContext } from "../context.ts"
-import { handleToolCall, TRIBE_COORD_METHODS } from "../handlers.ts"
+import { handleToolCall, isRemovedTribeMethod, removedTribeMethodMessage, TRIBE_COORD_METHODS } from "../handlers.ts"
 import { logEvent, sendMessage } from "../messaging.ts"
 import { registerSession, NameConflictError } from "../session.ts"
 import { adoptIdentity, resolveName, type PriorSession } from "../resolve-name.ts"
@@ -132,7 +132,7 @@ export function withDispatcher<
     function logActivity(type: string, content: string): void {
       sendMessage(daemonCtx, "*", content, type, undefined, undefined, "broadcast", {
         delivery: "pull",
-        pluginKind: `daemon:${type}`,
+        topic: `daemon:${type}`,
       })
     }
 
@@ -407,9 +407,8 @@ export function withDispatcher<
           }
 
           case TRIBE_COORD_METHODS.send:
-          case TRIBE_COORD_METHODS.broadcast:
+          case TRIBE_COORD_METHODS.fetch:
           case TRIBE_COORD_METHODS.members:
-          case TRIBE_COORD_METHODS.history:
           case TRIBE_COORD_METHODS.rename:
           case TRIBE_COORD_METHODS.join:
           case TRIBE_COORD_METHODS.health:
@@ -419,8 +418,6 @@ export function withDispatcher<
           case TRIBE_COORD_METHODS.claimChief:
           case TRIBE_COORD_METHODS.releaseChief:
           case TRIBE_COORD_METHODS.debug:
-          case TRIBE_COORD_METHODS.inbox:
-          case TRIBE_COORD_METHODS.ping:
           case TRIBE_COORD_METHODS.filter: {
             const client = clients.get(connId)
             const ctx = client?.ctx ?? daemonCtx
@@ -574,6 +571,10 @@ export function withDispatcher<
           }
 
           default: {
+            if (isRemovedTribeMethod(method)) {
+              return makeError(id, -32601, removedTribeMethodMessage(method))
+            }
+
             // Late-bound method handlers (e.g. MCP-spec methods registered
             // by `withMCPServer()`). Checked first so surfaces composed after
             // the dispatcher can answer methods over the same Unix socket.

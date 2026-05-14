@@ -53,7 +53,7 @@ export const gitPlugin: TribePluginApi = {
             // for the tribe but no agent needs to react. Land in inbox only.
             api.broadcast(`Committed: ${line}`, "status", undefined, {
               delivery: "pull",
-              pluginKind: "git:commit",
+              topic: "git:commit",
             })
           }
           // Hot-reload on tribe code changes is handled by the daemon's own

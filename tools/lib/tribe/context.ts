@@ -35,10 +35,10 @@ export type MessageInsertedInfo = {
   content: string
   bead_id: string | null
   /** km-tribe.event-classification routing — `push` lands on the MCP channel,
-   *  `pull` is inbox-only (read via `tribe.inbox`). */
+   *  `pull` is queued for `tribe.fetch`. */
   delivery: Delivery
   /** Originating plugin event id (e.g. `git:commit`); null for human messages. */
-  pluginKind: string | null
+  topic: string | null
   /** Matrix-shape room scope; null until populated by the room-aware path. */
   roomId: string | null
 }

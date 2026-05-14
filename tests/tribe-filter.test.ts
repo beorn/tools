@@ -1,14 +1,14 @@
 /**
  * tribe.filter — unit coverage for the unified filter tool (km-tribe.filter-collapse).
  *
- * tribe.filter({mode?, kinds?, until?}) collapses the previous tribe.mode +
+ * tribe.filter({mode?, mute?, until?}) collapses the previous tribe.mode +
  * tribe.snooze + tribe.dismiss trio into a single tool. Tests cover:
  *
  *   - Persistent mode (focus / normal / ambient) writes filter_mode
- *   - Time-bounded mute (kinds + until) writes filter_kinds + filter_until
- *   - Empty args clear the filter (mode → 'normal', kinds + until → null)
- *   - Validation: rejects invalid mode, negative until, non-string kinds
- *   - Direct DM bypass — only `mode: focus` filters DMs (kinds/until apply
+ *   - Time-bounded mute (mute + until) writes filter_mute + filter_until
+ *   - Empty args clear the filter (mode → 'normal', mute + until → null)
+ *   - Validation: rejects invalid mode, negative until, non-string mute
+ *   - Direct DM bypass — only `mode: focus` filters DMs (mute/until apply
  *     to broadcasts only); coverage at the shouldDeliver call site lives in
  *     tribe-classification-delivery.test.ts (daemon spawn).
  */
@@ -66,10 +66,10 @@ function ctxFor(db: ReturnType<typeof openDatabase>, stmts: ReturnType<typeof cr
 }
 
 function readFilter(db: ReturnType<typeof openDatabase>, sessionId: string) {
-  return db.prepare("SELECT filter_mode, filter_until, filter_kinds FROM sessions WHERE id = ?").get(sessionId) as {
+  return db.prepare("SELECT filter_mode, filter_until, filter_mute FROM sessions WHERE id = ?").get(sessionId) as {
     filter_mode: string
     filter_until: number | null
-    filter_kinds: string | null
+    filter_mute: string | null
   }
 }
 
@@ -89,7 +89,7 @@ describe("tribe.filter — persistent mode (focus / normal / ambient)", () => {
     const row = readFilter(f.db, ctx.sessionId)
     expect(row.filter_mode).toBe("focus")
     expect(row.filter_until).toBeNull()
-    expect(row.filter_kinds).toBeNull()
+    expect(row.filter_mute).toBeNull()
   })
 
   it("sets filter_mode = 'ambient' (escape hatch)", async () => {
@@ -110,32 +110,32 @@ describe("tribe.filter — persistent mode (focus / normal / ambient)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2. Time-bounded mute (kinds + until)
+// 2. Time-bounded mute (mute + until)
 // ---------------------------------------------------------------------------
 
-describe("tribe.filter — time-bounded mute (kinds + until)", () => {
+describe("tribe.filter — time-bounded mute (mute + until)", () => {
   let f: ReturnType<typeof dbFixture>
   beforeEach(() => {
     f = dbFixture()
   })
 
-  it("sets filter_until + filter_kinds for kind-scoped mute", async () => {
+  it("sets filter_until + filter_mute for topic-scoped mute", async () => {
     const ctx = ctxFor(f.db, f.stmts, "alice")
     const future = Date.now() + 600_000
-    await handleToolCall(ctx, "tribe.filter", { kinds: ["github:*"], until: future }, makeOpts())
+    await handleToolCall(ctx, "tribe.filter", { mute: ["github:*"], until: future }, makeOpts())
     const row = readFilter(f.db, ctx.sessionId)
     expect(row.filter_until).toBe(future)
-    expect(JSON.parse(row.filter_kinds!)).toEqual(["github:*"])
+    expect(JSON.parse(row.filter_mute!)).toEqual(["github:*"])
     // Mode defaults to 'normal' when not specified.
     expect(row.filter_mode).toBe("normal")
   })
 
-  it("kinds without until = persistent kind silence", async () => {
+  it("mute without until = persistent kind silence", async () => {
     const ctx = ctxFor(f.db, f.stmts, "alice")
-    await handleToolCall(ctx, "tribe.filter", { kinds: ["bead:status", "github:*"] }, makeOpts())
+    await handleToolCall(ctx, "tribe.filter", { mute: ["bead:status", "github:*"] }, makeOpts())
     const row = readFilter(f.db, ctx.sessionId)
     expect(row.filter_until).toBeNull()
-    expect(JSON.parse(row.filter_kinds!)).toEqual(["bead:status", "github:*"])
+    expect(JSON.parse(row.filter_mute!)).toEqual(["bead:status", "github:*"])
   })
 
   it("rejects negative until", async () => {
@@ -147,13 +147,13 @@ describe("tribe.filter — time-bounded mute (kinds + until)", () => {
     expect(parsed.error).toContain("until")
   })
 
-  it("rejects non-string entries in kinds", async () => {
+  it("rejects non-string entries in mute", async () => {
     const ctx = ctxFor(f.db, f.stmts, "alice")
-    const r = (await handleToolCall(ctx, "tribe.filter", { kinds: ["github:*", 7] }, makeOpts())) as {
+    const r = (await handleToolCall(ctx, "tribe.filter", { mute: ["github:*", 7] }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
     const parsed = JSON.parse(r.content[0]!.text) as { error?: string }
-    expect(parsed.error).toContain("kinds")
+    expect(parsed.error).toContain("mute")
   })
 })
 
@@ -162,36 +162,36 @@ describe("tribe.filter — time-bounded mute (kinds + until)", () => {
 // ---------------------------------------------------------------------------
 
 describe("tribe.filter — empty args clear the filter", () => {
-  it("clears mode to 'normal' and nullifies kinds + until", async () => {
+  it("clears mode to 'normal' and nullifies mute + until", async () => {
     const f = dbFixture()
     const ctx = ctxFor(f.db, f.stmts, "alice")
     // First, set a non-trivial filter.
     await handleToolCall(
       ctx,
       "tribe.filter",
-      { mode: "focus", kinds: ["bead:status"], until: Date.now() + 60_000 },
+      { mode: "focus", mute: ["bead:status"], until: Date.now() + 60_000 },
       makeOpts(),
     )
     const set = readFilter(f.db, ctx.sessionId)
     expect(set.filter_mode).toBe("focus")
-    expect(set.filter_kinds).not.toBeNull()
+    expect(set.filter_mute).not.toBeNull()
     expect(set.filter_until).not.toBeNull()
 
     // Now clear with empty args.
     await handleToolCall(ctx, "tribe.filter", {}, makeOpts())
     const cleared = readFilter(f.db, ctx.sessionId)
     expect(cleared.filter_mode).toBe("normal")
-    expect(cleared.filter_kinds).toBeNull()
+    expect(cleared.filter_mute).toBeNull()
     expect(cleared.filter_until).toBeNull()
     f.cleanup()
   })
 })
 
 // ---------------------------------------------------------------------------
-// 4. Combined filter — mode + kinds + until in one call
+// 4. Combined filter — mode + mute + until in one call
 // ---------------------------------------------------------------------------
 
-describe("tribe.filter — combined mode + kinds + until in one call", () => {
+describe("tribe.filter — combined mode + mute + until in one call", () => {
   it("persists all three dimensions atomically", async () => {
     const f = dbFixture()
     const ctx = ctxFor(f.db, f.stmts, "alice")
@@ -199,13 +199,13 @@ describe("tribe.filter — combined mode + kinds + until in one call", () => {
     await handleToolCall(
       ctx,
       "tribe.filter",
-      { mode: "focus", kinds: ["github:*", "bead:status"], until: future },
+      { mode: "focus", mute: ["github:*", "bead:status"], until: future },
       makeOpts(),
     )
     const row = readFilter(f.db, ctx.sessionId)
     expect(row.filter_mode).toBe("focus")
     expect(row.filter_until).toBe(future)
-    expect(JSON.parse(row.filter_kinds!)).toEqual(["github:*", "bead:status"])
+    expect(JSON.parse(row.filter_mute!)).toEqual(["github:*", "bead:status"])
     f.cleanup()
   })
 })

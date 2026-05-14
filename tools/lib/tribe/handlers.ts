@@ -96,9 +96,8 @@ export function readReconcilerSnapshot(): ReconcilerSection | null {
 
 export const TRIBE_COORD_METHODS = {
   send: "tribe.send",
-  broadcast: "tribe.broadcast",
+  fetch: "tribe.fetch",
   members: "tribe.members",
-  history: "tribe.history",
   rename: "tribe.rename",
   health: "tribe.health",
   join: "tribe.join",
@@ -108,12 +107,21 @@ export const TRIBE_COORD_METHODS = {
   claimChief: "tribe.claim-chief",
   releaseChief: "tribe.release-chief",
   debug: "tribe.debug",
-  inbox: "tribe.inbox",
   filter: "tribe.filter",
-  ping: "tribe.ping",
 } as const
 
 export type TribeCoordMethod = (typeof TRIBE_COORD_METHODS)[keyof typeof TRIBE_COORD_METHODS]
+
+const REMOVED_TRIBE_METHODS = new Set(["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read"])
+const REMOVED_TRIBE_METHOD_HINT = "use tribe.send/fetch/filter — see hub/bearly/design/tribe-message-bus.md"
+
+export function isRemovedTribeMethod(name: string): boolean {
+  return REMOVED_TRIBE_METHODS.has(name)
+}
+
+export function removedTribeMethodMessage(name: string): string {
+  return `${name} removed; ${REMOVED_TRIBE_METHOD_HINT}`
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -170,12 +178,10 @@ export function handleToolCall(
   switch (name) {
     case TRIBE_COORD_METHODS.send:
       return handleSend(ctx, a, opts)
-    case TRIBE_COORD_METHODS.broadcast:
-      return handleBroadcast(ctx, a)
+    case TRIBE_COORD_METHODS.fetch:
+      return handleFetch(ctx, a)
     case TRIBE_COORD_METHODS.members:
       return handleSessions(ctx, a, opts)
-    case TRIBE_COORD_METHODS.history:
-      return handleHistory(ctx, a)
     case TRIBE_COORD_METHODS.rename:
       return handleRename(ctx, a, opts)
     case TRIBE_COORD_METHODS.join:
@@ -194,29 +200,14 @@ export function handleToolCall(
       return handleReleaseChief(ctx, opts)
     case TRIBE_COORD_METHODS.debug:
       return handleDebug(ctx, a, opts)
-    case TRIBE_COORD_METHODS.inbox:
-      return handleInbox(ctx, a)
-    case TRIBE_COORD_METHODS.ping:
-      return handlePing(ctx, a)
     case TRIBE_COORD_METHODS.filter:
       return handleFilter(ctx, a)
     default:
+      if (REMOVED_TRIBE_METHODS.has(name)) {
+        throw new Error(removedTribeMethodMessage(name))
+      }
       throw new Error(`Unknown tool: ${name}`)
   }
-}
-
-/**
- * tribe.ping — drain pending events for this session (broadcasts + DMs).
- *
- * Semantically equivalent to tribe.inbox today, but documented as the
- * canonical "give me my events" call for pull-mode clients. Pull-mode
- * sessions (MCP-only clients like codex) call this to receive messages
- * the daemon couldn't push to a notification channel.
- *
- * See km-bearly.tribe-dm-delivery-gap-for-mcp-only-clients.
- */
-function handlePing(ctx: TribeContext, a: ToolArgs): ToolResult {
-  return handleInbox(ctx, a)
 }
 
 // ---------------------------------------------------------------------------
@@ -289,13 +280,6 @@ function routeChiefFallback(
   return { recipient: "*", content: `[no-chief] ${content}`, routedFromChief: true }
 }
 
-function handleBroadcast(ctx: TribeContext, a: ToolArgs): ToolResult {
-  const sanitized = sanitizeMessage(a.message as string)
-  const result = sendMessage(ctx, "*", sanitized, (a.type as string) ?? "notify", a.bead as string | undefined)
-  logEvent(ctx, "message.broadcast", a.bead as string | undefined, { message_id: result.id })
-  return { content: [{ type: "text", text: JSON.stringify({ sent: true, id: result.id }) }] }
-}
-
 function handleSessions(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResult {
   // Membership is sourced from the `room_members` table (Matrix-shape, see
   // km-tribe.matrix-shape). Today every project has exactly one default room
@@ -361,34 +345,6 @@ function handleSessions(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): Tool
     }
   })
   return { content: [{ type: "text", text: JSON.stringify({ sessions }, null, 2) }] }
-}
-
-function handleHistory(ctx: TribeContext, a: ToolArgs): ToolResult {
-  const who = (a.with as string) ?? ctx.getName()
-  const limit = (a.limit as number) ?? 20
-  const rows = ctx.stmts.messageHistory.all({ $name: who, $limit: limit }) as Array<{
-    id: string
-    type: string
-    sender: string
-    recipient: string
-    content: string
-    bead_id: string
-    ref: string
-    ts: number
-    read_at: number
-  }>
-  const messages = rows.map((r) => ({
-    id: r.id,
-    type: r.type,
-    from: r.sender,
-    to: r.recipient,
-    content: r.content,
-    bead: r.bead_id,
-    ref: r.ref,
-    ts: new Date(r.ts).toISOString(),
-    read: !!r.read_at,
-  }))
-  return { content: [{ type: "text", text: JSON.stringify(messages, null, 2) }] }
 }
 
 function handleRename(
@@ -527,8 +483,8 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
 
   // km-bearly.tribe-dm-delivery-gap: declare delivery mode. `push` (default)
   // means the daemon fans events out on the MCP channel; `pull` queues them
-  // and the agent drains via tribe.ping / tribe.inbox. MCP-only clients (codex,
-  // gemini, etc.) without a notification reader should join with `pull`.
+  // and the agent drains via tribe.fetch. MCP-only clients (codex, gemini,
+  // etc.) without a notification reader should join with `pull`.
   const deliveryRaw = a.delivery
   if (deliveryRaw === "push" || deliveryRaw === "pull") {
     ctx.stmts.setSessionDelivery.run({
@@ -779,7 +735,7 @@ function handleDebug(_ctx: TribeContext, _a: ToolArgs, opts: HandlerOpts): ToolR
 // km-tribe.event-classification handlers
 // ---------------------------------------------------------------------------
 
-type InboxRow = {
+type FetchRow = {
   id: string
   rowid: number
   type: string
@@ -790,29 +746,96 @@ type InboxRow = {
   ref: string | null
   ts: number
   delivery: string
-  plugin_kind: string | null
+  topic: string | null
   room_id: string | null
 }
 
-function handleInbox(ctx: TribeContext, a: ToolArgs): ToolResult {
+function handleFetch(ctx: TribeContext, a: ToolArgs): ToolResult {
   const limit = typeof a.limit === "number" && a.limit > 0 && a.limit <= 500 ? a.limit : 50
+  const topics = normalizeStringArray(a.topics)
+  if (a.topics !== undefined && topics === null) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "topics must be an array of strings." }) }] }
+  }
+
   const cursor = ctx.stmts.getInboxCursor.get({ $id: ctx.sessionId }) as { last_inbox_pull_seq: number } | null
-  const sinceArg = typeof a.since === "number" ? a.since : null
-  const since = sinceArg !== null ? sinceArg : (cursor?.last_inbox_pull_seq ?? 0)
+  const currentName = ctx.getName()
+  let rows: FetchRow[]
+  let shouldAdvance = false
+  let cursorBase = cursor?.last_inbox_pull_seq ?? 0
 
-  const rows = ctx.stmts.getInboxRows.all({
-    $since: since,
-    $name: ctx.getName(),
-    $limit: limit,
-  }) as InboxRow[]
+  const ids = normalizeStringArray(a.ids)
+  if (a.ids !== undefined && ids === null) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "ids must be an array of strings." }) }] }
+  }
 
-  // Optional plugin_kind glob filter — applied in JS to keep SQL simple.
-  const kindGlobs = Array.isArray(a.kinds) ? (a.kinds as string[]).filter((s) => typeof s === "string") : null
-  const filtered = kindGlobs && kindGlobs.length > 0 ? rows.filter((r) => matchesGlob(kindGlobs, r.plugin_kind)) : rows
+  if (ids && ids.length > 0) {
+    const placeholders = ids.map(() => "?").join(", ")
+    rows = ctx.db
+      .prepare(`
+        SELECT id, rowid, type, sender, recipient, content, bead_id, ref, ts, delivery, topic, room_id
+        FROM messages
+        WHERE id IN (${placeholders})
+          AND kind != 'event'
+          AND (sender = ? OR recipient = ? OR recipient = '*')
+        ORDER BY rowid ASC
+        LIMIT ?
+      `)
+      .all(...ids, currentName, currentName, limit) as FetchRow[]
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    rows = ids.map((id) => byId.get(id)).filter((r): r is FetchRow => !!r)
+  } else if (typeof a.with === "string" && a.with.length > 0) {
+    rows = ctx.db
+      .prepare(`
+        SELECT id, rowid, type, sender, recipient, content, bead_id, ref, ts, delivery, topic, room_id
+        FROM messages
+        WHERE kind != 'event'
+          AND (
+            (sender = $self AND recipient = $peer)
+            OR (sender = $peer AND recipient = $self)
+          )
+        ORDER BY rowid ASC
+        LIMIT $limit
+      `)
+      .all({ $self: currentName, $peer: a.with, $limit: limit }) as FetchRow[]
+  } else if (typeof a.from === "string" && a.from.length > 0) {
+    rows = ctx.db
+      .prepare(`
+        SELECT id, rowid, type, sender, recipient, content, bead_id, ref, ts, delivery, topic, room_id
+        FROM messages
+        WHERE kind != 'event'
+          AND sender = $from
+          AND (sender = $self OR recipient = $self OR recipient = '*')
+        ORDER BY rowid ASC
+        LIMIT $limit
+      `)
+      .all({ $from: a.from, $self: currentName, $limit: limit }) as FetchRow[]
+  } else if (typeof a.to === "string" && a.to.length > 0) {
+    rows = ctx.db
+      .prepare(`
+        SELECT id, rowid, type, sender, recipient, content, bead_id, ref, ts, delivery, topic, room_id
+        FROM messages
+        WHERE kind != 'event'
+          AND recipient = $to
+          AND (sender = $self OR recipient = $self OR recipient = '*')
+        ORDER BY rowid ASC
+        LIMIT $limit
+      `)
+      .all({ $to: a.to, $self: currentName, $limit: limit }) as FetchRow[]
+  } else {
+    const hasSince = typeof a.since === "number"
+    const since = hasSince ? (a.since as number) : cursorBase
+    cursorBase = since
+    rows = ctx.stmts.getInboxRows.all({
+      $since: since,
+      $name: currentName,
+      $limit: limit,
+    }) as FetchRow[]
+    shouldAdvance = hasSince ? a.advance === true : a.advance !== false
+  }
 
-  // Advance the cursor only when not using `since` arg (since=arg means caller
-  // controls iteration explicitly and shouldn't bump the persistent cursor).
-  if (filtered.length > 0 && sinceArg === null) {
+  const filtered = topics && topics.length > 0 ? rows.filter((r) => matchesGlob(topics, r.topic)) : rows
+
+  if (filtered.length > 0 && shouldAdvance) {
     const maxSeq = filtered[filtered.length - 1]!.rowid
     ctx.stmts.advanceInboxCursor.run({ $id: ctx.sessionId, $seq: maxSeq, $now: Date.now() })
   }
@@ -828,17 +851,27 @@ function handleInbox(ctx: TribeContext, a: ToolArgs): ToolResult {
     ref: r.ref,
     ts: new Date(r.ts).toISOString(),
     delivery: r.delivery,
-    plugin_kind: r.plugin_kind,
+    topic: r.topic,
     room_id: r.room_id,
   }))
   return {
     content: [
       {
         type: "text",
-        text: JSON.stringify({ events, cursor: events.length > 0 ? events[events.length - 1]!.rowid : since }, null, 2),
+        text: JSON.stringify(
+          { events, cursor: events.length > 0 ? events[events.length - 1]!.rowid : cursorBase },
+          null,
+          2,
+        ),
       },
     ],
   }
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.some((s) => typeof s !== "string")) return null
+  return value as string[]
 }
 
 function matchesGlob(globs: string[], value: string | null): boolean {
@@ -856,12 +889,12 @@ function matchesGlob(globs: string[], value: string | null): boolean {
 
 /**
  * Apply a session-level event filter — combines persistent mode + time-bounded
- * mute + per-kind glob list into a single tool call.
+ * mute + per-topic glob list into a single tool call.
  *
- * Empty args clear the filter (mode → 'normal', kinds + until → null).
- * `until` is an absolute unix-ms timestamp; absent = persistent.
+ * Empty args clear the filter (mode → 'normal', mute + until → null).
+ * `until` is an absolute unix-ms timestamp. `mute` without `until` is persistent.
  *
- * Direct messages always bypass kinds/until — only `mode: 'focus'` filters DMs.
+ * Direct messages always bypass mute/until — only `mode: 'focus'` filters DMs.
  */
 function handleFilter(ctx: TribeContext, a: ToolArgs): ToolResult {
   const rawMode = a.mode
@@ -885,19 +918,19 @@ function handleFilter(ctx: TribeContext, a: ToolArgs): ToolResult {
   }
   const until = (rawUntil as number | undefined) ?? null
 
-  const rawKinds = a.kinds
-  if (rawKinds !== undefined && (!Array.isArray(rawKinds) || rawKinds.some((k) => typeof k !== "string"))) {
+  const rawMute = a.mute
+  if (rawMute !== undefined && (!Array.isArray(rawMute) || rawMute.some((topic) => typeof topic !== "string"))) {
     return {
-      content: [{ type: "text", text: JSON.stringify({ error: "kinds must be an array of strings." }) }],
+      content: [{ type: "text", text: JSON.stringify({ error: "mute must be an array of strings." }) }],
     }
   }
-  const kinds = Array.isArray(rawKinds) && rawKinds.length > 0 ? JSON.stringify(rawKinds) : null
+  const mute = Array.isArray(rawMute) && rawMute.length > 0 ? JSON.stringify(rawMute) : null
 
   ctx.stmts.setSessionFilter.run({
     $id: ctx.sessionId,
     $mode: mode,
     $until: until,
-    $kinds: kinds,
+    $mute: mute,
     $now: Date.now(),
   })
 
@@ -909,7 +942,7 @@ function handleFilter(ctx: TribeContext, a: ToolArgs): ToolResult {
           set: true,
           mode,
           until: until !== null ? new Date(until).toISOString() : null,
-          kinds: Array.isArray(rawKinds) ? rawKinds : null,
+          mute: Array.isArray(rawMute) ? rawMute : null,
         }),
       },
     ],

@@ -11,7 +11,7 @@
  *   2. Plugin → wire integration — a fake plugin that calls api.broadcast
  *      on startup, hooked up to a minimal TribeClientApi that dispatches to
  *      a fresh tribe daemon subprocess. The broadcast must land in
- *      tribe.history exactly as if a regular session had sent it.
+ *      tribe.fetch exactly as if a regular session had sent it.
  *
  * Side-effect guard: every test runs the daemon with TRIBE_NO_PLUGINS=1 so
  * the built-in git/beads/github/health/accountly plugins stay out of the
@@ -167,7 +167,7 @@ async function killDaemon(proc: ChildProcess | null): Promise<void> {
 
 /** Build a TribeClientApi that dispatches to a real daemon via a DaemonClient
  *  registered under `pluginName`. This mirrors what an out-of-process plugin
- *  would do: connect as a client, then call tribe.send / tribe.broadcast. */
+ *  would do: connect as a client, then call tribe.send. */
 async function attachPlugin(
   socketPath: string,
   pluginName: string,
@@ -197,7 +197,7 @@ function parseToolText(result: unknown): unknown {
   return JSON.parse(text)
 }
 
-describe("plugin → tribe.history (integration)", () => {
+describe("plugin → tribe.fetch (integration)", () => {
   let tmpDir: string
   let socketPath: string
   let dbPath: string
@@ -240,7 +240,7 @@ describe("plugin → tribe.history (integration)", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it("a fake plugin calling api.broadcast on startup lands in tribe.history", async () => {
+  it("a fake plugin calling api.broadcast on startup lands in tribe.fetch", async () => {
     daemon = await spawnDaemon(socketPath, dbPath)
 
     // A second client will observe the wire.
@@ -265,11 +265,10 @@ describe("plugin → tribe.history (integration)", () => {
     const loaded = loadPlugins([plugin], api)
     await new Promise((r) => setTimeout(r, 250))
 
-    const messages = parseToolText(await observer.call("tribe.history", { limit: 20 })) as Array<{
-      from: string
-      content: string
-      type: string
-    }>
+    const fetched = parseToolText(await observer.call("tribe.fetch", { limit: 20, since: 0 })) as {
+      events: Array<{ from: string; content: string; type: string }>
+    }
+    const messages = fetched.events
     const match = messages.find((m) => m.content === "hello from plugin" && m.type === "test:plugin-boundary")
     expect(match).toBeDefined()
     expect(match!.from).toBe("fake-observer")

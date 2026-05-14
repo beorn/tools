@@ -474,10 +474,10 @@ describe("tribe daemon integration", () => {
       expect(result.chief).toBe("the-chief")
     }, 10_000)
 
-    it("session.joined lands in inbox (ambient — no channel push)", async () => {
+    it("session.joined lands in fetch (ambient — no channel push)", async () => {
       // km-tribe.event-classification: session join is ambient — the row lands
-      // in the inbox via tribe.inbox, not on the channel. Sessions that care
-      // (e.g. the proxy's auto-rename hook) pull the inbox cursor instead of
+      // in the fetch via tribe.fetch, not on the channel. Sessions that care
+      // (e.g. the proxy's auto-rename hook) pull the fetch cursor instead of
       // listening on the channel.
       daemon = await spawnDaemon(socketPath)
 
@@ -491,9 +491,9 @@ describe("tribe daemon integration", () => {
       const member = await connect()
       await member.call("register", { name: "new-worker", role: "member" })
 
-      // Pull chief's inbox — the new-worker join must be there.
+      // Pull chief's fetch — the new-worker join must be there.
       await waitFor(async () => {
-        const result = (await chief.call("tribe.inbox", { limit: 100, since: 0 })) as {
+        const result = (await chief.call("tribe.fetch", { limit: 100, since: 0 })) as {
           content: Array<{ type: string; text: string }>
         }
         const parsed = JSON.parse(result.content[0]!.text) as {
@@ -504,7 +504,7 @@ describe("tribe daemon integration", () => {
         )
       }, 5000)
 
-      // Channel must NOT have received the join — it is inbox-only now.
+      // Channel must NOT have received the join — it is fetch-only now.
       const joinOnChannel = channelNotifs.find(
         (n) =>
           String(n.params?.content ?? "").includes("joined") && String(n.params?.content ?? "").includes("new-worker"),
@@ -640,9 +640,9 @@ describe("tribe daemon integration", () => {
   // -------------------------------------------------------------------------
 
   describe("disconnect handling", () => {
-    it("session.left lands in inbox when a client disconnects (ambient)", async () => {
+    it("session.left lands in fetch when a client disconnects (ambient)", async () => {
       // km-tribe.event-classification: leave is ambient, same as join — pulled
-      // via tribe.inbox, not pushed on the channel.
+      // via tribe.fetch, not pushed on the channel.
       daemon = await spawnDaemon(socketPath)
 
       const chief = await connect()
@@ -655,9 +655,9 @@ describe("tribe daemon integration", () => {
       const member = await connect()
       await member.call("register", { name: "leaver", role: "member" })
 
-      // Wait for leaver's join in inbox before disconnecting (proves the row is durable).
+      // Wait for leaver's join in fetch before disconnecting (proves the row is durable).
       await waitFor(async () => {
-        const result = (await chief.call("tribe.inbox", { limit: 100, since: 0 })) as {
+        const result = (await chief.call("tribe.fetch", { limit: 100, since: 0 })) as {
           content: Array<{ type: string; text: string }>
         }
         const parsed = JSON.parse(result.content[0]!.text) as {
@@ -670,9 +670,9 @@ describe("tribe daemon integration", () => {
       const idx = clients.indexOf(member)
       if (idx !== -1) clients.splice(idx, 1)
 
-      // Wait for leave row to land in inbox.
+      // Wait for leave row to land in fetch.
       await waitFor(async () => {
-        const result = (await chief.call("tribe.inbox", { limit: 100, since: 0 })) as {
+        const result = (await chief.call("tribe.fetch", { limit: 100, since: 0 })) as {
           content: Array<{ type: string; text: string }>
         }
         const parsed = JSON.parse(result.content[0]!.text) as {

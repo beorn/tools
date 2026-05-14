@@ -54,7 +54,7 @@ export type ReplyHint = "yes" | "no" | "optional"
  */
 export type Classification = {
   delivery?: Delivery
-  pluginKind?: string
+  topic?: string
   roomId?: string
 }
 
@@ -124,7 +124,7 @@ export function sendMessage(
     $ref: ref ?? null,
     $ts: ts,
     $delivery: delivery,
-    $plugin_kind: classification.pluginKind ?? null,
+    $topic: classification.topic ?? null,
     $room_id: classification.roomId ?? null,
   })
   const rowid = Number(result.lastInsertRowid)
@@ -140,7 +140,7 @@ export function sendMessage(
     content,
     bead_id: bead_id ?? null,
     delivery,
-    pluginKind: classification.pluginKind ?? null,
+    topic: classification.topic ?? null,
     roomId: classification.roomId ?? null,
   })
   return { id, ts, rowid }
@@ -171,7 +171,7 @@ export function logEvent(ctx: TribeContext, type: string, bead_id?: string, data
     // kind='event' before delivery. The delivery column is still populated to
     // keep schema invariants — every row carries a delivery class.
     $delivery: "push",
-    $plugin_kind: null,
+    $topic: null,
     $room_id: null,
   })
 }

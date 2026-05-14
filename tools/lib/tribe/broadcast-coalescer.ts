@@ -34,8 +34,8 @@ export type PendingBroadcast = {
    *  recipient (km-tribe.filter-collapse). Used by the focus-mode filter and
    *  by the batched-broadcast aggregator; not surfaced on the wire. */
   replyHint: "yes" | "no" | "optional"
-  /** Originating plugin event id (e.g. `git:commit`); null for human messages. */
-  pluginKind: string | null
+  /** Originating event topic (e.g. `git:commit`); null for human messages. */
+  topic: string | null
   /** Fresh bead state read from `.beads/backup/issues.jsonl` at delivery time
    *  for `type='assign'` envelopes — see km-tribe.task-assignment-stale-snapshot.
    *  null/absent for non-assign messages or when the journal is unavailable. */

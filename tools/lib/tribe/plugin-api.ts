@@ -24,7 +24,7 @@
  *   - The ability to trigger hot-reloads (the source watcher handles that).
  *
  * This matches what a future out-of-process plugin would have access to if it
- * connected as a regular tribe client: `tribe.send`, `tribe.broadcast`, a
+ * connected as a regular tribe client: `tribe.send(to: "*", ...)`, a
  * dedup primitive, and an optional members roster for targeted alerts.
  */
 
@@ -51,7 +51,7 @@ export interface TribePluginHandle {
 /**
  * km-tribe.event-classification: per-emit metadata that plugins attach to
  * pick how the event should reach the agent. All fields optional — omit to
- * get back-compat behavior (push delivery, plugin-kind null).
+ * get default behavior (push delivery, no topic).
  *
  * `responseExpected` was removed in km-tribe.filter-collapse (v4 wire) — the
  * channel envelope now derives the reply hint at delivery time from
@@ -60,8 +60,8 @@ export interface TribePluginHandle {
 export type EventClassification = {
   /** push = actionable channel-delivered; pull = ambient inbox-only */
   delivery?: "push" | "pull"
-  /** Stable plugin event id (e.g. `git:commit`); used by tribe.filter-kind globs */
-  pluginKind?: string
+  /** Stable event topic (e.g. `git:commit`); used by tribe.filter mute globs. */
+  topic?: string
 }
 
 export interface TribeClientApi {

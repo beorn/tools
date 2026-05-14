@@ -425,7 +425,7 @@ export const githubPlugin: TribePluginApi = {
             // consecutive-failure threshold) stay actionable.
             api.broadcast(`${formatted.line} ${formatted.url}`, `github:${formatted.type}`, undefined, {
               delivery: "pull",
-              pluginKind: `github:${formatted.type}`,
+              topic: `github:${formatted.type}`,
             })
 
             // Track who pushed to each repo for CI correlation
@@ -488,7 +488,7 @@ export const githubPlugin: TribePluginApi = {
               // hint is derived at delivery time on the channel envelope.
               api.broadcast(`${line} ${run.html_url}`, `github:workflow`, undefined, {
                 delivery: "pull",
-                pluginKind: `github:workflow:${run.conclusion}`,
+                topic: `github:workflow:${run.conclusion}`,
               })
             }
 
@@ -506,7 +506,7 @@ export const githubPlugin: TribePluginApi = {
                   `CI ALERT: ${r} ${run.name} has failed ${state.consecutiveFailures}x consecutively.${pusherInfo} Fix before pushing more.`,
                   "github:ci-alert",
                   undefined,
-                  { delivery: "push", pluginKind: "github:ci-alert" },
+                  { delivery: "push", topic: "github:ci-alert" },
                 )
 
                 // DM sessions that might be responsible — match by repo name in session names
@@ -518,7 +518,7 @@ export const githubPlugin: TribePluginApi = {
                       `Your repo ${r} has CI failures (${run.name} failed ${state.consecutiveFailures}x). Check ${run.html_url}`,
                       "github:ci-alert",
                       undefined,
-                      { delivery: "push", pluginKind: "github:ci-alert" },
+                      { delivery: "push", topic: "github:ci-alert" },
                     )
                   }
                 }
@@ -527,7 +527,7 @@ export const githubPlugin: TribePluginApi = {
                   `CI ALERT: ${r} ${run.name} still broken — ${state.consecutiveFailures} consecutive failures`,
                   "github:ci-alert",
                   undefined,
-                  { delivery: "push", pluginKind: "github:ci-alert" },
+                  { delivery: "push", topic: "github:ci-alert" },
                 )
               }
             } else if (run.conclusion === "success") {
@@ -536,7 +536,7 @@ export const githubPlugin: TribePluginApi = {
                   `CI RECOVERED: ${r} ${run.name} green after ${state.consecutiveFailures} failures`,
                   "github:ci-recovered",
                   undefined,
-                  { delivery: "push", pluginKind: "github:ci-recovered" },
+                  { delivery: "push", topic: "github:ci-recovered" },
                 )
               }
               state.consecutiveFailures = 0

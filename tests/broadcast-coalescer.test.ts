@@ -20,7 +20,7 @@ function makeEv(i: number, overrides: Partial<PendingBroadcast> = {}): PendingBr
     content: `event ${i}`,
     bead_id: null,
     replyHint: "optional",
-    pluginKind: null,
+    topic: null,
     ...overrides,
   }
 }

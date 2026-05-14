@@ -3,11 +3,11 @@
  *
  * Covers:
  *   - Per-plugin classification (push vs pull) at sendMessage boundary
- *   - tribe.inbox dual cursor + glob filter
+ *   - tribe.fetch dual cursor + glob filter
  *   - replyHint derivation at delivery time (kind + sender role + recipient)
- *   - Schema invariant: every row carries delivery / pluginKind / no-NULL
+ *   - Schema invariant: every row carries delivery / topic / no-NULL
  *
- * tribe.filter (mode + kinds + until) coverage lives in tribe-filter.test.ts.
+ * tribe.filter (mode + topics + until) coverage lives in tribe-filter.test.ts.
  *
  * These are unit tests over the in-process daemon helpers (database, messaging,
  * handlers) — no socket, no spawn. Faster + deterministic vs spawning a daemon
@@ -83,44 +83,44 @@ describe("classification — per-plugin defaults via sendMessage", () => {
     f = dbFixture()
   })
 
-  it("git:commit broadcast lands as delivery=pull with the right pluginKind", () => {
+  it("git:commit broadcast lands as delivery=pull with the right topic", () => {
     const ctx = ctxFor(f.db, f.stmts, "git-plugin")
     sendMessage(ctx, "*", "Committed: abc123 fix bug", "status", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "git:commit",
+      topic: "git:commit",
     })
-    const row = f.db.prepare("SELECT delivery, plugin_kind FROM messages").get() as {
+    const row = f.db.prepare("SELECT delivery, topic FROM messages").get() as {
       delivery: string
-      plugin_kind: string
+      topic: string
     }
     expect(row.delivery).toBe("pull")
-    expect(row.plugin_kind).toBe("git:commit")
+    expect(row.topic).toBe("git:commit")
   })
 
-  it("github:ci-alert DM lands as delivery=push with the right pluginKind", () => {
+  it("github:ci-alert DM lands as delivery=push with the right topic", () => {
     const ctx = ctxFor(f.db, f.stmts, "github-plugin")
     sendMessage(ctx, "alice", "Your repo X has CI failures", "github:ci-alert", undefined, undefined, "direct", {
       delivery: "push",
-      pluginKind: "github:ci-alert",
+      topic: "github:ci-alert",
     })
-    const row = f.db.prepare("SELECT delivery, plugin_kind FROM messages").get() as {
+    const row = f.db.prepare("SELECT delivery, topic FROM messages").get() as {
       delivery: string
-      plugin_kind: string
+      topic: string
     }
     expect(row.delivery).toBe("push")
-    expect(row.plugin_kind).toBe("github:ci-alert")
+    expect(row.topic).toBe("github:ci-alert")
   })
 
   it("legacy sendMessage call without classification defaults to push delivery", () => {
     const ctx = ctxFor(f.db, f.stmts, "legacy")
     // Note: NO 8th argument — exercises the default classification path.
     sendMessage(ctx, "*", "legacy broadcast", "notify")
-    const row = f.db.prepare("SELECT delivery, plugin_kind FROM messages").get() as {
+    const row = f.db.prepare("SELECT delivery, topic FROM messages").get() as {
       delivery: string
-      plugin_kind: string | null
+      topic: string | null
     }
     expect(row.delivery).toBe("push")
-    expect(row.plugin_kind).toBeNull()
+    expect(row.topic).toBeNull()
   })
 })
 
@@ -152,10 +152,10 @@ describe("deriveReplyHint — derived from kind + recipient + senderRole", () =>
 })
 
 // ---------------------------------------------------------------------------
-// 3. tribe.inbox — dual cursor
+// 3. tribe.fetch — dual cursor
 // ---------------------------------------------------------------------------
 
-describe("tribe.inbox — pull cursor advances independently of push cursor", () => {
+describe("tribe.fetch — pull cursor advances independently of push cursor", () => {
   let f: ReturnType<typeof dbFixture>
   beforeEach(() => {
     f = dbFixture()
@@ -169,12 +169,12 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
     for (const tag of ["a1", "b2", "c3"]) {
       sendMessage(sender, "*", `Committed: ${tag}`, "status", undefined, undefined, "broadcast", {
         delivery: "pull",
-        pluginKind: "git:commit",
+        topic: "git:commit",
       })
     }
 
     // First pull — all three.
-    const r1 = (await handleToolCall(reader, "tribe.inbox", { limit: 50 }, makeOpts())) as {
+    const r1 = (await handleToolCall(reader, "tribe.fetch", { limit: 50 }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
     const p1 = JSON.parse(r1.content[0]!.text) as { events: Array<{ content: string }>; cursor: number }
@@ -182,7 +182,7 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
     expect(p1.events.map((e) => e.content)).toEqual(["Committed: a1", "Committed: b2", "Committed: c3"])
 
     // Second pull — empty (cursor advanced).
-    const r2 = (await handleToolCall(reader, "tribe.inbox", { limit: 50 }, makeOpts())) as {
+    const r2 = (await handleToolCall(reader, "tribe.fetch", { limit: 50 }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
     const p2 = JSON.parse(r2.content[0]!.text) as { events: Array<unknown> }
@@ -191,9 +191,9 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
     // New event after cursor — visible on next pull.
     sendMessage(sender, "*", "Committed: d4", "status", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "git:commit",
+      topic: "git:commit",
     })
-    const r3 = (await handleToolCall(reader, "tribe.inbox", { limit: 50 }, makeOpts())) as {
+    const r3 = (await handleToolCall(reader, "tribe.fetch", { limit: 50 }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
     const p3 = JSON.parse(r3.content[0]!.text) as { events: Array<{ content: string }> }
@@ -206,20 +206,20 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
 
     sendMessage(sender, "*", "Committed: a1", "status", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "git:commit",
+      topic: "git:commit",
     })
     sendMessage(sender, "*", "Committed: b2", "status", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "git:commit",
+      topic: "git:commit",
     })
 
     // Snapshot read with since=0 — should not bump cursor.
-    await handleToolCall(reader, "tribe.inbox", { since: 0, limit: 50 }, makeOpts())
+    await handleToolCall(reader, "tribe.fetch", { since: 0, limit: 50 }, makeOpts())
     const cursor = f.stmts.getInboxCursor.get({ $id: reader.sessionId }) as { last_inbox_pull_seq: number }
     expect(cursor.last_inbox_pull_seq).toBe(0)
 
     // Now do a real pull — cursor advances.
-    await handleToolCall(reader, "tribe.inbox", { limit: 50 }, makeOpts())
+    await handleToolCall(reader, "tribe.fetch", { limit: 50 }, makeOpts())
     const cursor2 = f.stmts.getInboxCursor.get({ $id: reader.sessionId }) as { last_inbox_pull_seq: number }
     expect(cursor2.last_inbox_pull_seq).toBeGreaterThan(0)
   })
@@ -237,13 +237,13 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
       delivery: "pull",
     })
 
-    // Pull-side cursor empty before tribe.inbox call.
+    // Pull-side cursor empty before tribe.fetch call.
     const before = f.stmts.getInboxCursor.get({ $id: reader.sessionId }) as { last_inbox_pull_seq: number }
     expect(before.last_inbox_pull_seq).toBe(0)
 
-    // tribe.inbox sees BOTH (push events also appear in inbox per design — pull
+    // tribe.fetch sees BOTH (push events also appear in inbox per design — pull
     // is a superset; the channel just additionally fans them out for push).
-    const r = (await handleToolCall(reader, "tribe.inbox", { limit: 50 }, makeOpts())) as {
+    const r = (await handleToolCall(reader, "tribe.fetch", { limit: 50 }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
     const events = (JSON.parse(r.content[0]!.text) as { events: Array<{ delivery: string }> }).events
@@ -258,29 +258,29 @@ describe("tribe.inbox — pull cursor advances independently of push cursor", ()
     expect(sess.last_delivered_seq).toBe(0)
   })
 
-  it("kinds glob filter narrows results", async () => {
+  it("topics glob filter narrows results", async () => {
     const sender = ctxFor(f.db, f.stmts, "plugins")
     const reader = ctxFor(f.db, f.stmts, "alice")
 
     sendMessage(sender, "*", "Committed: a", "status", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "git:commit",
+      topic: "git:commit",
     })
     sendMessage(sender, "*", "[push] x", "github:push", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "github:push",
+      topic: "github:push",
     })
     sendMessage(sender, "*", "[pr] y", "github:pull_request", undefined, undefined, "broadcast", {
       delivery: "pull",
-      pluginKind: "github:pull_request",
+      topic: "github:pull_request",
     })
 
-    const r = (await handleToolCall(reader, "tribe.inbox", { kinds: ["github:*"], limit: 50 }, makeOpts())) as {
+    const r = (await handleToolCall(reader, "tribe.fetch", { topics: ["github:*"], limit: 50 }, makeOpts())) as {
       content: Array<{ type: string; text: string }>
     }
-    const events = (JSON.parse(r.content[0]!.text) as { events: Array<{ plugin_kind: string }> }).events
+    const events = (JSON.parse(r.content[0]!.text) as { events: Array<{ topic: string }> }).events
     expect(events).toHaveLength(2)
-    expect(events.every((e) => e.plugin_kind.startsWith("github:"))).toBe(true)
+    expect(events.every((e) => e.topic.startsWith("github:"))).toBe(true)
   })
 })
 
@@ -311,7 +311,7 @@ describe("schema v11 — every row carries delivery; replyHint is derived not st
     const cols = (f.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((r) => r.name)
     expect(cols).toContain("filter_mode")
     expect(cols).toContain("filter_until")
-    expect(cols).toContain("filter_kinds")
+    expect(cols).toContain("filter_mute")
     expect(cols).not.toContain("mode")
     expect(cols).not.toContain("snooze_until")
     expect(cols).not.toContain("snooze_kinds")

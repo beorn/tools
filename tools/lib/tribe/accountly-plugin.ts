@@ -164,7 +164,7 @@ export const accountlyPlugin: TribePluginApi = {
               undefined,
               {
                 delivery: "pull",
-                pluginKind: "health:account:error",
+                topic: "health:account:error",
               },
             )
           }
@@ -216,7 +216,7 @@ export const accountlyPlugin: TribePluginApi = {
             `accountly: ${oauthAccounts.length} accounts (${healthy} healthy), active=${status.active ?? "none"}, util=${Math.round(maxUtil)}%`,
             "health:account:status",
             undefined,
-            { delivery: "pull", pluginKind: "health:account:status" },
+            { delivery: "pull", topic: "health:account:status" },
           )
         }
 
@@ -233,7 +233,7 @@ export const accountlyPlugin: TribePluginApi = {
               `accountly: usage API rate-limited (429), backing off ${Math.round(backoffMs / 1000)}s`,
               "health:account:error",
               undefined,
-              { delivery: "pull", pluginKind: "health:account:rate-limit" },
+              { delivery: "pull", topic: "health:account:rate-limit" },
             )
           }
           return backoffMs
@@ -254,7 +254,7 @@ export const accountlyPlugin: TribePluginApi = {
                 `Account "${name}" needs attention: ${error}. Run: /login then bun accountly import`,
                 "health:account:unavailable",
                 undefined,
-                { delivery: "push", pluginKind: "health:account:unavailable" },
+                { delivery: "push", topic: "health:account:unavailable" },
               )
             }
           }
@@ -292,7 +292,7 @@ export const accountlyPlugin: TribePluginApi = {
           lastSwitchTime = Date.now()
           api.broadcast(`Auto-switched account — ${decision.reason}`, "health:account:switched", undefined, {
             delivery: "pull",
-            pluginKind: "health:account:switched",
+            topic: "health:account:switched",
           })
         } else {
           api.send(
@@ -300,7 +300,7 @@ export const accountlyPlugin: TribePluginApi = {
             `Switch needed (${decision.reason}) but failed: ${(autoErr || autoOut).trim().slice(0, 200)}`,
             "health:account:error",
             undefined,
-            { delivery: "push", pluginKind: "health:account:switch-failed" },
+            { delivery: "push", topic: "health:account:switch-failed" },
           )
         }
       } catch (err) {
