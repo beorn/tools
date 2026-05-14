@@ -506,13 +506,12 @@ describe("registerSession (real impl)", () => {
     }
   })
 
-  test("colliding name from an ACTIVE holder throws NameConflictError (no silent fallback)", () => {
-    // Updated for @km/bearly/tribe-rename-no-fallback-and-allow-sigils: the
-    // registerSession path no longer silently suffixes names on collision.
-    // The caller (dispatcher / stdio-adapter) sees a typed conflict error
-    // with `existing_names` and decides how to recover. The previous "auto
-    // -N suffix" behavior masked legitimate duplication and made names
-    // unpredictable for the user; surfacing the conflict is the design.
+  test("colliding name from an ACTIVE holder auto-suffixes (registration always succeeds)", () => {
+    // Updated for @km/bearly/tribe-silvercode-session-name-conflict:
+    // registerSession auto-suffixes on collision instead of rejecting.
+    // Registration should always succeed — name conflicts during initial
+    // connect are a transport artifact, not a user error. The session can
+    // rename later via tribe.join or tribe.rename.
     const db = openDatabase(rsDbPath)
     const stmts = createStatements(db)
     try {
@@ -540,18 +539,21 @@ describe("registerSession (real impl)", () => {
         claudeSessionId: null,
         claudeSessionName: null,
       })
-      // isActive reports A as currently connected — B cannot overwrite its row,
-      // and the no-silent-fallback contract surfaces this as a typed error.
+      // isActive reports A as currently connected — B gets auto-suffixed.
       const activeIds = new Set([ctxA.sessionId])
-      expect(() => realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))).toThrow(/already taken|conflict/i)
+      realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid))
 
-      // A's row is preserved untouched (no spurious suffixed row from B).
+      // B registered successfully with a suffixed name.
+      expect(ctxB.getName()).toBe("worker-2")
+
+      // A's row is preserved untouched.
       const rows = db.prepare("SELECT id, name FROM sessions ORDER BY name").all() as Array<{
         id: string
         name: string
       }>
-      expect(rows.map((r) => r.name)).toEqual(["worker"])
+      expect(rows.map((r) => r.name).sort()).toEqual(["worker", "worker-2"])
       expect(rows.find((r) => r.name === "worker")!.id).toBe(ctxA.sessionId)
+      expect(rows.find((r) => r.name === "worker-2")!.id).toBe(ctxB.sessionId)
     } finally {
       db.close()
     }
@@ -586,10 +588,9 @@ describe("registerSession (real impl)", () => {
     }
   })
 
-  test("NameConflictError surfaces holder_pid for actionable spawn-time-binding", () => {
-    // The conflict error must name the live PID of the holder so the caller
-    // (stdio-adapter) can decide between "real second instance" and "stale
-    // daemon-side ghost" without an extra round trip.
+  test("auto-suffix works with client PIDs and preserves holder row", () => {
+    // When B collides with A (active + alive PID), B gets suffixed.
+    // A's row (including its PID) is preserved.
     const db = openDatabase(rsDbPath)
     const stmts = createStatements(db)
     try {
@@ -617,21 +618,12 @@ describe("registerSession (real impl)", () => {
         claudeSessionName: null,
       })
       const activeIds = new Set([ctxA.sessionId])
+      realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid), null, livePid + 1)
 
-      let caught: unknown = null
-      try {
-        realRegisterSession(ctxB, undefined, (sid) => activeIds.has(sid), null, livePid + 1)
-      } catch (e) {
-        caught = e
-      }
-      expect(caught).toBeTruthy()
-      // Use shape-checks instead of `instanceof` so the test stays portable
-      // across the named-export boundary.
-      const err = caught as { name?: string; holder_pid?: number; existing_names?: string[]; message?: string }
-      expect(err.name).toBe("NameConflictError")
-      expect(err.holder_pid).toBe(livePid)
-      expect(err.existing_names).toContain("worker")
-      expect(err.message).toMatch(new RegExp(`pid ${livePid}`))
+      // B got auto-suffixed, A is untouched.
+      expect(ctxB.getName()).toBe("worker-2")
+      const rowA = db.prepare("SELECT pid FROM sessions WHERE id = $id").get({ $id: ctxA.sessionId }) as { pid: number }
+      expect(rowA.pid).toBe(livePid)
     } finally {
       db.close()
     }

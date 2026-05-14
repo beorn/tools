@@ -454,13 +454,32 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
   if (taken) {
     const isActive = opts.getActiveSessionIds().has(taken.id)
     if (isActive) {
-      return { content: [{ type: "text", text: JSON.stringify({ error: `Name "${joinName}" is already taken` }) }] }
+      // Auto-suffix instead of rejecting — sessions should always be able to join.
+      // The caller can rename later via tribe.rename if the suffixed name isn't ideal.
+      for (let n = 2; n <= 100; n++) {
+        const candidate = `${joinName}-${n}`
+        const candidateTaken = ctx.stmts.checkNameTaken.get({ $name: candidate, $session_id: ctx.sessionId }) as
+          | { id: string }
+          | undefined
+        if (!candidateTaken || !opts.getActiveSessionIds().has(candidateTaken.id)) {
+          if (candidateTaken) {
+            const tombName = `${candidate}-dead-${candidateTaken.id.slice(0, 8)}`
+            ctx.db
+              .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
+              .run({ $tomb: tombName, $now: Date.now(), $id: candidateTaken.id })
+          }
+          log.info?.(`name "${joinName}" taken by active session; auto-assigned "${candidate}"`)
+          joinName = candidate
+          break
+        }
+      }
+    } else {
+      const tombstoneName = `${joinName}-dead-${taken.id.slice(0, 8)}`
+      ctx.db
+        .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
+        .run({ $tomb: tombstoneName, $now: Date.now(), $id: taken.id })
+      log.info?.(`reclaimed name "${joinName}" from dead session ${taken.id} (tombstoned as "${tombstoneName}")`)
     }
-    const tombstoneName = `${joinName}-dead-${taken.id.slice(0, 8)}`
-    ctx.db
-      .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
-      .run({ $tomb: tombstoneName, $now: Date.now(), $id: taken.id })
-    log.info?.(`reclaimed name "${joinName}" from dead session ${taken.id} (tombstoned as "${tombstoneName}")`)
   }
 
   // Joining with role=chief is now an explicit claim — derived chief otherwise.

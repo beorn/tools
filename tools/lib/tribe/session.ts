@@ -119,10 +119,35 @@ export function registerSession(
     }
   }
 
+  // If the name is still taken after eviction attempts (active + alive holder),
+  // auto-suffix instead of rejecting. Registration should always succeed —
+  // name conflicts during initial connect are a transport artifact (e.g.,
+  // silvercode's tribe-mcp opening a second socket from the same host session),
+  // not a user error. The session can rename later via tribe.join or tribe.rename.
+  let finalName = desiredName
+  const takenCheck = ctx.db
+    .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
+    .get({ $name: finalName, $id: ctx.sessionId }) as { id: string } | null
+  if (takenCheck && isActive?.(takenCheck.id)) {
+    // Find a free name by appending -2, -3, ...
+    for (let n = 2; n <= 100; n++) {
+      const candidate = `${desiredName}-${n}`
+      const taken = ctx.db
+        .prepare("SELECT id FROM sessions WHERE name = $name AND id != $id")
+        .get({ $name: candidate, $id: ctx.sessionId }) as { id: string } | null
+      if (!taken || !isActive(taken.id)) {
+        finalName = candidate
+        log.info?.(`name "${desiredName}" taken by active session; auto-assigned "${finalName}"`)
+        ctx.setName(finalName)
+        break
+      }
+    }
+  }
+
   try {
     ctx.stmts.upsertSession.run({
       $id: ctx.sessionId,
-      $name: desiredName,
+      $name: finalName,
       $role: ctx.sessionRole,
       $domains: JSON.stringify(ctx.domains),
       $pid: pid,
@@ -135,12 +160,8 @@ export function registerSession(
       $delivery: delivery ?? "push",
     })
   } catch {
-    // Name still taken (race or active holder). Surface as a typed error so
-    // the caller decides — no silent auto-fallback. The user wants to know
-    // about name conflicts, not discover them later via a mutated name. The
-    // holder_pid (when we have one) makes the error actionable: the spawner
-    // can confirm the conflict is a real live process before retrying.
-    throw new NameConflictError(desiredName, listSessionNames(ctx, isActive), holder?.pid ?? null)
+    // Shouldn't happen after auto-suffix, but surface as typed error if it does.
+    throw new NameConflictError(finalName, listSessionNames(ctx, isActive), holder?.pid ?? null)
   }
 
   // Matrix-shape: every session is a member of its project's default room.
