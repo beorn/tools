@@ -345,7 +345,7 @@ Tribe messages:
 - Don't over-broadcast — only send when it changes what someone else should know.`
 
 mcp = new Server(
-  { name: "daemon", version: "0.14.1" },
+  { name: "tribe", version: "0.14.1" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },
