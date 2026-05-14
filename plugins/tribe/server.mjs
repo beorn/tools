@@ -1698,7 +1698,7 @@ function createReconnectingClient2(opts) {
 // tools/lib/tribe/tools-list.ts
 var TOOLS_LIST = [
   {
-    name: "tribe.send",
+    name: "send",
     description: 'Send a message to one tribe member, or to everyone with to: "*".',
     inputSchema: {
       type: "object",
@@ -1718,7 +1718,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.fetch",
+    name: "fetch",
     description: "Read tribe messages. Default drains this session's pending queue and advances its cursor. ids/with/from/to reads are snapshots. since scans the journal and advances only with advance:true.",
     inputSchema: {
       type: "object",
@@ -1749,7 +1749,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.members",
+    name: "members",
     description: "List active tribe sessions with their roles and domains",
     inputSchema: {
       type: "object",
@@ -1759,7 +1759,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.rename",
+    name: "rename",
     description: "Rename this session in the tribe",
     inputSchema: {
       type: "object",
@@ -1770,7 +1770,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.health",
+    name: "health",
     description: "Diagnostic: check for silent members, stale beads, unread messages",
     inputSchema: {
       type: "object",
@@ -1778,7 +1778,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.join",
+    name: "join",
     description: "Re-announce this session's name, role, and domains after compaction or rejoin.",
     inputSchema: {
       type: "object",
@@ -1804,7 +1804,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.reload",
+    name: "reload",
     description: "Hot-reload the tribe MCP server \u2014 re-exec with latest code from disk. Use after tribe code is updated to pick up fixes without restarting the Claude Code session.",
     inputSchema: {
       type: "object",
@@ -1814,7 +1814,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.retro",
+    name: "retro",
     description: "Generate a retrospective report analyzing tribe message history, coordination health, and per-member activity",
     inputSchema: {
       type: "object",
@@ -1833,7 +1833,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.chief",
+    name: "chief",
     description: "Show the current chief \u2014 derived from connection order, or explicitly claimed via tribe.claim-chief.",
     inputSchema: {
       type: "object",
@@ -1841,7 +1841,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.debug",
+    name: "debug",
     description: "Dump daemon internals for troubleshooting \u2014 clients, chief derivation, chief claim, per-session cursors.",
     inputSchema: {
       type: "object",
@@ -1849,7 +1849,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.claim-chief",
+    name: "claim-chief",
     description: "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released.",
     inputSchema: {
       type: "object",
@@ -1857,7 +1857,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.release-chief",
+    name: "release-chief",
     description: "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent.",
     inputSchema: {
       type: "object",
@@ -1865,7 +1865,7 @@ var TOOLS_LIST = [
     }
   },
   {
-    name: "tribe.filter",
+    name: "filter",
     description: "Per-session filter for incoming channel events. mode controls focus level; mute stores topic globs to silence until the optional timestamp. Empty args clears the filter.",
     inputSchema: {
       type: "object",
@@ -2471,14 +2471,15 @@ Tribe messages:
     const { name, arguments: toolArgs } = req.params;
     const a = toolArgs ?? {};
     try {
-      if (name === "tribe.send" && a.to && typeof a.to === "string") {
+      if (name === "send" && a.to && typeof a.to === "string") {
         const directResult = await trySendDirect(a);
         if (directResult)
           return directResult;
       }
-      const payload = name === "tribe.join" ? { ...a, identity_token: identityToken } : a;
-      const result = await daemon.call(name, payload);
-      if (name === "tribe.join" || name === "tribe.rename") {
+      const payload = name === "join" ? { ...a, identity_token: identityToken } : a;
+      const daemonMethod = `tribe.${name}`;
+      const result = await daemon.call(daemonMethod, payload);
+      if (name === "join" || name === "rename") {
         const r = result;
         try {
           const data = JSON.parse(r.content[0]?.text ?? "{}");

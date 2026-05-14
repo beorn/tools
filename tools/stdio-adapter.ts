@@ -383,18 +383,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = (toolArgs ?? {}) as Record<string, unknown>
 
   try {
-    // Try direct peer messaging for tribe.send
-    if (name === "tribe.send" && a.to && typeof a.to === "string") {
+    // Try direct peer messaging for send
+    if (name === "send" && a.to && typeof a.to === "string") {
       const directResult = await trySendDirect(a)
       if (directResult) return directResult
     }
 
-    // Attach identity_token to tribe.join so the daemon can adopt prior
+    // Attach identity_token to join so the daemon can adopt prior
     // session state when Claude Code restarts and the agent calls join again.
-    const payload = name === "tribe.join" ? { ...a, identity_token: identityToken } : a
-    const result = await daemon.call(name, payload)
+    const payload = name === "join" ? { ...a, identity_token: identityToken } : a
+    // Tool names are bare verbs ("send", "fetch"); daemon wire methods use "tribe." prefix
+    const daemonMethod = `tribe.${name}`
+    const result = await daemon.call(daemonMethod, payload)
     // Update local name/role after join/rename
-    if (name === "tribe.join" || name === "tribe.rename") {
+    if (name === "join" || name === "rename") {
       const r = result as { content: Array<{ type: string; text: string }> }
       try {
         const data = JSON.parse(r.content[0]?.text ?? "{}") as Record<string, string>

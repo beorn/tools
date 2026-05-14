@@ -8,7 +8,7 @@
 
 export const TOOLS_LIST = [
   {
-    name: "tribe.send",
+    name: "send",
     description: 'Send a message to one tribe member, or to everyone with to: "*".',
     inputSchema: {
       type: "object" as const,
@@ -28,7 +28,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.fetch",
+    name: "fetch",
     description:
       "Read tribe messages. Default drains this session's pending queue and advances its cursor. ids/with/from/to reads are snapshots. since scans the journal and advances only with advance:true.",
     inputSchema: {
@@ -60,7 +60,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.members",
+    name: "members",
     description: "List active tribe sessions with their roles and domains",
     inputSchema: {
       type: "object" as const,
@@ -70,7 +70,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.rename",
+    name: "rename",
     description: "Rename this session in the tribe",
     inputSchema: {
       type: "object" as const,
@@ -81,7 +81,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.health",
+    name: "health",
     description: "Diagnostic: check for silent members, stale beads, unread messages",
     inputSchema: {
       type: "object" as const,
@@ -89,7 +89,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.join",
+    name: "join",
     description: "Re-announce this session's name, role, and domains after compaction or rejoin.",
     inputSchema: {
       type: "object" as const,
@@ -117,7 +117,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.reload",
+    name: "reload",
     description:
       "Hot-reload the tribe MCP server — re-exec with latest code from disk. Use after tribe code is updated to pick up fixes without restarting the Claude Code session.",
     inputSchema: {
@@ -128,7 +128,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.retro",
+    name: "retro",
     description:
       "Generate a retrospective report analyzing tribe message history, coordination health, and per-member activity",
     inputSchema: {
@@ -148,7 +148,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.chief",
+    name: "chief",
     description: "Show the current chief — derived from connection order, or explicitly claimed via tribe.claim-chief.",
     inputSchema: {
       type: "object" as const,
@@ -156,7 +156,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.debug",
+    name: "debug",
     description:
       "Dump daemon internals for troubleshooting — clients, chief derivation, chief claim, per-session cursors.",
     inputSchema: {
@@ -165,7 +165,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.claim-chief",
+    name: "claim-chief",
     description:
       "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released.",
     inputSchema: {
@@ -174,7 +174,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.release-chief",
+    name: "release-chief",
     description:
       "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent.",
     inputSchema: {
@@ -183,7 +183,7 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "tribe.filter",
+    name: "filter",
     description:
       "Per-session filter for incoming channel events. mode controls focus level; mute stores topic globs to silence until the optional timestamp. Empty args clears the filter.",
     inputSchema: {

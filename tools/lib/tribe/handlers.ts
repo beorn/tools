@@ -95,25 +95,25 @@ export function readReconcilerSnapshot(): ReconcilerSection | null {
 // ---------------------------------------------------------------------------
 
 export const TRIBE_COORD_METHODS = {
-  send: "tribe.send",
-  fetch: "tribe.fetch",
-  members: "tribe.members",
-  rename: "tribe.rename",
-  health: "tribe.health",
-  join: "tribe.join",
-  reload: "tribe.reload",
-  retro: "tribe.retro",
-  chief: "tribe.chief",
-  claimChief: "tribe.claim-chief",
-  releaseChief: "tribe.release-chief",
-  debug: "tribe.debug",
-  filter: "tribe.filter",
+  send: "send",
+  fetch: "fetch",
+  members: "members",
+  rename: "rename",
+  health: "health",
+  join: "join",
+  reload: "reload",
+  retro: "retro",
+  chief: "chief",
+  claimChief: "claim-chief",
+  releaseChief: "release-chief",
+  debug: "debug",
+  filter: "filter",
 } as const
 
 export type TribeCoordMethod = (typeof TRIBE_COORD_METHODS)[keyof typeof TRIBE_COORD_METHODS]
 
-const REMOVED_TRIBE_METHODS = new Set(["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read"])
-const REMOVED_TRIBE_METHOD_HINT = "use tribe.send/fetch/filter — see hub/bearly/design/tribe-message-bus.md"
+const REMOVED_TRIBE_METHODS = new Set(["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read", "broadcast", "history", "inbox", "ping", "read"])
+const REMOVED_TRIBE_METHOD_HINT = "use send/fetch/filter — see hub/bearly/design/tribe-message-bus.md"
 
 export function isRemovedTribeMethod(name: string): boolean {
   return REMOVED_TRIBE_METHODS.has(name)
