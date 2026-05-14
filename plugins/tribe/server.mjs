@@ -417,8 +417,9 @@ function serializeCause(cause, maxDepth = 3) {
       message: cause.message,
       stack: cause.stack
     };
-    if (cause.code)
+    if (cause.code) {
       result.code = cause.code;
+    }
     if (cause.cause !== undefined) {
       result.cause = serializeCause(cause.cause, maxDepth - 1);
     }
@@ -439,8 +440,9 @@ function safeStringify(value) {
         stack: val.stack,
         name: val.name
       };
-      if (val.code)
+      if (val.code) {
         result.code = val.code;
+      }
       if (val.cause !== undefined)
         result.cause = serializeCause(val.cause);
       return result;
@@ -658,16 +660,19 @@ function buildPipeline(elements, parentConfig) {
       }
       if (isValidLogLevel(obj.level))
         config.level = obj.level;
-      if (obj.ns !== undefined)
+      if (obj.ns !== undefined) {
         config.ns = parseNsFilter(obj.ns);
-      if (obj.format === "console" || obj.format === "json")
+      }
+      if (obj.format === "console" || obj.format === "json") {
         config.format = obj.format;
+      }
       if (obj.spans === true)
         spansEnabled = true;
       if (obj.spans === false)
         spansEnabled = false;
-      if (obj.idFormat === "simple" || obj.idFormat === "w3c")
+      if (obj.idFormat === "simple" || obj.idFormat === "w3c") {
         setIdFormat(obj.idFormat);
+      }
       if (typeof obj.sampleRate === "number")
         setSampleRate(obj.sampleRate);
       continue;
@@ -694,8 +699,9 @@ function buildPipeline(elements, parentConfig) {
         e = result;
     }
     for (const output of outputs) {
-      if (e.kind === "log" && LOG_LEVEL_PRIORITY[e.level] < output.levelPriority)
+      if (e.kind === "log" && LOG_LEVEL_PRIORITY[e.level] < output.levelPriority) {
         continue;
+      }
       if (output.nsFilter && !output.nsFilter(e.namespace))
         continue;
       output.write(e);
@@ -758,8 +764,9 @@ function readEnvTrace() {
   const traceEnv = getEnv("TRACE");
   if (!traceEnv)
     return { enabled: false, filter: null };
-  if (traceEnv === "1" || traceEnv === "true")
+  if (traceEnv === "1" || traceEnv === "true") {
     return { enabled: true, filter: null };
+  }
   const prefixes = traceEnv.split(",").map((s) => s.trim());
   return {
     enabled: true,
@@ -1264,8 +1271,9 @@ function createEnvPipeline() {
     disposables.push(() => writer.close());
   }
   const dispatch = (event) => {
-    if (event.kind === "log" && LOG_LEVEL_PRIORITY[event.level] < LOG_LEVEL_PRIORITY[currentLevel()])
+    if (event.kind === "log" && LOG_LEVEL_PRIORITY[event.level] < LOG_LEVEL_PRIORITY[currentLevel()]) {
       return;
+    }
     if (event.kind === "span") {
       const trace = currentTrace();
       if (!trace.enabled)
@@ -1312,12 +1320,11 @@ function withConfigMetrics() {
   };
 }
 var createLogger = pipe(baseCreateLogger, withEnvDefaults(), withSpans(), withConfigMetrics());
+function setSuppressConsole(value) {
+  _suppressConsole = value;
+}
 // ../loggily/src/index.ts
 _setLogFileWriterFactory(createFileWriter);
-if (_env.DEBUG_LOG) {
-  _env.LOG_FILE ??= _env.DEBUG_LOG;
-  _suppressConsole = true;
-}
 
 // packages/tribe-client/src/parser.ts
 var log = createLogger("tribe-client:parser");
@@ -1429,9 +1436,9 @@ function connectToDaemon(socketPath, opts) {
         const p = pending.get(msg.id);
         if (p) {
           pending.delete(msg.id);
-          if (msg.error)
+          if (msg.error) {
             p.reject(Object.assign(new Error(msg.error.message), { code: msg.error.code, data: msg.error.data }));
-          else
+          } else
             p.resolve(msg.result);
         }
       } else if (isNotification(msg)) {
@@ -1586,18 +1593,20 @@ async function createReconnectingClient(opts) {
   setupReconnect();
   return new Proxy(current, {
     get(_, prop) {
-      if (prop === "close")
+      if (prop === "close") {
         return () => {
           closed = true;
           reconnectAc?.abort();
           current.close();
           current.socket.unref();
         };
-      if (prop === "onNotification")
+      }
+      if (prop === "onNotification") {
         return (handler) => {
           notificationHandlers.push(handler);
           current.onNotification(handler);
         };
+      }
       return current[prop];
     }
   });
@@ -1792,6 +1801,11 @@ var TOOLS_LIST = [
           type: "array",
           items: { type: "string" },
           description: "Domain expertise areas (e.g. ['silvery', 'flexily'])"
+        },
+        delivery: {
+          type: "string",
+          description: "How this session consumes messages. 'push' (default) = daemon fans events out on the MCP notification channel (Claude Code, Claude Agent SDK with a channel reader). 'pull' = events queue in SQLite; drain via tribe.ping or tribe.inbox (MCP-only clients without a notification handler \u2014 codex, gemini, custom MCP). Sender is transport-blind: tribe.send routes by the recipient's registered mode.",
+          enum: ["push", "pull"]
         }
       },
       required: ["name", "role"]
@@ -1864,6 +1878,25 @@ var TOOLS_LIST = [
   {
     name: "tribe.inbox",
     description: "Pull pending tribe events that did NOT push to the channel (ambient: commits, joins/leaves, routine github events, low-severity health warnings). Returns events newer than the per-session pull cursor; advances the cursor on call. " + "Empty response is the correct behavior for most tribe channel events you do see \u2014 the tool returns inbox data; you decide whether to act. Do not generate acknowledgement text just because a message arrived.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        since: {
+          type: "number",
+          description: "Pull rows with rowid > since. Default: per-session cursor."
+        },
+        kinds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional plugin_kind globs to filter (e.g. ['github:*', 'git:commit'])."
+        },
+        limit: { type: "number", description: "Max rows to return (default: 50)." }
+      }
+    }
+  },
+  {
+    name: "tribe.ping",
+    description: "Drain pending tribe events for this session \u2014 broadcasts AND direct messages since the per-session cursor. The canonical 'give me my events' call for pull-mode clients (MCP-only sessions that can't receive channel-push notifications). Semantically equivalent to tribe.inbox today; use tribe.ping when polling on a turn boundary, tribe.inbox when filtering by plugin_kind globs. Advances the cursor on call. Empty response = nothing pending.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1988,10 +2021,85 @@ function defangModelInput(text) {
 `);
 }
 
+// tools/lib/tribe/cwd-guardrail.ts
+import { existsSync as existsSync3 } from "fs";
+import { basename as basename2, dirname as dirname4 } from "path";
+import { spawnSync } from "child_process";
+function parseCwdPolicy(raw) {
+  if (raw === "ignore" || raw === "warn" || raw === "refuse")
+    return raw;
+  return "warn";
+}
+function readCwdPolicyFromEnv(env = process.env) {
+  if (env.BEARLY_ALLOW_MAIN_REPO_CWD === "1" || env.BEARLY_ALLOW_MAIN_REPO_CWD === "true")
+    return "ignore";
+  return parseCwdPolicy(env.TRIBE_MAIN_REPO_POLICY);
+}
+function isPoolSlotName(name) {
+  return /-wt\d+$/.test(name);
+}
+function findSiblingPoolSlots(repoRoot) {
+  const parent = dirname4(repoRoot);
+  const repoBasename = basename2(repoRoot);
+  const slots = [];
+  for (let n = 0;n < 10; n++) {
+    const slotName = `${repoBasename}-wt${n}`;
+    const slotPath = `${parent}/${slotName}`;
+    if (existsSync3(slotPath))
+      slots.push(slotName);
+  }
+  return slots;
+}
+function migrationOneLiner(repoRoot) {
+  const repoBasename = basename2(repoRoot);
+  return `bun worktree create wtN && cd ../${repoBasename}-wtN`;
+}
+function evaluateCwdPolicy(policy, probe) {
+  if (policy === "ignore") {
+    return { kind: "ignored", reason: "policy=ignore (or BEARLY_ALLOW_MAIN_REPO_CWD=1)" };
+  }
+  if (!probe.gitRoot) {
+    return { kind: "ok", reason: "cwd is not inside a git repo" };
+  }
+  if (isPoolSlotName(basename2(probe.gitRoot))) {
+    return { kind: "ok", reason: `cwd is pool slot ${basename2(probe.gitRoot)}` };
+  }
+  const branch = probe.headBranch ?? "";
+  if (branch !== "main" && branch !== "master") {
+    return { kind: "ok", reason: `HEAD is on ${branch || "(unknown)"}, not main` };
+  }
+  if (probe.siblingPoolSlots.length === 0) {
+    return { kind: "ok", reason: "no `<repo>-wt<N>` pool detected \u2014 solo repo, no isolation needed" };
+  }
+  const projectBasename = basename2(probe.gitRoot);
+  const oneLiner = migrationOneLiner(probe.gitRoot);
+  const baseMsg = `tribe: standalone session running in main repo (${projectBasename}) on branch ${branch}. ` + `Tribe SOP \xA7F2a says main stays on main \u2014 edits should land in a pool slot. ` + `Migrate with: ${oneLiner}. ` + `Pool slots present: ${probe.siblingPoolSlots.join(", ")}. ` + `Set TRIBE_MAIN_REPO_POLICY=ignore (or BEARLY_ALLOW_MAIN_REPO_CWD=1) to silence this for legitimate chief / exploratory sessions.`;
+  if (policy === "refuse") {
+    return { kind: "refuse", message: `REFUSE: ${baseMsg}` };
+  }
+  return { kind: "warn", message: baseMsg };
+}
+function probeCwd(cwd = process.cwd()) {
+  const git = (args) => {
+    try {
+      const res = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      if (res.status !== 0)
+        return null;
+      return res.stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+  const gitRoot = git(["rev-parse", "--show-toplevel"]);
+  const headBranch = gitRoot ? git(["rev-parse", "--abbrev-ref", "HEAD"]) : null;
+  const siblingPoolSlots = gitRoot ? findSiblingPoolSlots(gitRoot) : [];
+  return { cwd, gitRoot, headBranch, siblingPoolSlots };
+}
+
 // tools/lib/tribe/hot-reload.ts
 import { createHash as createHash2 } from "crypto";
-import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, watch } from "fs";
-import { dirname as dirname4, resolve as resolve4 } from "path";
+import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync2, watch } from "fs";
+import { dirname as dirname5, resolve as resolve4 } from "path";
 import { spawn as spawn2 } from "child_process";
 var log3 = createLogger("tribe:reload");
 function setupHotReload(opts) {
@@ -2000,7 +2108,7 @@ function setupHotReload(opts) {
     return null;
   const scriptPath = new URL(importMetaUrl).pathname;
   const reloadScriptName = scriptPath.split("/").pop()?.replace(/\.(ts|tsx)$/, "") ?? "unknown";
-  const sourceDir = dirname4(scriptPath);
+  const sourceDir = dirname5(scriptPath);
   const libTribeDir = resolve4(sourceDir, "lib/tribe");
   if (process.env.__TRIBE_HOT_RELOAD === "1") {
     delete process.env.__TRIBE_HOT_RELOAD;
@@ -2012,7 +2120,7 @@ function setupHotReload(opts) {
     const dirs = [libTribeDir, ...extraDirs];
     for (const dir of dirs) {
       try {
-        if (existsSync3(dir)) {
+        if (existsSync4(dir)) {
           for (const f of readdirSync(dir)) {
             if (f.endsWith(".ts"))
               files.push(resolve4(dir, f));
@@ -2061,13 +2169,13 @@ function setupHotReload(opts) {
   try {
     watchers.push(watch(sourceDir, { persistent: false }, (_e, f) => onChange(f)));
   } catch {}
-  if (existsSync3(libTribeDir)) {
+  if (existsSync4(libTribeDir)) {
     try {
       watchers.push(watch(libTribeDir, { persistent: false }, (_e, f) => onChange(f)));
     } catch {}
   }
   for (const dir of extraDirs) {
-    if (existsSync3(dir)) {
+    if (existsSync4(dir)) {
       try {
         watchers.push(watch(dir, { persistent: false }, (_e, f) => onChange(f)));
       } catch {}
@@ -2085,7 +2193,7 @@ function setupHotReload(opts) {
 }
 
 // tools/lib/tribe/session.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync5, readFileSync as readFileSync3 } from "fs";
 import { resolve as resolve5 } from "path";
 var log4 = createLogger("tribe:session");
 function resolveTranscriptPath(claudeSessionId) {
@@ -2094,7 +2202,7 @@ function resolveTranscriptPath(claudeSessionId) {
   const cwd = process.cwd();
   const projectKey = "-" + cwd.replace(/\//g, "-");
   const transcriptPath = resolve5(process.env.HOME ?? "~", ".claude/projects", projectKey, `${claudeSessionId}.jsonl`);
-  return existsSync4(transcriptPath) ? transcriptPath : null;
+  return existsSync5(transcriptPath) ? transcriptPath : null;
 }
 function readTranscriptSlug(transcriptPath) {
   if (!transcriptPath)
@@ -2121,8 +2229,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "net";
-import { existsSync as existsSync5, unlinkSync as unlinkSync2, mkdirSync as mkdirSync3, chmodSync } from "fs";
-import { dirname as dirname5 } from "path";
+import { existsSync as existsSync6, unlinkSync as unlinkSync2, mkdirSync as mkdirSync3, chmodSync } from "fs";
+import { dirname as dirname6 } from "path";
 import { spawn as spawn3 } from "child_process";
 import { createHash as createHash3, randomUUID } from "crypto";
 function sendChannel(content, meta) {
@@ -2132,10 +2240,10 @@ function sendChannel(content, meta) {
   mcp.notification({ method: "notifications/claude/channel", params: { content: safeContent, meta } }).catch(() => {});
 }
 function startPeerServer() {
-  const socketDir = dirname5(PEER_SOCKET_PATH);
-  if (!existsSync5(socketDir))
+  const socketDir = dirname6(PEER_SOCKET_PATH);
+  if (!existsSync6(socketDir))
     mkdirSync3(socketDir, { recursive: true });
-  if (existsSync5(PEER_SOCKET_PATH)) {
+  if (existsSync6(PEER_SOCKET_PATH)) {
     try {
       unlinkSync2(PEER_SOCKET_PATH);
     } catch {}
@@ -2229,7 +2337,7 @@ function cleanupPeerSocket() {
     peerServer.close();
     peerServer = null;
   }
-  if (existsSync5(PEER_SOCKET_PATH)) {
+  if (existsSync6(PEER_SOCKET_PATH)) {
     try {
       unlinkSync2(PEER_SOCKET_PATH);
     } catch {}
@@ -2264,6 +2372,10 @@ function tryAutoRenameOnClaim(content) {
 }
 let __stack = [];
 try {
+  if (process.env.DEBUG_LOG) {
+    process.env.LOG_FILE ??= process.env.DEBUG_LOG;
+    setSuppressConsole(true);
+  }
   var log5 = createLogger("tribe:stdio-adapter");
   var proxyAc = new AbortController;
   var timers = createTimers2(proxyAc.signal);
@@ -2272,6 +2384,13 @@ try {
   var SESSION_DOMAINS = parseSessionDomains(args);
   var CLAUDE_SESSION_ID = resolveClaudeSessionId();
   var CLAUDE_SESSION_NAME = resolveClaudeSessionName();
+  var CWD_POLICY = readCwdPolicyFromEnv();
+  var CWD_EVAL = evaluateCwdPolicy(CWD_POLICY, probeCwd());
+  if (CWD_EVAL.kind === "warn" || CWD_EVAL.kind === "refuse") {
+    log5.warn?.(CWD_EVAL.message);
+  } else {
+    log5.debug?.(`cwd-guardrail: ${CWD_EVAL.kind} (${CWD_EVAL.reason})`);
+  }
   log5.info?.(`Connecting to daemon at ${SOCKET_PATH}`);
   var myName = "pending";
   var myRole = "member";
@@ -2282,6 +2401,7 @@ try {
   var mcp;
   peerServer = startPeerServer();
   var identityToken = createHash3("sha256").update(`${CLAUDE_SESSION_ID ?? ""}|${process.cwd()}|${args.role ?? "member"}`).digest("hex").slice(0, 16);
+  var DELIVERY = process.env.TRIBE_DELIVERY === "pull" ? "pull" : "push";
   var registerParams = {
     ...args.name ? { name: args.name } : {},
     ...args.role ? { role: args.role } : {},
@@ -2294,7 +2414,8 @@ try {
     pid: process.pid,
     claudeSessionId: CLAUDE_SESSION_ID,
     claudeSessionName: CLAUDE_SESSION_NAME,
-    identityToken
+    identityToken,
+    delivery: DELIVERY
   };
   var daemon = await createReconnectingClient2({
     socketPath: SOCKET_PATH,
@@ -2445,6 +2566,16 @@ Tribe messages:
   process.on("SIGTERM", shutdown);
   process.on("exit", cleanupPeerSocket);
   await mcp.connect(new StdioServerTransport);
+  if (CWD_EVAL.kind === "warn" || CWD_EVAL.kind === "refuse") {
+    const prefix = CWD_EVAL.kind === "refuse" ? "system" : "warning";
+    timers.setTimeout(() => {
+      sendChannel(CWD_EVAL.message, { from: "stdio-adapter", type: prefix });
+      daemon.call("log_event", {
+        type: CWD_EVAL.kind === "refuse" ? "cwd_guardrail_refuse" : "cwd_guardrail_warn",
+        content: CWD_EVAL.message
+      }).catch(() => {});
+    }, 750);
+  }
   {
     const transcriptPath = resolveTranscriptPath(CLAUDE_SESSION_ID);
     if (transcriptPath) {

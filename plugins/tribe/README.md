@@ -219,6 +219,17 @@ Plugins run in the daemon and activate automatically when their dependencies are
 | `beads`  | `.beads/` dir exists | Broadcasts bead claims/closures                    |
 | `github` | `gh auth` available  | Monitors repos, broadcasts push/PR/CI/issue events |
 
+## Worktree-isolation guardrail
+
+Standalone MCP clients (e.g. `codex`, `gemini`) inherit the user's invocation cwd. If a project uses the `<basename>-wtN` worktree pool (`bun worktree create wtN`), main repo edits should land in a slot, not in the canonical main checkout. When the stdio adapter detects this shape — cwd is the main repo, HEAD is `main`/`master`, and at least one sibling `<basename>-wtN` exists — it surfaces a startup warning on the tribe channel and in the session's debug log.
+
+| Env var                      | Default | Effect                                                                                                       |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `TRIBE_MAIN_REPO_POLICY`     | `warn`  | `warn` = startup warning; `refuse` = stronger marker; `ignore` = silence.                                    |
+| `BEARLY_ALLOW_MAIN_REPO_CWD` | unset   | Set to `1` (or `true`) as a synonym for `ignore`. Use for chief integration sessions and exploratory shells. |
+
+`@agent/N`-claimed sessions register from inside `<basename>-wtN` by construction, so the warning is a no-op for them. Solo repos (no `wtN` siblings) are also no-ops.
+
 ## License
 
 MIT

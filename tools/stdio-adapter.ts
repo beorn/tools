@@ -44,6 +44,7 @@ import { TOOLS_LIST } from "./lib/tribe/tools-list.ts"
 import { createLogger, setSuppressConsole } from "loggily"
 import { createTimers } from "./lib/tribe/timers.ts"
 import { defangModelInput } from "../plugins/injection-envelope/src/defang.ts"
+import { evaluateCwdPolicy, probeCwd, readCwdPolicyFromEnv, type CwdEvaluation } from "./lib/tribe/cwd-guardrail.ts"
 
 if (process.env.DEBUG_LOG) {
   process.env.LOG_FILE ??= process.env.DEBUG_LOG
@@ -64,6 +65,19 @@ const SOCKET_PATH = resolveSocketPath(args.socket)
 const SESSION_DOMAINS = parseSessionDomains(args)
 const CLAUDE_SESSION_ID = resolveClaudeSessionId()
 const CLAUDE_SESSION_NAME = resolveClaudeSessionName()
+
+// Worktree-isolation guardrail (km-bearly.tribe-codex-cwd-worktree-guardrail):
+// standalone codex / non-launcher MCP clients inherit the user's invocation
+// cwd. If that cwd is the main repo while a `<basename>-wtN` pool exists,
+// warn the agent so edits don't leak into main. Evaluation is pure; the
+// notification fires after MCP is up. Policy env: TRIBE_MAIN_REPO_POLICY.
+const CWD_POLICY = readCwdPolicyFromEnv()
+const CWD_EVAL: CwdEvaluation = evaluateCwdPolicy(CWD_POLICY, probeCwd())
+if (CWD_EVAL.kind === "warn" || CWD_EVAL.kind === "refuse") {
+  log.warn?.(CWD_EVAL.message)
+} else {
+  log.debug?.(`cwd-guardrail: ${CWD_EVAL.kind} (${CWD_EVAL.reason})`)
+}
 
 log.info?.(`Connecting to daemon at ${SOCKET_PATH}`)
 
@@ -485,6 +499,25 @@ process.on("exit", cleanupPeerSocket)
 
 // Connect MCP to Claude Code
 await mcp.connect(new StdioServerTransport())
+
+// Surface the cwd-guardrail decision on the tribe channel so the agent sees
+// it next to other startup signals. Wrapped in setTimeout to give the MCP
+// channel time to settle (mirrors the autoidentify nudge pattern above).
+if (CWD_EVAL.kind === "warn" || CWD_EVAL.kind === "refuse") {
+  const prefix = CWD_EVAL.kind === "refuse" ? "system" : "warning"
+  timers.setTimeout(() => {
+    sendChannel(CWD_EVAL.message, { from: "stdio-adapter", type: prefix })
+    // Also log to the daemon's activity stream so `tribe.history` surfaces it.
+    daemon
+      .call("log_event", {
+        type: CWD_EVAL.kind === "refuse" ? "cwd_guardrail_refuse" : "cwd_guardrail_warn",
+        content: CWD_EVAL.message,
+      })
+      .catch(() => {
+        /* daemon may not be ready yet — log_event is best-effort */
+      })
+  }, 750)
+}
 
 // Watch transcript file for /rename slug changes and auto-sync to tribe
 import { resolveTranscriptPath, readTranscriptSlug } from "./lib/tribe/session.ts"

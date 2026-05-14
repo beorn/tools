@@ -5,6 +5,18 @@ All notable changes to `@bearly/tribe` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this package adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased — Worktree-isolation guardrail for standalone MCP clients (km-bearly.tribe-codex-cwd-worktree-guardrail)
+
+Standalone codex / gemini / any non-launcher MCP client inherits the user's invocation cwd. Default cwd is the main repo → edits leak into `main` against the §F2a "main stays on main" rule. The stdio adapter now probes its cwd at startup and surfaces a startup warning when (a) cwd matches `git rev-parse --show-toplevel`, (b) HEAD is on `main`/`master`, (c) at least one sibling `<basename>-wtN` pool slot exists, (d) cwd is not itself a `<basename>-wtN` slot.
+
+### Added
+
+- **`TRIBE_MAIN_REPO_POLICY`** — `warn` (default), `refuse`, or `ignore`. Refuse still registers — the daemon doesn't refuse the connection — but the warning is louder so the agent surfaces it.
+- **`BEARLY_ALLOW_MAIN_REPO_CWD`** — set to `1` or `true` as a synonym for `ignore`. Use for chief integration sessions and exploratory shells where main-repo cwd is intentional.
+- **`tools/lib/tribe/cwd-guardrail.ts`** — pure decision + probe helpers, unit-tested in `tests/tribe-cwd-guardrail.test.ts`.
+
+`@agent/N`-claimed sessions register from inside `<basename>-wtN` by construction, so the check is a no-op for them. Solo repos with no `wtN` siblings are no-ops too.
+
 ## Unreleased — Per-session delivery routing + tribe.ping (Option G, km-bearly.tribe-dm-delivery-gap-for-mcp-only-clients)
 
 Closes the DM-delivery gap for MCP-only clients (codex, gemini, and any future
