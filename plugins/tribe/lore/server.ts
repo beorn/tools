@@ -485,7 +485,7 @@ async function handleSessionState(args: Record<string, unknown>): Promise<string
 // MCP server wiring
 // ============================================================================
 
-const server = new Server({ name: "/tribe", version: "0.12.0" }, { capabilities: { tools: {} } })
+const server = new Server({ name: "lore", version: "0.12.0" }, { capabilities: { tools: {} } })
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: TOOLS }

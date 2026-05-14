@@ -2450,7 +2450,7 @@ Tribe messages:
 - Keep SHORT \u2014 1-3 lines max. No essays.
 - Plain text only \u2014 no markdown (**bold**, headers, bullets). Renders as escaped text.
 - Don't over-broadcast \u2014 only send when it changes what someone else should know.`;
-  mcp = new Server({ name: "tribe", version: "0.12.0" }, {
+  mcp = new Server({ name: "daemon", version: "0.12.0" }, {
     capabilities: {
       experimental: { "claude/channel": {} },
       tools: {}

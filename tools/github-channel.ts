@@ -408,7 +408,7 @@ React to workflow failures immediately — they likely need attention. PR review
 may need a response. Push events are informational unless they conflict with your current work.`
 
 const mcp = new Server(
-  { name: "github", version: "0.1.0" },
+  { name: "events", version: "0.1.0" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },
