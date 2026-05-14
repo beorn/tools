@@ -73,3 +73,29 @@ Collect responses and present as a table.
 - If tribe tools are not available (MCP server not loaded), tell the user to launch with: `claude --dangerously-load-development-channels server:tribe`
 - `/tribe whoami` reads from the MCP server instructions (check if "chief" or "member" appears)
 - The tribe DB is at `~/.local/share/tribe/tribe.db` (user-level default). Legacy `.beads/tribe.db` is auto-migrated to the XDG path on first daemon start after upgrade. Override via `--db` flag or `TRIBE_DB` env.
+
+## Delivery modes — `push` vs `pull`
+
+Each session declares a delivery mode at join time. The daemon routes broadcasts and DMs accordingly. **Senders stay transport-blind** — `tribe.send({to: "codex1", message: "..."})` works the same regardless of how the recipient receives it.
+
+| Mode       | When to declare                                                                              | How it works                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **push**   | Default. Claude Code, Agent SDK, or any client with an MCP notification-channel reader.      | Daemon fans events out on the MCP channel; client sees them as `<channel source="tribe">`. |
+| **pull**   | Codex, Gemini, or any MCP-only client without a notification reader.                         | Events queue in SQLite; client drains via `tribe.ping` or `tribe.inbox`.                   |
+
+**How to declare on join.** Pass `delivery: "push" | "pull"` to `tribe.join`. The stdio-adapter reads the `TRIBE_DELIVERY` env var and threads it into the join call automatically — pull-mode clients usually never call `tribe.join` directly; setting the env on the MCP server entry is enough.
+
+**Codex example** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.tribe.env]
+TRIBE_DELIVERY = "pull"
+```
+
+**Draining in pull mode.** `tribe.ping()` is the canonical "give me my events" call — returns all broadcasts + DMs received since the session's last cursor. `tribe.inbox()` is semantically equivalent (both return the queued events and advance the cursor) and remains available for callers that already use it. Pick `tribe.ping` for new code.
+
+**Watch clients** (`tribe-watch`, `tribe-cli` log/events) always receive push regardless of the recipient's declared mode — the per-session toggle only gates _agent-bound_ fanout.
+
+**Future arc.** Once silvercode squad mode lands, it will wrap codex/gemini sessions and re-advertise them as push by proxying the notification channel through the host. Pull is the transitional fallback for MCP-only clients today; long-term the host owns the channel and squad members go back to push.
+
+**Internals** (for daemon work): per-session delivery lives in `sessions.delivery` (schema v12, NOT NULL DEFAULT `'push'`). The fanout filter is in `tools/lib/tribe/compose/with-broadcast.ts` — `toConnected` skips socket fanout for pull-mode recipients.
