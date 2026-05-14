@@ -1314,6 +1314,10 @@ function withConfigMetrics() {
 var createLogger = pipe(baseCreateLogger, withEnvDefaults(), withSpans(), withConfigMetrics());
 // ../loggily/src/index.ts
 _setLogFileWriterFactory(createFileWriter);
+if (_env.DEBUG_LOG) {
+  _env.LOG_FILE ??= _env.DEBUG_LOG;
+  _suppressConsole = true;
+}
 
 // packages/tribe-client/src/parser.ts
 var log = createLogger("tribe-client:parser");
@@ -2315,6 +2319,12 @@ You are the chief of a tribe \u2014 a coordinator for multiple Claude Code sessi
 
 ${joinInstruction}
 
+Turn-start inbox check:
+- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
+- Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
+
 Coordination protocol:
 - Use tribe.members() to see who's online and their domains
 - Use tribe.send(to, message, type) to assign work, answer queries, or approve requests
@@ -2334,6 +2344,12 @@ Tribe messages:
 You are a tribe member \u2014 a worker session coordinated by the chief.
 
 ${joinInstruction}
+
+Turn-start inbox check:
+- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
+- Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
 Coordination protocol:
 - When you START work on a task, broadcast what you're doing: tribe.send(to="*", message="starting: <task>")

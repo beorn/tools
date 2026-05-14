@@ -41,9 +41,14 @@ import { dirname } from "node:path"
 import { spawn } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { TOOLS_LIST } from "./lib/tribe/tools-list.ts"
-import { createLogger } from "loggily"
+import { createLogger, setSuppressConsole } from "loggily"
 import { createTimers } from "./lib/tribe/timers.ts"
 import { defangModelInput } from "../plugins/injection-envelope/src/defang.ts"
+
+if (process.env.DEBUG_LOG) {
+  process.env.LOG_FILE ??= process.env.DEBUG_LOG
+  setSuppressConsole(true)
+}
 
 const log = createLogger("tribe:stdio-adapter")
 
@@ -256,6 +261,12 @@ You are the chief of a tribe — a coordinator for multiple Claude Code sessions
 
 ${joinInstruction}
 
+Turn-start inbox check:
+- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
+- Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
+
 Coordination protocol:
 - Use tribe.members() to see who's online and their domains
 - Use tribe.send(to, message, type) to assign work, answer queries, or approve requests
@@ -276,6 +287,12 @@ const memberInstructions = `Messages from other Claude Code sessions arrive as <
 You are a tribe member — a worker session coordinated by the chief.
 
 ${joinInstruction}
+
+Turn-start inbox check:
+- At the start of each user turn, call tribe.inbox({ limit: 50 }) before responding.
+- If direct-message context is needed, also call tribe.history({ with: <your session name>, limit: 20 }).
+- Surface only actionable items: direct messages, requests, blockers, assignments, chief verdicts, CI alerts, or user-relevant coordination.
+- Ignore routine ambient joins/leaves, git commits, low-severity status, and notification-only events unless explicitly asked.
 
 Coordination protocol:
 - When you START work on a task, broadcast what you're doing: tribe.send(to="*", message="starting: <task>")
