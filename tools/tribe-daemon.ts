@@ -21,7 +21,7 @@ import { beadsPlugin } from "./lib/tribe/beads-plugin.ts"
 import { githubPlugin } from "./lib/tribe/github-plugin.ts"
 import { healthMonitorPlugin } from "./lib/tribe/health-monitor-plugin.ts"
 import { accountlyPlugin } from "./lib/tribe/accountly-plugin.ts"
-import { doltReaperPlugin } from "./lib/tribe/dolt-reaper-plugin.ts"
+
 import {
   createBaseTribe,
   loreTools,
@@ -172,7 +172,7 @@ const withSignalsShape = withSignals<typeof withHotReloadShape>({
 const tribe = withRuntime<typeof withSignalsShape>({
   plugins: process.env.TRIBE_NO_PLUGINS
     ? []
-    : [gitPlugin, beadsPlugin, githubPlugin, healthMonitorPlugin, accountlyPlugin, doltReaperPlugin],
+    : [gitPlugin, beadsPlugin, githubPlugin, healthMonitorPlugin, accountlyPlugin],
   publishActivePluginNames: (n) => {
     refs.activePluginNames = n
   },
