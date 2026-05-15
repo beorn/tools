@@ -99,3 +99,17 @@ TRIBE_DELIVERY = "pull"
 **Future arc.** Once silvercode squad mode lands, it will wrap codex/gemini sessions and re-advertise them as push by proxying the notification channel through the host. Pull is the transitional fallback for MCP-only clients today; long-term the host owns the channel and squad members go back to push.
 
 **Internals** (for daemon work): per-session delivery lives in `sessions.delivery` (schema v12, NOT NULL DEFAULT `'push'`). The fanout filter is in `tools/lib/tribe/compose/with-broadcast.ts` — `toConnected` skips socket fanout for pull-mode recipients.
+
+## Topic Trust Tiers
+
+The canonical topic-to-trust registry lives in `vendor/bearly/tools/lib/tribe/trust.ts` and is exported through `@bearly/tribe-client` for prompt adapters. Unknown topics fail closed to `external`.
+
+| Topic glob | Trust tier | Treatment |
+|---|---|---|
+| `tribe.send` | `internal` | Rostered peer messages: sanitized, length-capped, fenced |
+| `daemon:*` | `daemon` | Daemon lifecycle/session events: fenced |
+| `health:*` | `daemon` | Daemon health/account/reaper/git-lock events: fenced |
+| `bead:*` | `internal` | Local bead observer events: sanitized, length-capped, fenced |
+| `git:commit` | `external` | ID-only stub by default |
+| `github:*` | `external` | ID-only stub by default |
+| `ci:*` | `external` | ID-only stub by default |

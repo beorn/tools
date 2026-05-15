@@ -2,7 +2,6 @@
  * Tribe tool handlers — all MCP tool case implementations.
  */
 
-import type { Database } from "bun:sqlite"
 import { createLogger } from "loggily"
 import type { TribeContext } from "./context.ts"
 import type { TribeRole } from "./config.ts"
@@ -12,6 +11,7 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { validateName, sanitizeMessage } from "./validation.ts"
 import { sendMessage, logEvent } from "./messaging.ts"
 import { isPidAlive as pidStillAlive } from "./session.ts"
+import { senderMayUseRegisteredTrustTopic, type SessionRoster } from "./trust.ts"
 
 // ---------------------------------------------------------------------------
 // Reconciler snapshot — read-only view into chief-reconciler output, surfaced
@@ -112,7 +112,18 @@ export const TRIBE_COORD_METHODS = {
 
 export type TribeCoordMethod = (typeof TRIBE_COORD_METHODS)[keyof typeof TRIBE_COORD_METHODS]
 
-const REMOVED_TRIBE_METHODS = new Set(["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read", "broadcast", "history", "inbox", "ping", "read"])
+const REMOVED_TRIBE_METHODS = new Set([
+  "tribe.broadcast",
+  "tribe.history",
+  "tribe.inbox",
+  "tribe.ping",
+  "tribe.read",
+  "broadcast",
+  "history",
+  "inbox",
+  "ping",
+  "read",
+])
 const REMOVED_TRIBE_METHOD_HINT = "use send/fetch/filter — see hub/bearly/design/tribe-message-bus.md"
 
 export function isRemovedTribeMethod(name: string): boolean {
@@ -226,6 +237,11 @@ function listActiveSessionNames(ctx: TribeContext, activeIds?: Set<string>): str
     .sort()
 }
 
+function parseDomains(value: string): string[] {
+  const parsed: unknown = JSON.parse(value)
+  return Array.isArray(parsed) && parsed.every((v) => typeof v === "string") ? parsed : []
+}
+
 function handleSend(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResult {
   const msgType = (a.type as string) ?? "notify"
   // Only the current chief can assign or verdict
@@ -333,7 +349,7 @@ function handleSessions(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): Tool
     return {
       name: r.name,
       role: r.role,
-      domains: JSON.parse(r.domains),
+      domains: parseDomains(r.domains),
       pid: r.pid,
       cwd: r.cwd,
       claude_session_id: r.claude_session_id,
@@ -469,7 +485,9 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
       ctx.db
         .prepare("UPDATE sessions SET name = $tomb, updated_at = $now WHERE id = $id")
         .run({ $tomb: tombstoneName, $now: Date.now(), $id: taken.id })
-      log.info?.(`tribe.join takeover: "${joinName}" reclaimed from active session ${taken.id} (tombstoned as "${tombstoneName}")`)
+      log.info?.(
+        `tribe.join takeover: "${joinName}" reclaimed from active session ${taken.id} (tombstoned as "${tombstoneName}")`,
+      )
     }
   }
 
@@ -506,9 +524,11 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
   const delivery =
     deliveryRaw === "push" || deliveryRaw === "pull"
       ? deliveryRaw
-      : (ctx.db.prepare("SELECT delivery FROM sessions WHERE id = $id").get({ $id: ctx.sessionId }) as
-          | { delivery: string }
-          | undefined)?.delivery ?? "push"
+      : ((
+          ctx.db.prepare("SELECT delivery FROM sessions WHERE id = $id").get({ $id: ctx.sessionId }) as
+            | { delivery: string }
+            | undefined
+        )?.delivery ?? "push")
 
   logEvent(ctx, "session.joined", undefined, {
     name: joinName,
@@ -580,7 +600,7 @@ function handleHealth(ctx: TribeContext, opts: HandlerOpts): ToolResult {
     return {
       name: s.name,
       role: s.role,
-      domains: JSON.parse(s.domains),
+      domains: parseDomains(s.domains),
       pid: s.pid,
       alive,
       pid_alive: pidAlive,
@@ -608,8 +628,10 @@ function handleHealth(ctx: TribeContext, opts: HandlerOpts): ToolResult {
     .all() as Array<{ recipient: string; count: number }>
 
   const stats = {
-    messages: (ctx.db.prepare("SELECT COUNT(*) as n FROM messages").get() as any)?.n ?? 0,
-    events: (ctx.db.prepare("SELECT COUNT(*) as n FROM messages WHERE kind = 'event'").get() as any)?.n ?? 0,
+    messages: (ctx.db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number } | undefined)?.n ?? 0,
+    events:
+      (ctx.db.prepare("SELECT COUNT(*) as n FROM messages WHERE kind = 'event'").get() as { n: number } | undefined)
+        ?.n ?? 0,
   }
 
   const result: Record<string, unknown> = { members, unread, stats, checked_at: new Date().toISOString() }
@@ -649,7 +671,7 @@ function handleReload(ctx: TribeContext, a: ToolArgs, cleanup: () => void): Tool
       env: process.env,
     })
     // Forward exit
-    child.exited.then((code) => process.exit(code ?? 0))
+    void child.exited.then((code) => process.exit(code ?? 0)).catch(() => process.exit(1))
   }, 100) // small delay so the tool response gets sent first
 
   return {
@@ -760,6 +782,16 @@ type FetchRow = {
   room_id: string | null
 }
 
+function sessionRoster(ctx: TribeContext): SessionRoster {
+  return ctx.db.prepare("SELECT name, role FROM sessions").all() as Array<{ name: string; role: string | null }>
+}
+
+function filterRowsByTrust(ctx: TribeContext, rows: FetchRow[]): FetchRow[] {
+  if (rows.length === 0) return rows
+  const roster = sessionRoster(ctx)
+  return rows.filter((r) => senderMayUseRegisteredTrustTopic(r.topic, r.sender, roster))
+}
+
 function handleFetch(ctx: TribeContext, a: ToolArgs): ToolResult {
   const limit = typeof a.limit === "number" && a.limit > 0 && a.limit <= 500 ? a.limit : 50
   const topics = normalizeStringArray(a.topics)
@@ -843,11 +875,18 @@ function handleFetch(ctx: TribeContext, a: ToolArgs): ToolResult {
     shouldAdvance = hasSince ? a.advance === true : a.advance !== false
   }
 
+  const visibleRows = rows
+  rows = filterRowsByTrust(ctx, visibleRows)
   const filtered = topics && topics.length > 0 ? rows.filter((r) => matchesGlob(topics, r.topic)) : rows
+  const cursorRows = topics && topics.length > 0 ? visibleRows.filter((r) => matchesGlob(topics, r.topic)) : visibleRows
+  let outputCursor = filtered.at(-1)?.rowid ?? cursorBase
 
-  if (filtered.length > 0 && shouldAdvance) {
-    const maxSeq = filtered[filtered.length - 1]!.rowid
-    ctx.stmts.advanceInboxCursor.run({ $id: ctx.sessionId, $seq: maxSeq, $now: Date.now() })
+  if (cursorRows.length > 0 && shouldAdvance) {
+    const last = cursorRows.at(-1)
+    if (last) {
+      ctx.stmts.advanceInboxCursor.run({ $id: ctx.sessionId, $seq: last.rowid, $now: Date.now() })
+      outputCursor = last.rowid
+    }
   }
 
   const events = filtered.map((r) => ({
@@ -868,11 +907,7 @@ function handleFetch(ctx: TribeContext, a: ToolArgs): ToolResult {
     content: [
       {
         type: "text",
-        text: JSON.stringify(
-          { events, cursor: events.length > 0 ? events[events.length - 1]!.rowid : cursorBase },
-          null,
-          2,
-        ),
+        text: JSON.stringify({ events, cursor: outputCursor }, null, 2),
       },
     ],
   }
