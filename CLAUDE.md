@@ -50,8 +50,12 @@ These live in `tools/` and run from source. They will eventually become independ
 | `llm`            | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`            |
 | `recall`         | Session history search, LLM synthesis                       | `bun tools/recall.ts`         |
 | `tty`            | TTY testing MCP server                                      | `bun tools/tty.ts`            |
-| `worktree`       | Git worktree management with submodules                     | `bun tools/worktree.ts`       |
+| `worktree`       | Git worktree management with submodules — **now lives in km/tools/worktree.ts** (see note below) | `bun tools/worktree.ts` (km root) |
 | `github-channel` | GitHub notifications (deprecated — use tribe github plugin) | `bun tools/github-channel.ts` |
+
+### Note: `worktree` moved out of vendor/bearly
+
+Per [`@km/all/worktree-tooling-submodule-cycle`](https://github.com/beorn/km/blob/main/%40km/all/worktree-tooling-submodule-cycle.md): the canonical `bun worktree` tool now lives at `km/tools/worktree.ts`, not in this submodule. This breaks the submodule-pointer-propagation cycle where main bumps the bearly pointer for a worktree-tooling fix but each git-worktree carries its own pinned pointer that doesn't auto-update. `vendor/bearly` retains the source for backwards-compatible callers but the km root is the source of truth.
 
 ### Tribe Tools (part of @bearly/tribe)
 
