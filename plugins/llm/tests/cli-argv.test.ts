@@ -76,12 +76,18 @@ async function runWithArgv(argv: readonly string[]): Promise<void> {
     const mod = await import("../src/cli")
     await mod.main()
   } catch (e) {
-    if (!/^__exit_/.test((e as Error).message)) throw e
+    if (!(e as Error).message.startsWith("__exit_")) throw e
   }
 }
 
 function lastAskAndFinishArgs(): Record<string, any> | undefined {
   const calls = askAndFinishMock.mock.calls
+  const last = calls[calls.length - 1]
+  return last?.[0] as Record<string, any> | undefined
+}
+
+function lastRunProDualArgs(): Record<string, any> | undefined {
+  const calls = runProDualMock.mock.calls
   const last = calls[calls.length - 1]
   return last?.[0] as Record<string, any> | undefined
 }
@@ -172,5 +178,23 @@ describe("cli argv parsing", () => {
     expect(env.exitCodes).toContain(1)
     const stderrAll = env.stderr.join("\n")
     expect(stderrAll).toMatch(/Unknown model:\s+acme\/custom-7b/)
+  }, 10_000)
+
+  it("pro --bead VALUE injects bead context without leaking VALUE into the question", async () => {
+    const env = makeTestEnv()
+    const beadPath = join(env.tmpDir, "demo-bead.md")
+    writeFileSync(beadPath, "# [ ] Demo bead\n\nGround truth from bead body.\n")
+    mockOk()
+
+    await runWithArgv(["pro", "-y", "--bead", beadPath, "--no-challenger", "what should change?"])
+
+    const args = lastRunProDualArgs()
+    expect(args).toBeDefined()
+    expect(args!.question).toBe("what should change?")
+    expect(args!.question).not.toContain(beadPath)
+
+    const context = await args!.buildContext("what should change?")
+    expect(context).toContain("# /pro --bead context")
+    expect(context).toContain("Ground truth from bead body.")
   }, 10_000)
 })

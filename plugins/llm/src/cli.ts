@@ -111,6 +111,7 @@ const VALUE_FLAGS = [
   "--model",
   "--context",
   "--context-file",
+  "--bead",
   "--output",
   "--image",
   "--challenger",
@@ -296,12 +297,20 @@ if (imagePath) {
 }
 
 /** Build context from CLI flags */
-function buildContextFromFlags(topic: string): Promise<string | undefined> {
-  return buildContext(topic, {
+async function buildContextFromFlags(topic: string, opts: { includeBead?: boolean } = {}): Promise<string | undefined> {
+  const parts: string[] = []
+  const explicitContext = await buildContext(topic, {
     contextArg: getArg("--context"),
     contextFiles: getAllArgs("--context-file"),
     withHistory: hasFlag("--with-history"),
   })
+  if (explicitContext) parts.push(explicitContext)
+  if (opts.includeBead) {
+    const { buildBeadContext } = await import("./lib/bead-context")
+    const beadContext = await buildBeadContext(getArg("--bead"))
+    if (beadContext) parts.push(beadContext)
+  }
+  return parts.length > 0 ? parts.join("\n\n---\n\n") : undefined
 }
 
 function extractText(fromAll: boolean, exclude?: string[]): string {
@@ -448,6 +457,8 @@ FLAGS
   --with-history         Include relevant context from session history
   --context <text>       Provide explicit context (prepended to topic)
   --context-file <path>  Read context from a file
+  --bead <id|path>       For pro: prepend bead body, linked test output,
+                         cited code snippets, and blame to context
   --output <file>        Write response to specific file (default: auto /tmp/llm-<session>-<slug>-<rand>.txt)
   --json                 Pipe-friendly mode: stdout gets a single JSON envelope
                          line, all human text goes to stderr. Schema:
@@ -787,7 +798,6 @@ export async function main(): Promise<string | undefined> {
         modelOverride,
         imagePath,
         streamToken,
-        buildContext: buildContextFromFlags,
         outputFile,
         sessionTag,
         skipConfirm,
@@ -796,6 +806,7 @@ export async function main(): Promise<string | undefined> {
         legs: legs != null && Number.isFinite(legs) ? legs : undefined,
         extraExclude: excludeArgs,
         challengerOverride: getArg("--challenger"),
+        buildContext: (topic: string) => buildContextFromFlags(topic, { includeBead: true }),
       })
       break
     }
