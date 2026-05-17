@@ -21,6 +21,7 @@
     "./seo": "./src/seo.ts",
     "./validate": "./src/validate.ts",
     "./terminal-glossary": "./src/terminal-glossary.ts",
+    "./terminfo": "./src/terminfo.ts",
     "./doc-glossary": "./src/doc-glossary.ts",
     "./ecosystem-glossary": "./src/ecosystem-glossary.ts",
     "./css/tooltip.css": "./src/css/tooltip.css",
@@ -52,6 +53,10 @@
       "./terminal-glossary": {
         "types": "./dist/terminal-glossary.d.mts",
         "import": "./dist/terminal-glossary.mjs"
+      },
+      "./terminfo": {
+        "types": "./dist/terminfo.d.mts",
+        "import": "./dist/terminfo.mjs"
       },
       "./doc-glossary": {
         "types": "./dist/doc-glossary.d.mts",
@@ -93,6 +98,7 @@
       "src/seo.ts",
       "src/validate.ts",
       "src/terminal-glossary.ts",
+      "src/terminfo.ts",
       "src/doc-glossary.ts",
       "src/ecosystem-glossary.ts"
     ],

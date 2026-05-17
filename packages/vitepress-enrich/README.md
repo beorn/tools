@@ -85,7 +85,7 @@ That's it. Every page now gets glossary auto-linking, tooltips, and structured d
 
 ```typescript
 interface GlossaryEntity {
-  term: string // Text to match (word-boundary, case-sensitive)
+  term: string // Text to match (identifier-boundary, case-sensitive)
   href?: string // Link URL — omit for tooltip-only
   tooltip?: string // Hover tooltip text
   external?: boolean // Opens in new tab
@@ -152,6 +152,19 @@ const enrichedHtml = linkify("Use SelectList for keyboard navigation")
 // → 'Use <a href="/api/select-list" class="hover-link" data-tooltip="...">SelectList</a> for keyboard navigation'
 ```
 
+For terminfo.dev-style sites, build the entity list from content JSON once and
+reuse it for both markdown pages and dynamic route content:
+
+```typescript
+import { createLinkifier, loadTerminfoEntities } from "@bearly/vitepress-enrich"
+
+const entities = loadTerminfoEntities("content", {
+  tooltipOnlyHrefs: ["/about", "/features", "/glossary", "/standards"],
+})
+
+const linkify = createLinkifier(entities)
+```
+
 ## Validation
 
 `validateGlossary()` runs at build time and:
@@ -167,6 +180,7 @@ const enrichedHtml = linkify("Use SelectList for keyboard navigation")
 | `createLinkifier`      | `@bearly/vitepress-enrich/linkify`                | Build-time string linkifier |
 | `seoHead`              | `@bearly/vitepress-enrich/seo`                    | Static `<head>` entries     |
 | `seoTransformPageData` | `@bearly/vitepress-enrich/seo`                    | Per-page SEO hook           |
+| `loadTerminfoEntities` | `@bearly/vitepress-enrich/terminfo`               | terminfo.dev content loader |
 | `validateGlossary`     | `@bearly/vitepress-enrich/validate`               | Build-time link validation  |
 | `compileEntities`      | `@bearly/vitepress-enrich`                        | Low-level entity compiler   |
 | `replaceEntities`      | `@bearly/vitepress-enrich`                        | Low-level text replacer     |

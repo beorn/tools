@@ -25,7 +25,7 @@ export function compileEntities(entities: GlossaryEntity[]): CompiledEntity[] {
     seen.add(e.term)
     compiled.push({
       term: e.term,
-      pattern: new RegExp(`\\b${escapeRegex(e.term)}\\b`, "g"),
+      pattern: new RegExp(`(?<![A-Za-z0-9_])${escapeRegex(e.term)}(?![A-Za-z0-9_])`, "g"),
       href: e.href ?? "",
       tooltip: e.tooltip ?? "",
       tooltipOnly: !e.href,
@@ -48,12 +48,21 @@ function renderEntity(original: string, entity: CompiledEntity): string {
   return `<span class="glossary-hint"${tooltip}>${original}</span>`
 }
 
+function isLinked(entity: CompiledEntity, linkedTerms?: Set<string>): boolean {
+  return Boolean(linkedTerms?.has(entity.term) || (entity.href && linkedTerms?.has(entity.href)))
+}
+
+function markLinked(entity: CompiledEntity, linkedTerms?: Set<string>): void {
+  linkedTerms?.add(entity.term)
+  if (entity.href) linkedTerms?.add(entity.href)
+}
+
 /**
  * Replace entity mentions in a text string with HTML tags.
  * Entities are processed longest-first; positions already matched are skipped.
- * If `linkedTerms` is provided, only the first occurrence of each term is linked.
+ * If `linkedTerms` is provided, only the first occurrence of each term/href is linked.
  */
-export function replaceEntities(text: string, entities: CompiledEntity[], _linkedTerms?: Set<string>): string {
+export function replaceEntities(text: string, entities: CompiledEntity[], linkedTerms?: Set<string>): string {
   const matches: Array<{ start: number; end: number; entity: CompiledEntity }> = []
   const occupied = new Set<number>()
 
@@ -72,7 +81,9 @@ export function replaceEntities(text: string, entities: CompiledEntity[], _linke
       }
       if (overlap) continue
       for (let p = start; p < end; p++) occupied.add(p)
+      if (isLinked(entity, linkedTerms)) continue
       matches.push({ start, end, entity })
+      markLinked(entity, linkedTerms)
     }
   }
 
@@ -141,7 +152,9 @@ export function replaceInHtml(html: string, entities: CompiledEntity[], linkedTe
         }
         if (overlap) continue
         for (let p = absStart; p < absEnd; p++) occupied.add(p)
+        if (isLinked(entity, linkedTerms)) continue
         matches.push({ start: absStart, end: absEnd, entity })
+        markLinked(entity, linkedTerms)
       }
     }
   }

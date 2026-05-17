@@ -4,7 +4,7 @@
 
 /** A glossary entity that can be auto-linked in content. */
 export interface GlossaryEntity {
-  /** The term to match (case-sensitive, word-boundary matched). */
+  /** The term to match (case-sensitive, identifier-boundary matched). */
   term: string
   /** URL to link to. Omit for tooltip-only (no navigation). */
   href?: string
