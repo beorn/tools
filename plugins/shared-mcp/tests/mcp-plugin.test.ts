@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { mkdtempSync, statSync, existsSync, readdirSync } from "node:fs"
+import { mkdtempSync, statSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { request as httpRequest, type IncomingMessage } from "node:http"
@@ -149,6 +149,12 @@ async function until(pred: () => boolean, timeoutMs = 1_000, stepMs = 10): Promi
 }
 
 describe("createMcpPlugin (post-elegance-review spec)", () => {
+  it("does not carry the Bun #7716 URL.toString Request shim", () => {
+    const source = readFileSync(new URL("../mcp-plugin.ts", import.meta.url), "utf8")
+    expect(source).not.toContain("new Request(url.toString()")
+    expect(source).not.toContain("UPSTREAM-WAITING(oven-sh/bun#7716)")
+  })
+
   // (a) idleTimeoutMs fires after no activity
   it("idleTimeoutMs fires shutdown when connection count drops to zero and stays there", async () => {
     const shutdowns: string[] = []
