@@ -41,7 +41,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "loggily": "^0.4.2"
+    "loggily": "^0.10.0"
   },
   "devDependencies": {
     "tsdown": "^0.21.7",
