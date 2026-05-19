@@ -38,6 +38,15 @@ export const TtyTypeInputSchema = z.object({
 export const TtyScreenshotInputSchema = z.object({
   sessionId: SessionIdSchema,
   outputPath: z.string().optional(),
+  /**
+   * Renderer to use. "canvas" (default) drives ghostty-web's CanvasRenderer
+   * in playwright — real-fidelity truecolor + glyph shaping + retina (the
+   * Visual Eyes path). "svg" keeps the legacy SVG → PNG path (deterministic
+   * baseline; lower fidelity).
+   */
+  renderer: z.enum(["canvas", "svg"]).optional(),
+  /** Override the canvas font path (absolute). Default: bundled Iosevka if available. */
+  fontPath: z.string().optional(),
 })
 
 export const TtyTextInputSchema = z.object({

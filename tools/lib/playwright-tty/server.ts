@@ -11,7 +11,7 @@
 
 import type { Browser } from "playwright"
 import type { Terminal } from "@termless/core"
-import { createTerminal } from "@termless/core"
+import { createTerminal, screenshotCanvasPng } from "@termless/core"
 import { createXtermBackend } from "@termless/xtermjs"
 import {
   TtyStartInputSchema,
@@ -257,9 +257,23 @@ export class PlaywrightTtyBackend {
       case "tty_screenshot": {
         const input = TtyScreenshotInputSchema.parse(args)
         const session = this.getSession(input.sessionId)
-        const svg = session.terminal.screenshotSvg()
+        const renderer = input.renderer ?? "canvas"
 
-        // Launch browser lazily for rendering SVG to PNG
+        if (renderer === "canvas") {
+          // Visual Eyes path — ghostty-web CanvasRenderer in headless playwright.
+          // Real-fidelity truecolor + glyph shaping + retina (DPR 2).
+          const buffer = await screenshotCanvasPng(session.terminal, {
+            fontPath: input.fontPath,
+          })
+          if (input.outputPath) {
+            await writeFile(input.outputPath, buffer)
+            return { path: input.outputPath, mimeType: "image/png" }
+          }
+          return { data: Buffer.from(buffer).toString("base64"), mimeType: "image/png" }
+        }
+
+        // Legacy SVG → PNG path (deterministic, lower fidelity).
+        const svg = session.terminal.screenshotSvg()
         const browser = await this.ensureBrowser()
         const context = await browser.newContext()
         const page = await context.newPage()

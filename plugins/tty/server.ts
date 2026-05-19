@@ -185,6 +185,11 @@ async function main() {
       inputSchema: {
         sessionId: z.string().describe("Session ID"),
         outputPath: z.string().optional().describe("File path to save (returns base64 if omitted)"),
+        renderer: z
+          .enum(["canvas", "svg"])
+          .optional()
+          .describe("'canvas' (default) — ghostty-web in playwright, real-fidelity. 'svg' — legacy resvg path."),
+        fontPath: z.string().optional().describe("Absolute path to a .ttf font for canvas renderer (e.g. Iosevka Nerd Font Mono)"),
       },
     },
     safeTool(async (args) => {
