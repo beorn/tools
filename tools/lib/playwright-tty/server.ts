@@ -11,7 +11,8 @@
 
 import type { Browser } from "playwright"
 import type { Terminal } from "@termless/core"
-import { createTerminal, screenshotCanvasPng } from "@termless/core"
+import { createTerminal, createFrameTracer, screenshotCanvasPng } from "@termless/core"
+import type { FrameTracer } from "@termless/core"
 import { createXtermBackend } from "@termless/xtermjs"
 import {
   TtyStartInputSchema,
@@ -22,6 +23,7 @@ import {
   TtyTextInputSchema,
   TtyWaitInputSchema,
   TtyListInputSchema,
+  TtyTraceInputSchema,
   type TtyStartOutput,
   type TtyListOutput,
   type TtyStopOutput,
@@ -30,6 +32,7 @@ import {
   type TtyScreenshotOutput,
   type TtyTextOutput,
   type TtyWaitOutput,
+  type TtyTraceOutput,
 } from "./types.js"
 import { writeFile } from "fs/promises"
 
@@ -41,6 +44,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
   tty_type: 5_000,
   tty_screenshot: 15_000, // may need to launch browser
   tty_text: 5_000,
+  tty_trace: 5_000,
 }
 
 const POLL_INTERVAL = 50
@@ -75,6 +79,7 @@ interface TtySession {
   command: string[]
   createdAt: Date
   terminal: Terminal
+  frameTracer: FrameTracer | null
 }
 
 type ToolOutput =
@@ -86,6 +91,7 @@ type ToolOutput =
   | TtyScreenshotOutput
   | TtyTextOutput
   | TtyWaitOutput
+  | TtyTraceOutput
 
 export class PlaywrightTtyBackend {
   private sessions = new Map<string, TtySession>()
@@ -181,11 +187,24 @@ export class PlaywrightTtyBackend {
         const cols = input.cols ?? 120
         const rows = input.rows ?? 40
 
+        // Late-bound so we can register the tracer's onWrite hook into the
+        // terminal's onAfterWrite at construction time.
+        let frameTracer: FrameTracer | null = null
         const terminal = createTerminal({
           backend: createXtermBackend({ cols, rows }),
           cols,
           rows,
+          onAfterWrite: (data) => frameTracer?.onWrite(data),
         })
+        if (input.frames) {
+          frameTracer = createFrameTracer(terminal, {
+            dir: input.frames.dir,
+            debounceMs: input.frames.debounceMs,
+            maxFrames: input.frames.maxFrames,
+            dedupe: input.frames.dedupe,
+            canvas: { cols, rows, fontPath: input.frames.fontPath },
+          })
+        }
 
         await terminal.spawn(input.command, {
           env: input.env as Record<string, string> | undefined,
@@ -211,6 +230,7 @@ export class PlaywrightTtyBackend {
           command: input.command,
           createdAt: new Date(),
           terminal,
+          frameTracer,
         })
         return { sessionId: id }
       }
@@ -229,6 +249,10 @@ export class PlaywrightTtyBackend {
       case "tty_stop": {
         const input = TtyStopInputSchema.parse(args)
         const session = this.getSession(input.sessionId)
+        let frameSummary: Awaited<ReturnType<FrameTracer["stop"]>> | null = null
+        if (session.frameTracer) {
+          frameSummary = await session.frameTracer.stop()
+        }
         await session.terminal.close()
         this.sessions.delete(input.sessionId)
 
@@ -237,6 +261,9 @@ export class PlaywrightTtyBackend {
           await this.closeBrowser()
         }
 
+        if (frameSummary) {
+          return { success: true, frames: frameSummary } as TtyStopOutput
+        }
         return { success: true }
       }
 
@@ -320,6 +347,19 @@ export class PlaywrightTtyBackend {
           }
           throw err
         }
+      }
+
+      case "tty_trace": {
+        const input = TtyTraceInputSchema.parse(args)
+        const session = this.getSession(input.sessionId)
+        if (!session.frameTracer) {
+          throw new Error(`Session ${input.sessionId} was not started with frame-trace mode. Pass \`frames: { dir }\` to tty_start.`)
+        }
+        const frames =
+          input.sinceTs != null
+            ? session.frameTracer.framesSinceTime(input.sinceTs)
+            : session.frameTracer.framesSinceSeq(input.sinceSeq ?? 0)
+        return { frames }
       }
 
       default:

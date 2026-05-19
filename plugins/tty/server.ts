@@ -94,6 +94,16 @@ async function main() {
           .describe("Wait condition: 'content', 'stable', or specific text"),
         timeout: z.number().default(5000).describe("Timeout in ms for waitFor condition (default: 5000)"),
         cwd: z.string().optional().describe("Working directory"),
+        frames: z
+          .object({
+            dir: z.string().describe("Directory to write index.jsonl + NNNNN.png frames into"),
+            debounceMs: z.number().default(16).describe("Debounce interval (default 16ms = 60fps)"),
+            maxFrames: z.number().default(10_000).describe("Hard cap (default 10_000)"),
+            dedupe: z.boolean().default(true).describe("Skip PNG for identical hashes (default true)"),
+            fontPath: z.string().optional().describe("Absolute path to .ttf for canvas renderer"),
+          })
+          .optional()
+          .describe("Visual Eyes Phase 2: enable frame-trace mode"),
       },
     },
     safeTool(async (args) => {
@@ -250,6 +260,26 @@ async function main() {
     },
     safeTool(async (args) => {
       const result = await backend.callTool("tty_wait", args)
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      }
+    }),
+  )
+
+  // trace - Poll frame-trace data mid-session (Visual Eyes Phase 2)
+  register(
+    server,
+    "trace",
+    {
+      description: "Poll frame-trace data for a session started with frames mode",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID"),
+        sinceSeq: z.number().optional().describe("Return frames with seq > sinceSeq (default 0)"),
+        sinceTs: z.number().optional().describe("Return frames with ts >= sinceTs (ms epoch, alternative to sinceSeq)"),
+      },
+    },
+    safeTool(async (args) => {
+      const result = await backend.callTool("tty_trace", args)
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       }
