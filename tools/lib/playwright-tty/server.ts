@@ -305,10 +305,12 @@ export class PlaywrightTtyBackend {
         const context = await browser.newContext()
         const page = await context.newPage()
         try {
-          await page.setContent(`<!DOCTYPE html><html><body style="margin:0;background:#000">${svg}</body></html>`, {
+          await page.setContent(`<!DOCTYPE html><html><body style="margin:0;padding:0;background:#000">${svg}</body></html>`, {
             waitUntil: "load",
           })
-          const buffer = await page.screenshot()
+          // Clip to the SVG element so the screenshot matches the actual
+          // rendered area — not playwright's default 1280×720 viewport.
+          const buffer = await page.locator("svg").screenshot({ omitBackground: false })
 
           if (input.outputPath) {
             await writeFile(input.outputPath, buffer)
