@@ -371,6 +371,14 @@ function handleRename(
     setUserRenamed: (v: boolean) => void
     /** Optional: when provided, allow reclaiming names held by non-active sessions. */
     getActiveSessionIds?: () => Set<string>
+    /** Optional: current chief id + name + whether the role was explicitly
+     *  claimed — used to detect a rename by the session holding the claim. */
+    getChiefInfo?: () => { id: string; name: string; claimed: boolean } | null
+    /** Optional: re-assert an explicit chief claim. Used so a rename by the
+     *  chief carries the claim to the new name instead of looking like the
+     *  chief left (which would drop the daemon back to connection-order
+     *  derivation and flap the chief identity). */
+    claimChief?: (sessionId: string, name: string) => void
   },
 ): ToolResult {
   const newName = a.new_name as string
@@ -417,9 +425,24 @@ function handleRename(
     log.info?.(`reclaimed name "${newName}" from dead session ${existing.id} (tombstoned as "${tombstoneName}")`)
   }
   const oldName = ctx.getName()
+  // A rename is the same session (same pid, same socket, same ctx.sessionId) —
+  // it must NOT look like the chief left. If this session currently holds the
+  // EXPLICIT chief claim, re-assert it across the rename so the claim moves
+  // old name → new name atomically. Without this, a stale claim (or any
+  // future name-anchored claim) drops the daemon back to connection-order
+  // derivation, and a random session becomes chief — the multi-way
+  // chief-identity flap reproduced 2026-05-20.
+  const chiefBefore = opts.getChiefInfo?.() ?? null
+  const heldExplicitClaim = chiefBefore?.claimed === true && chiefBefore.id === ctx.sessionId
   ctx.stmts.renameSession.run({ $new_name: newName, $session_id: ctx.sessionId, $now: Date.now() })
   ctx.setName(newName)
   opts.setUserRenamed(true) // Explicit rename — name is now sticky, won't be overridden
+  if (heldExplicitClaim) {
+    // Re-assert with the new name. claimChief is idempotent and keyed by
+    // sessionId, so this carries the claim forward and refreshes the
+    // displayed/logged chief name to match the post-rename identity.
+    opts.claimChief?.(ctx.sessionId, newName)
+  }
   // Broadcast the rename
   sendMessage(ctx, "*", `Member "${oldName}" is now "${newName}"`, "notify")
   logEvent(ctx, "session.renamed", undefined, { old_name: oldName, new_name: newName })
