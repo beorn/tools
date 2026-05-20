@@ -266,10 +266,16 @@ const daemon = await createReconnectingClient({
     // Startup banner — emit tribe state to the channel so the agent (and user) sees the setup
     try {
       const membersResult = (await client.call("tribe.members", {})) as { content: Array<{ text: string }> }
-      const membersData = JSON.parse(membersResult.content?.[0]?.text ?? "{}") as { sessions?: Array<{ name: string; role: string; alive: boolean; uptime_min: number; delivery?: string }> }
+      const membersData = JSON.parse(membersResult.content?.[0]?.text ?? "{}") as {
+        sessions?: Array<{ name: string; role: string; alive: boolean; uptime_min: number; delivery?: string }>
+      }
       const sessions = (membersData.sessions ?? []).filter((s: { alive: boolean }) => s.alive)
       const chief = reg.chief || sessions.find((s: { role: string }) => s.role === "chief")?.name || "(none)"
-      const peers = sessions.filter((s: { name: string }) => s.name !== myName).map((s: { name: string; role: string }) => `${s.name} (${s.role})`).join(", ") || "(solo)"
+      const peers =
+        sessions
+          .filter((s: { name: string }) => s.name !== myName)
+          .map((s: { name: string; role: string }) => `${s.name} (${s.role})`)
+          .join(", ") || "(solo)"
 
       const shortSocket = SOCKET_PATH.replace(process.env.HOME ?? "", "~")
       const banner = `**tribe** ${myName} (${myRole}) · chief: ${chief} · ${DELIVERY} · peers: ${peers} · ${shortSocket}`
@@ -360,6 +366,25 @@ Tribe messages:
 - Plain text only — no markdown (**bold**, headers, bullets). Renders as escaped text.
 - Don't over-broadcast — only send when it changes what someone else should know.`
 
+// `experimental["claude/channel"]` registers this MCP server as a Claude Code
+// *channel source*. Claude Code reads this capability from the `initialize`
+// response, then captures every `notifications/claude/channel` notification
+// the server emits (see `sendChannel` above) — queuing them and draining on
+// the next REPL turn. This IS Claude Code's native channel-delivery mechanism;
+// there is no `--channels` CLI flag (the flag does not exist in Claude Code
+// 2.1.145 — channel delivery is purely the MCP capability + notification).
+//
+// This is Mode 2 of the three-host tribe-delivery design (km epic 15409): a
+// `claude` session launched via `ag` receives tribe messages through this
+// channel pipe, no silvercode host and no pty send-keys hack. The tribe MCP
+// `tools/*` (fetch/send/members/…) stay alongside — channels is *additive*
+// delivery (push), the tools remain the pull surface.
+//
+// Native auto-wake of an idle REPL on channel arrival is currently bug-broken
+// upstream — Claude Code GitHub issue #44380 (channel messages queue but do
+// not wake an idle REPL). Channels-as-delivery is still correct: messages
+// arrive, queue, and drain on the next turn. The `/loop` heartbeat is the
+// interim wake mechanism until #44380 lands.
 mcp = new Server(
   { name: "tribe", version: "0.14.1" },
   {

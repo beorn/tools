@@ -154,16 +154,17 @@ import { openSync, writeSync, closeSync } from "fs";
 function createFileWriter(filePath, options = {}) {
   const bufferSize = options.bufferSize ?? 4096;
   const flushInterval = options.flushInterval ?? 100;
+  const fs = options.__fs ?? { openSync, writeSync, closeSync };
   let buffer = "";
   let fd = null;
   let timer = null;
   let closed = false;
-  fd = openSync(filePath, "a");
+  fd = fs.openSync(filePath, "a");
   function flush() {
     if (buffer.length === 0 || fd === null)
       return;
     const data = buffer;
-    writeSync(fd, data);
+    fs.writeSync(fd, data);
     buffer = "";
   }
   timer = setInterval(flush, flushInterval);
@@ -195,7 +196,7 @@ function createFileWriter(filePath, options = {}) {
         flush();
       } catch {} finally {
         if (fd !== null) {
-          closeSync(fd);
+          fs.closeSync(fd);
           fd = null;
         }
         process.removeListener("exit", exitHandler);
@@ -704,8 +705,18 @@ function buildPipeline(elements, parentConfig) {
       branch.dispatch(e);
     }
   };
+  const spanEnabledForNamespace = (namespace) => {
+    if (!spansEnabled)
+      return false;
+    if (outputs.some((output) => !output.nsFilter || output.nsFilter(namespace)))
+      return true;
+    if (branches.some((branch) => branch.spanEnabled(namespace)))
+      return true;
+    return stages.length > 0;
+  };
   return {
     dispatch,
+    spanEnabled: spanEnabledForNamespace,
     level: config.level,
     dispose: () => {
       for (const d of disposables)
@@ -879,6 +890,13 @@ function withMetrics(collector) {
 }
 
 // ../loggily/src/core.ts
+var SPAN_ENABLED = Symbol("loggily.spanEnabled");
+function spanIsEnabled(logger, namespace) {
+  if (collectSpans)
+    return true;
+  const checker = logger[SPAN_ENABLED];
+  return checker ? checker(namespace) : true;
+}
 var _getContextTags = null;
 var _getContextParent = null;
 var _enterContext = null;
@@ -976,6 +994,9 @@ function createLoggerImpl(name, props, pipeline) {
     get level() {
       return pipeline.level;
     },
+    [SPAN_ENABLED](namespace) {
+      return pipeline.spanEnabled(namespace);
+    },
     dispatch(event) {
       pipeline.dispatch(event);
     },
@@ -1036,10 +1057,11 @@ function withSpans() {
 }
 function augmentWithSpans(logger, parentSpanId, traceId, traceSampled) {
   const spanState = { parentSpanId, traceId, traceSampled };
+  const spanMethod = spanIsEnabled(logger, logger.name) ? createSpanMethod(logger, spanState) : undefined;
   return new Proxy(logger, {
     get(target, prop) {
       if (prop === "span") {
-        return createSpanMethod(target, spanState);
+        return spanMethod;
       }
       if (prop === "child") {
         return function child(namespaceOrContext, childProps) {
@@ -1241,6 +1263,21 @@ function withEnvDefaults() {
 function applyNamespaceGating(logger) {
   return new Proxy(logger, {
     get(target, prop) {
+      if (prop === SPAN_ENABLED) {
+        return (namespace) => {
+          if (collectSpans)
+            return true;
+          const trace = currentTrace();
+          if (!trace.enabled)
+            return false;
+          if (trace.filter && !trace.filter(namespace))
+            return false;
+          const ns = currentNs();
+          if (ns && !ns(namespace))
+            return false;
+          return true;
+        };
+      }
       if (typeof prop === "string" && prop in LOG_LEVEL_PRIORITY && prop !== "silent") {
         const nsLevel = readEnvLevelForNamespace(target.name);
         if (LOG_LEVEL_PRIORITY[prop] < LOG_LEVEL_PRIORITY[nsLevel]) {
@@ -1288,6 +1325,17 @@ function createEnvPipeline() {
   };
   return {
     dispatch,
+    spanEnabled(namespace) {
+      const trace = currentTrace();
+      if (!trace.enabled)
+        return false;
+      if (trace.filter && !trace.filter(namespace))
+        return false;
+      const ns = currentNs();
+      if (ns && !ns(namespace))
+        return false;
+      return true;
+    },
     get level() {
       return currentLevel();
     },
