@@ -11,7 +11,7 @@
 
 import type { Browser } from "playwright"
 import type { Terminal } from "@termless/core"
-import { createTerminal, createFrameTracer, screenshotCanvasPng } from "@termless/core"
+import { createTerminal, createFrameTracer } from "@termless/core"
 import type { FrameTracer } from "@termless/core"
 import { createXtermBackend } from "@termless/xtermjs"
 import {
@@ -287,9 +287,15 @@ export class PlaywrightTtyBackend {
         const renderer = input.renderer ?? "canvas"
 
         if (renderer === "canvas") {
-          // Visual Eyes path — ghostty-web CanvasRenderer in headless playwright.
-          // Real-fidelity truecolor + glyph shaping + retina (DPR 2).
-          const buffer = await screenshotCanvasPng(session.terminal, {
+          // Visual Eyes path — Terminal.screenshot() auto-picks the canonical
+          // renderer (today: @termless/ghostty's CanvasRenderer + napi-rs/canvas,
+          // in-process, no Playwright/Chromium dependency).
+          //
+          // This consumer is scheduled for deletion in Phase 0.5 step 8 of
+          // @km/infra/mcp-tty-ghostty-backend-toggle (the canonical tty MCP
+          // tool now lives in @termless/cli). The migration here just keeps
+          // it functional until the deletion lands.
+          const buffer = await session.terminal.screenshot({
             fontPath: input.fontPath,
           })
           if (input.outputPath) {
