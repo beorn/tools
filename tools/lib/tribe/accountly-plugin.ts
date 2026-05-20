@@ -8,9 +8,9 @@
  * more frequently as it approaches the threshold.
  *
  * Config via env vars:
- *   ACCOUNTLY_THRESHOLD_5HOUR   — 5-hour window % trigger (default: 95)
- *   ACCOUNTLY_THRESHOLD_7DAY    — 7-day window % trigger (default: 98)
- *   ACCOUNTLY_THRESHOLD_MONTHLY — monthly window % trigger (default: 95)
+ *   AG_THRESHOLD_5HOUR   — 5-hour window % trigger (default: 95)
+ *   AG_THRESHOLD_7DAY    — 7-day window % trigger (default: 98)
+ *   AG_THRESHOLD_MONTHLY — monthly window % trigger (default: 95)
  */
 
 import { existsSync } from "node:fs"
@@ -51,9 +51,9 @@ export interface AccountlyStatus {
 
 export function getThresholds(): AccountlyThresholds {
   return {
-    fiveHour: Number(process.env.ACCOUNTLY_THRESHOLD_5HOUR) || 95,
-    sevenDay: Number(process.env.ACCOUNTLY_THRESHOLD_7DAY) || 98,
-    monthly: Number(process.env.ACCOUNTLY_THRESHOLD_MONTHLY) || 95,
+    fiveHour: Number(process.env.AG_THRESHOLD_5HOUR) || 95,
+    sevenDay: Number(process.env.AG_THRESHOLD_7DAY) || 98,
+    monthly: Number(process.env.AG_THRESHOLD_MONTHLY) || 95,
   }
 }
 
@@ -122,7 +122,7 @@ export function getActiveMaxUtilization(status: AccountlyStatus): number {
 // Plugin
 // ---------------------------------------------------------------------------
 
-const ACCOUNTLY_CONFIG_PATH = resolve(homedir(), ".config/accountly/accounts.json")
+const ACCOUNTLY_CONFIG_PATH = resolve(homedir(), ".config/ag/accounts.json")
 
 export const accountlyPlugin: TribePluginApi = {
   name: "accountly",
@@ -155,11 +155,11 @@ export const accountlyPlugin: TribePluginApi = {
       }
 
       try {
-        const cliPath = resolve(process.cwd(), "packages/km-accounts/src/cli.ts")
-        if (!existsSync(cliPath)) {
+        const agBin = Bun.which("ag")
+        if (!agBin) {
           if (api.claimDedup("accountly:cli-missing")) {
             api.broadcast(
-              "accountly plugin: CLI not found, auto-rotation disabled",
+              "accountly plugin: `ag` not found on PATH, auto-rotation disabled",
               "health:account:error",
               undefined,
               {
@@ -171,8 +171,8 @@ export const accountlyPlugin: TribePluginApi = {
           return nextInterval
         }
 
-        // Check quotas via accountly CLI
-        const proc = Bun.spawn(["bun", cliPath, "status", "--json"], {
+        // Check quotas via the `ag` account CLI
+        const proc = Bun.spawn([agBin, "status", "--json"], {
           cwd: process.cwd(),
           stdout: "pipe",
           stderr: "pipe",
@@ -276,33 +276,20 @@ export const accountlyPlugin: TribePluginApi = {
           return nextInterval
         }
 
-        log.info?.(`auto-switching: ${decision.reason}`)
-        const autoProc = Bun.spawn(["bun", cliPath, "auto"], {
-          cwd: process.cwd(),
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        const [autoOut, autoErr] = await Promise.all([
-          new Response(autoProc.stdout).text(),
-          new Response(autoProc.stderr).text(),
-        ])
-        await autoProc.exited
-
-        if (autoProc.exitCode === 0) {
-          lastSwitchTime = Date.now()
-          api.broadcast(`Auto-switched account — ${decision.reason}`, "health:account:switched", undefined, {
-            delivery: "pull",
-            topic: "health:account:switched",
-          })
-        } else {
-          api.send(
-            "chief",
-            `Switch needed (${decision.reason}) but failed: ${(autoErr || autoOut).trim().slice(0, 200)}`,
-            "health:account:error",
-            undefined,
-            { delivery: "push", topic: "health:account:switch-failed" },
-          )
-        }
+        // The standalone `accountly auto` switch command was retired with the
+        // accountly CLI (15301). There is no non-launching "switch active
+        // account" command — switching is `ag profile claude default <name>`,
+        // a deliberate operator action. Surface the recommendation to chief
+        // rather than auto-executing; reuse the cooldown to avoid re-spamming.
+        log.info?.(`account switch recommended: ${decision.reason}`)
+        api.send(
+          "chief",
+          `Account switch recommended (${decision.reason}). Run \`ag profile claude default <name>\` to switch.`,
+          "health:account:error",
+          undefined,
+          { delivery: "push", topic: "health:account:switch-recommended" },
+        )
+        lastSwitchTime = Date.now()
       } catch (err) {
         // Rate-limit: only log once per unique error message per 10 minutes.
         // Previously this fired every poll (~5 min), flooding the warnings
