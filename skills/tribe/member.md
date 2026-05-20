@@ -5,13 +5,13 @@ Your job is doing assigned work, reporting status, and coordinating shared resou
 
 ## Tools
 
-| Tool              | Use                                       |
-| ----------------- | ----------------------------------------- |
-| `tribe.send`      | Send a message to chief or another member (use `to: "*"` for broadcast) |
-| `tribe.fetch`     | Drain pending messages / view history                                   |
-| `tribe.members`   | See who's online                                                        |
-| `tribe.filter`    | Set subscription filter (topics, mute)                                  |
-| `tribe.join`      | Re-announce name/role/domains                                           |
+| Tool            | Use                                                                     |
+| --------------- | ----------------------------------------------------------------------- |
+| `tribe.send`    | Send a message to chief or another member (use `to: "*"` for broadcast) |
+| `tribe.fetch`   | Drain pending messages / view history                                   |
+| `tribe.members` | See who's online                                                        |
+| `tribe.filter`  | Set subscription filter (topics, mute)                                  |
+| `tribe.join`    | Re-announce name/role/domains                                           |
 
 ## Coordination Protocol
 

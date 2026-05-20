@@ -79,7 +79,12 @@ function makeFakeTribe(opts: FakeTribeOpts) {
       quitTimeoutSec: opts.quitTimeoutSec,
     },
     registry: {
-      clients: { size: opts.clientCount, [Symbol.iterator]() { return [].values() } } as any,
+      clients: {
+        size: opts.clientCount,
+        [Symbol.iterator]() {
+          return [].values()
+        },
+      } as any,
       socketToClient: new Map(),
     },
   }

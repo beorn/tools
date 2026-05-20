@@ -164,4 +164,3 @@ export function probeCwd(cwd: string = process.cwd()): CwdProbe {
   const siblingPoolSlots = gitRoot ? findSiblingPoolSlots(gitRoot) : []
   return { cwd, gitRoot, headBranch, siblingPoolSlots }
 }
-

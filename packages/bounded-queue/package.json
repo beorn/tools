@@ -4,11 +4,11 @@
   "private": true,
   "description": "Coordination primitive — bounded queue with explicit drop policy and always-on O(1) depth gauge. Sibling to @bearly/tribe-client and @bearly/bg-recall.",
   "keywords": [
-    "bounded-queue",
     "backpressure",
+    "bounded-queue",
     "coordination",
-    "observability",
-    "drop-policy"
+    "drop-policy",
+    "observability"
   ],
   "homepage": "https://github.com/beorn/bearly/tree/main/packages/bounded-queue",
   "bugs": {

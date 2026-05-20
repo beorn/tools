@@ -10,12 +10,12 @@ allowed-tools: Bash, Read, Glob, Grep, Task, AskUserQuestion
 
 ## Commands
 
-| Command | Action |
-|---------|--------|
-| `/discuss <topic>` | Checkpoint → enter discussion mode |
-| `/discuss continue` | Restore context → resume implementation |
-| `/discuss end` | Synthesize insights → update bead → resume |
-| `/discuss history` | Search past discussions via recall |
+| Command             | Action                                     |
+| ------------------- | ------------------------------------------ |
+| `/discuss <topic>`  | Checkpoint → enter discussion mode         |
+| `/discuss continue` | Restore context → resume implementation    |
+| `/discuss end`      | Synthesize insights → update bead → resume |
+| `/discuss history`  | Search past discussions via recall         |
 
 ## `/discuss <topic>` — Start
 
@@ -32,6 +32,7 @@ allowed-tools: Bash, Read, Glob, Grep, Task, AskUserQuestion
 4. If no issue: `No active tracking issue — discussing freely. /discuss end to capture insights.`
 
 **Discussion mode rules:**
+
 - **Read-only** — explore code to explain, never edit files
 - **Concise first** — short answers, elaborate only when asked
 - **Show code** — use `file:line` refs, read actual files
@@ -80,4 +81,4 @@ bun recall "<specific-topic>" --since 2w
 - Editing code during discussion — stay read-only
 - Long monologues — be concise, ask "want more detail?"
 - Skipping synthesis — use `/discuss end`, not bare `/discuss continue`, after deep discussions
-- Losing decisions — end summary must capture *what was decided*, not just what was discussed
+- Losing decisions — end summary must capture _what was decided_, not just what was discussed

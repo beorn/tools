@@ -3,15 +3,9 @@ import { createBoundedQueue } from "../src/index.ts"
 
 describe("createBoundedQueue", () => {
   test("validates maxDepth (must be positive integer)", () => {
-    expect(() =>
-      createBoundedQueue({ maxDepth: 0, dropPolicy: "drop-oldest", gaugeName: "g" }),
-    ).toThrow(TypeError)
-    expect(() =>
-      createBoundedQueue({ maxDepth: -1, dropPolicy: "drop-oldest", gaugeName: "g" }),
-    ).toThrow(TypeError)
-    expect(() =>
-      createBoundedQueue({ maxDepth: 1.5, dropPolicy: "drop-oldest", gaugeName: "g" }),
-    ).toThrow(TypeError)
+    expect(() => createBoundedQueue({ maxDepth: 0, dropPolicy: "drop-oldest", gaugeName: "g" })).toThrow(TypeError)
+    expect(() => createBoundedQueue({ maxDepth: -1, dropPolicy: "drop-oldest", gaugeName: "g" })).toThrow(TypeError)
+    expect(() => createBoundedQueue({ maxDepth: 1.5, dropPolicy: "drop-oldest", gaugeName: "g" })).toThrow(TypeError)
   })
 
   test("validates dropPolicy", () => {
@@ -26,9 +20,7 @@ describe("createBoundedQueue", () => {
   })
 
   test("validates gaugeName (non-empty string)", () => {
-    expect(() =>
-      createBoundedQueue({ maxDepth: 4, dropPolicy: "drop-oldest", gaugeName: "" }),
-    ).toThrow(TypeError)
+    expect(() => createBoundedQueue({ maxDepth: 4, dropPolicy: "drop-oldest", gaugeName: "" })).toThrow(TypeError)
     expect(() =>
       // @ts-expect-error — wrong type
       createBoundedQueue({ maxDepth: 4, dropPolicy: "drop-oldest", gaugeName: 42 }),

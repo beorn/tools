@@ -22,7 +22,11 @@ import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve, dirname, basename } from "node:path"
 
-async function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string } = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolveP) => {
     const proc = spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] })
     let stdout = ""
@@ -70,7 +74,8 @@ async function listPoolSlots(mainRoot: string): Promise<string[]> {
 
 async function broadcastWindDown(): Promise<void> {
   console.log("[team-down] broadcasting wind-down to tribe...")
-  const message = "winding down — finish active beads, run /complete, sound off offline @agent/N when done. chief integrating after."
+  const message =
+    "winding down — finish active beads, run /complete, sound off offline @agent/N when done. chief integrating after."
   // Sibling tribe-cli.ts in this bearly tools/ directory.
   const tribeCliPath = resolve(import.meta.dir, "tribe-cli.ts")
   const r = await run("bun", [tribeCliPath, "send", "*", message])
@@ -81,7 +86,10 @@ async function broadcastWindDown(): Promise<void> {
   }
 }
 
-async function integrateSlot(slot: string, mainRoot: string): Promise<{ slot: string; integrated: boolean; sha?: string; reason?: string }> {
+async function integrateSlot(
+  slot: string,
+  mainRoot: string,
+): Promise<{ slot: string; integrated: boolean; sha?: string; reason?: string }> {
   // chief-integrate exits 0 even if nothing to integrate; capture stdout for the SHA
   const r = await run("bun", ["tools/chief-integrate.ts", slot], { cwd: mainRoot })
   if (r.exitCode !== 0) {
@@ -110,7 +118,10 @@ function retroSkeleton(date: string, integrated: { slot: string; sha?: string }[
 **Session window**: <fill in>
 **Active agents**: <fill in>
 **Saga-class closures**: <count>
-**Integrations**: ${integrated.filter((i) => i.sha).length} (${integrated.filter((i) => i.sha).map((i) => `${i.slot}→${i.sha?.slice(0, 9)}`).join(", ")})
+**Integrations**: ${integrated.filter((i) => i.sha).length} (${integrated
+    .filter((i) => i.sha)
+    .map((i) => `${i.slot}→${i.sha?.slice(0, 9)}`)
+    .join(", ")})
 
 ## What went well
 

@@ -565,7 +565,9 @@ const MIGRATIONS: readonly Migration[] = [
         } else if (!sessionCols.has("filter_mute")) {
           db.run("ALTER TABLE sessions ADD COLUMN filter_mute TEXT")
         } else if (sessionCols.has("filter_kinds")) {
-          db.run("UPDATE sessions SET filter_mute = filter_kinds WHERE filter_mute IS NULL AND filter_kinds IS NOT NULL")
+          db.run(
+            "UPDATE sessions SET filter_mute = filter_kinds WHERE filter_mute IS NULL AND filter_kinds IS NOT NULL",
+          )
           db.run("ALTER TABLE sessions DROP COLUMN filter_kinds")
         }
       }

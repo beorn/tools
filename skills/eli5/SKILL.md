@@ -34,6 +34,7 @@ For a simple question, just write prose under "What's happening" and stop.
 ❌ "Should I (a) try singlePassLayout, (b) hunt the 336-wide text, or (c) audit useBoxRect call sites? Suspect 3 didn't pan out and AsideLayout was reverted."
 
 ✅ "The remaining churn is the rendering framework doing layout, then re-rendering, then doing layout again until things settle — call this the cascade. Three angles:
+
 - **Force one layout pass** — the framework has a setting that runs layout exactly once. Risk: components that read their own size get 0 on first paint.
 - **Find the long unwrappable text** — one chat element measures 336 columns wide inside an 85-column parent. Adding `wrap="wrap"` fixes that one leaf.
 - **Reduce measurement reads** — every measurement-hook call is a re-render trigger. We have 3; some may be redundant."
@@ -41,6 +42,7 @@ For a simple question, just write prose under "What's happening" and stop.
 ## Self-trigger when you catch yourself
 
 Writing any of these in user-facing text → stop, run /eli5:
+
 - "the X fix" / "the Y change" — name what changed mechanically
 - "Suspect N" / "Phase N" / "Attempt N" — your enumeration isn't theirs
 - "Per the diagnosis" / "Per the bead" — they haven't read it

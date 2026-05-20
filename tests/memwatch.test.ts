@@ -394,93 +394,82 @@ describe("memwatch smoke test", () => {
   })
 
   test("trips threshold, writes log + PANIC line + delivers SIGUSR2 marker", { timeout: 60_000 }, async () => {
-      const markerPath = join(workDir, "marker.txt")
-      const logPath = join(workDir, "memwatch.log")
-      const snapshotDir = join(workDir, "snapshots")
+    const markerPath = join(workDir, "marker.txt")
+    const logPath = join(workDir, "memwatch.log")
+    const snapshotDir = join(workDir, "snapshots")
 
-      // Spawn the leaky fixture — allocates 10 × 50MB = ~500MB.
-      leakyChild = spawn(
-        "bun",
-        [
-          LEAKY_CHILD,
-          "--marker-path",
-          markerPath,
-          "--chunk-mb",
-          "50",
-          "--max-chunks",
-          "10",
-          "--interval-ms",
-          "100",
-        ],
-        { stdio: ["ignore", "ignore", "pipe"], detached: false },
-      )
-      expect(leakyChild.pid).toBeDefined()
-      const childPid = leakyChild.pid!
+    // Spawn the leaky fixture — allocates 10 × 50MB = ~500MB.
+    leakyChild = spawn(
+      "bun",
+      [LEAKY_CHILD, "--marker-path", markerPath, "--chunk-mb", "50", "--max-chunks", "10", "--interval-ms", "100"],
+      { stdio: ["ignore", "ignore", "pipe"], detached: false },
+    )
+    expect(leakyChild.pid).toBeDefined()
+    const childPid = leakyChild.pid!
 
-      // Give the child a moment to allocate enough to trip a low threshold (200 MB).
-      await new Promise((r) => setTimeout(r, 2000))
+    // Give the child a moment to allocate enough to trip a low threshold (200 MB).
+    await new Promise((r) => setTimeout(r, 2000))
 
-      // Spawn memwatch with a 1-second interval and 200 MB target threshold —
-      // the child should be past 200 MB after the 2s warmup.
-      memwatchProc = spawn(
-        "bun",
-        [
-          MEMWATCH_BIN,
-          String(childPid),
-          "--threshold-rss-mb",
-          "200",
-          "--threshold-parent-rss-mb",
-          "999999", // disable parent trip — we only want to assert target trip
-          "--interval-sec",
-          "1",
-          "--snapshot-dir",
-          snapshotDir,
-          "--log-path",
-          logPath,
-          "--panic-cooldown-sec",
-          "5",
-        ],
-        { stdio: ["ignore", "pipe", "pipe"], detached: false },
-      )
+    // Spawn memwatch with a 1-second interval and 200 MB target threshold —
+    // the child should be past 200 MB after the 2s warmup.
+    memwatchProc = spawn(
+      "bun",
+      [
+        MEMWATCH_BIN,
+        String(childPid),
+        "--threshold-rss-mb",
+        "200",
+        "--threshold-parent-rss-mb",
+        "999999", // disable parent trip — we only want to assert target trip
+        "--interval-sec",
+        "1",
+        "--snapshot-dir",
+        snapshotDir,
+        "--log-path",
+        logPath,
+        "--panic-cooldown-sec",
+        "5",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], detached: false },
+    )
 
-      // Wait for the marker file (fixture caught SIGUSR2 and exited).
-      const deadline = Date.now() + 20_000
-      while (Date.now() < deadline && !existsSync(markerPath)) {
-        await new Promise((r) => setTimeout(r, 200))
-      }
+    // Wait for the marker file (fixture caught SIGUSR2 and exited).
+    const deadline = Date.now() + 20_000
+    while (Date.now() < deadline && !existsSync(markerPath)) {
+      await new Promise((r) => setTimeout(r, 200))
+    }
 
-      // The fixture should have caught SIGUSR2 and written the marker.
-      expect(existsSync(markerPath), `marker file ${markerPath} should exist`).toBe(true)
-      expect(readFileSync(markerPath, "utf8")).toContain("SIGUSR2")
+    // The fixture should have caught SIGUSR2 and written the marker.
+    expect(existsSync(markerPath), `marker file ${markerPath} should exist`).toBe(true)
+    expect(readFileSync(markerPath, "utf8")).toContain("SIGUSR2")
 
-      // Log file should contain a PANIC line.
-      expect(existsSync(logPath), `log file ${logPath} should exist`).toBe(true)
-      const log = readFileSync(logPath, "utf8")
-      expect(log).toMatch(/PANIC: target RSS = \d+MB exceeds threshold 200MB/)
+    // Log file should contain a PANIC line.
+    expect(existsSync(logPath), `log file ${logPath} should exist`).toBe(true)
+    const log = readFileSync(logPath, "utf8")
+    expect(log).toMatch(/PANIC: target RSS = \d+MB exceeds threshold 200MB/)
 
-      // Snapshot summary file was written under snapshotDir.
-      expect(existsSync(snapshotDir), `snapshot dir ${snapshotDir} should exist`).toBe(true)
-      const snapshotFiles = readdirSync(snapshotDir).filter((f) => f.startsWith(`memwatch-${childPid}-`))
-      expect(snapshotFiles.length).toBeGreaterThan(0)
-      const snapshot = readFileSync(join(snapshotDir, snapshotFiles[0]!), "utf8")
-      expect(snapshot).toContain("# memwatch panic snapshot")
-      // Log file logged the snapshot path.
-      expect(log).toContain("snapshot=")
+    // Snapshot summary file was written under snapshotDir.
+    expect(existsSync(snapshotDir), `snapshot dir ${snapshotDir} should exist`).toBe(true)
+    const snapshotFiles = readdirSync(snapshotDir).filter((f) => f.startsWith(`memwatch-${childPid}-`))
+    expect(snapshotFiles.length).toBeGreaterThan(0)
+    const snapshot = readFileSync(join(snapshotDir, snapshotFiles[0]!), "utf8")
+    expect(snapshot).toContain("# memwatch panic snapshot")
+    // Log file logged the snapshot path.
+    expect(log).toContain("snapshot=")
 
-      // memwatch should exit naturally once the target dies (SIGUSR2 → child exit).
-      const memwatchExit = new Promise<number | null>((resolve) => {
-        memwatchProc!.on("exit", (code) => resolve(code))
-      })
-      const exitCode = await Promise.race([
-        memwatchExit,
-        new Promise<number | null>((r) => setTimeout(() => r(null), 15_000)),
-      ])
-      // Either it exited (code 0) or we tear down in afterAll; we don't assert
-      // a strict exit code — the user-visible signal + log are what matter.
-      // But we DO want to stop the process here to avoid a runaway test.
-      if (exitCode === null && memwatchProc && !memwatchProc.killed) {
-        memwatchProc.kill("SIGTERM")
-      }
-    },
-  )
+    // memwatch should exit naturally once the target dies (SIGUSR2 → child exit).
+    const memwatchExit = new Promise<number | null>((resolve) => {
+      memwatchProc!.on("exit", (code) => resolve(code))
+    })
+    const exitCode = await Promise.race([
+      memwatchExit,
+      new Promise<number | null>((r) => setTimeout(() => r(null), 15_000)),
+    ])
+    // Either it exited (code 0) or we tear down in afterAll; we don't assert
+    // a strict exit code — the user-visible signal + log are what matter.
+    // But we DO want to stop the process here to avoid a runaway test.
+    if (exitCode === null && memwatchProc && !memwatchProc.killed) {
+      memwatchProc.kill("SIGTERM")
+    }
+  })
 })

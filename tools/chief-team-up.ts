@@ -23,9 +23,16 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { resolve, dirname, basename } from "node:path"
 
-async function run(cmd: string, args: string[], opts: { cwd?: string; pipe?: boolean } = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; pipe?: boolean } = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolveP) => {
-    const proc = spawn(cmd, args, { cwd: opts.cwd, stdio: opts.pipe === false ? "inherit" : ["ignore", "pipe", "pipe"] })
+    const proc = spawn(cmd, args, {
+      cwd: opts.cwd,
+      stdio: opts.pipe === false ? "inherit" : ["ignore", "pipe", "pipe"],
+    })
     let stdout = ""
     let stderr = ""
     if (opts.pipe !== false) {
@@ -76,7 +83,13 @@ async function cleanSlot(slot: string, mainRoot: string): Promise<boolean> {
     console.warn(`[team-up] cleanup warned for ${slot}:\n${r.stderr || r.stdout}`)
     return false
   }
-  console.log(r.stdout.trim().split("\n").map((l) => `  ${l}`).join("\n"))
+  console.log(
+    r.stdout
+      .trim()
+      .split("\n")
+      .map((l) => `  ${l}`)
+      .join("\n"),
+  )
   return true
 }
 

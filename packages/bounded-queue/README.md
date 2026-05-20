@@ -16,11 +16,11 @@ const q = createBoundedQueue<string>({
 })
 
 q.enqueue("msg-1")
-q.depth          // 1
-q.dropCount      // 0
-q.lastDropAt     // null
+q.depth // 1
+q.dropCount // 0
+q.lastDropAt // null
 
-q.drain()        // ["msg-1"]; queue empty
+q.drain() // ["msg-1"]; queue empty
 ```
 
 ## API
@@ -47,11 +47,11 @@ All gauge reads are O(1) and synchronous. No background polling, no reactive wra
 
 ## When to use which drop policy
 
-| Policy | Use when | Trade-off |
-| --- | --- | --- |
-| `drop-oldest` | Latest data is most valuable (rendering, telemetry, log injection). | Loses history under sustained overload. |
-| `drop-newest` | History is canonical (audit logs, event sourcing). | New events silently disappear under sustained overload. |
-| `block-until-drained` | Caller has a clear drain signal (consumer-driven flow control). | Caller must handle `"blocked"` explicitly — no implicit retry. |
+| Policy                | Use when                                                            | Trade-off                                                      |
+| --------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `drop-oldest`         | Latest data is most valuable (rendering, telemetry, log injection). | Loses history under sustained overload.                        |
+| `drop-newest`         | History is canonical (audit logs, event sourcing).                  | New events silently disappear under sustained overload.        |
+| `block-until-drained` | Caller has a clear drain signal (consumer-driven flow control).     | Caller must handle `"blocked"` explicitly — no implicit retry. |
 
 ## Why this lives in bearly (not `alien-*`)
 

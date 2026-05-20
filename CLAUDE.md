@@ -44,14 +44,14 @@ Each package in `plugins/` must:
 
 These live in `tools/` and run from source. They will eventually become independent packages.
 
-| Tool             | Description                                                 | Entry Point                   |
-| ---------------- | ----------------------------------------------------------- | ----------------------------- |
-| `refactor`       | Batch rename, replace, API migration                        | `bun tools/refactor.ts`       |
-| `llm`            | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`            |
-| `recall`         | Session history search, LLM synthesis                       | `bun tools/recall.ts`         |
-| ~~`tty`~~        | ~~TTY testing MCP server~~ — **folded into `termless mcp`** (see note below) | `termless mcp` (via `@termless/cli`) |
-| `worktree`       | Git worktree management with submodules — **now lives in km/tools/worktree.ts** (see note below) | `bun tools/worktree.ts` (km root) |
-| `github-channel` | GitHub notifications (deprecated — use tribe github plugin) | `bun tools/github-channel.ts` |
+| Tool             | Description                                                                                      | Entry Point                          |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `refactor`       | Batch rename, replace, API migration                                                             | `bun tools/refactor.ts`              |
+| `llm`            | Multi-LLM research, consensus, deep research                                                     | `bun tools/llm.ts`                   |
+| `recall`         | Session history search, LLM synthesis                                                            | `bun tools/recall.ts`                |
+| ~~`tty`~~        | ~~TTY testing MCP server~~ — **folded into `termless mcp`** (see note below)                     | `termless mcp` (via `@termless/cli`) |
+| `worktree`       | Git worktree management with submodules — **now lives in km/tools/worktree.ts** (see note below) | `bun tools/worktree.ts` (km root)    |
+| `github-channel` | GitHub notifications (deprecated — use tribe github plugin)                                      | `bun tools/github-channel.ts`        |
 
 ### Note: `tty` moved out of vendor/bearly
 

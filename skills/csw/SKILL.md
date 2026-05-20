@@ -57,13 +57,13 @@ For EACH option, show a **concrete example**: actual code, config, syntax, or fi
 
 For each option:
 
-| Dimension | What to Write |
-|-----------|---------------|
-| **Concrete example** | Real code/config/syntax — 5-20 lines showing the approach |
-| **Pros** | What's genuinely good (be specific, not "clean" or "simple") |
-| **Cons** | What's genuinely bad (be honest — every option has cons) |
-| **Effort** | Lines changed, files touched, breaking changes, migration needed |
-| **Risk** | What could go wrong, edge cases, future regret |
+| Dimension            | What to Write                                                    |
+| -------------------- | ---------------------------------------------------------------- |
+| **Concrete example** | Real code/config/syntax — 5-20 lines showing the approach        |
+| **Pros**             | What's genuinely good (be specific, not "clean" or "simple")     |
+| **Cons**             | What's genuinely bad (be honest — every option has cons)         |
+| **Effort**           | Lines changed, files touched, breaking changes, migration needed |
+| **Risk**             | What could go wrong, edge cases, future regret                   |
 
 Kill weak options here. If an option is clearly dominated (another option is better on every dimension), note why and drop it. Final set should be 3-6 genuine contenders.
 
@@ -73,7 +73,7 @@ Pick 4-6 dimensions that actually matter for THIS decision (not generic). Score 
 
 ```markdown
 | Option | <dim1> | <dim2> | <dim3> | <dim4> | <dim5> |
-|--------|--------|--------|--------|--------|--------|
+| ------ | ------ | ------ | ------ | ------ | ------ |
 | A: ... | ++     | +      | -      | ++     | o      |
 | B: ... | +      | ++     | +      | -      | +      |
 | ...    |        |        |        |        |        |
@@ -86,6 +86,7 @@ Choose dimensions that differentiate — if every option scores the same on a di
 ### Phase 5: Recommendation
 
 State clearly:
+
 1. **Which option** and **why** (2-3 sentences, reference the matrix)
 2. **What to do first** if the approach is phased
 3. **What NOT to do** — explicitly call out traps, anti-patterns, or tempting-but-wrong alternatives
@@ -107,41 +108,50 @@ Update the analysis with any corrections. If the recommendation changes, that's 
 
 Present the analysis **directly in the conversation** — do not write it to a file. Only persist to a bead if the user explicitly asks. The decision-maker reads it inline and says "approved" or picks an option.
 
-```markdown
+````markdown
 ## CSW: <topic>
 
 ### Context
+
 <1-3 paragraphs — what exists now, what triggered this decision, constraints, prior art>
 
 ### Options
 
 #### Option A: <descriptive name>
+
 ```<lang>
 <concrete example — real code/config/syntax>
 ```
+````
+
 - **Pros**: <specific benefits>
 - **Cons**: <specific drawbacks>
 - **Effort**: <scope estimate>
 - **Risk**: <what could go wrong>
 
 #### Option B: <descriptive name>
+
 ...
 
 [repeat for each surviving option]
 
 ### Decision Matrix
+
 | Option | <dim1> | <dim2> | <dim3> | <dim4> | <dim5> |
-|--------|--------|--------|--------|--------|--------|
+| ------ | ------ | ------ | ------ | ------ | ------ |
 | A: ... | ++     | +      | -      | ++     | o      |
 | B: ... | ...    |        |        |        |        |
 
 ### Recommendation
+
 <which option and why — 2-3 sentences referencing the matrix>
 
 **First step**: <what to do immediately>
 
 ### What NOT to Do
+
 <traps, anti-patterns, tempting-but-wrong paths — be specific>
+
 ```
 
 ## Anti-Patterns
@@ -168,3 +178,4 @@ The context-gathering phase of CSW is JIT BCC applied to a decision instead of a
 - One agent for "what did past sessions decide on adjacent questions?" (`bun recall`)
 
 Returns: comparative evidence per option, surfacing trade-offs the user can call. No hard wave cap; stop on fixed-point or clear winner. Canonical: `.claude/skills/bead-pickup/SKILL.md` § "JIT bead-context-completion".
+```
