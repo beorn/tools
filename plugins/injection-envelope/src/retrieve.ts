@@ -78,7 +78,7 @@ export async function retrieveMemory(id: string): Promise<RetrievedMemory | null
  * path OR contains a slash AND ends in a known markdown ext), read it
  * directly. Otherwise try `qmd get <id>`.
  *
- * Registered by default so the qmd-based accountly recall path works
+ * Registered by default so the qmd-export recall path works
  * out of the box.
  */
 export const qmdFetcher: RetrieveFetcher = async (id: string) => {

@@ -16,7 +16,7 @@
  */
 export type RegisteredSource =
   | "recall" // bearly session-history FTS (hookRecall daemon path)
-  | "qmd" // qmd-backed vault markdown search (accountly recall)
+  | "qmd" // qmd-backed vault markdown search (qmd-export recall)
   | "tribe" // tribe channel messages from other Claude sessions
   | "telegram" // telegram bot inbound messages
   | "github" // github notifications / PR comments / issue events
