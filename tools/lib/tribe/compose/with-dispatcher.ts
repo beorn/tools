@@ -44,7 +44,7 @@ import { createTribeContext, type TribeContext } from "../context.ts"
 import { handleToolCall, isRemovedTribeMethod, removedTribeMethodMessage, TRIBE_COORD_METHODS } from "../handlers.ts"
 import { logEvent, sendMessage } from "../messaging.ts"
 import { registerSession, NameConflictError } from "../session.ts"
-import { adoptIdentity, resolveName, type PriorSession } from "../resolve-name.ts"
+import { adoptByPidCwd, adoptIdentity, resolveName, type PriorSession } from "../resolve-name.ts"
 import { type LoreConnState } from "../lore-handlers.ts"
 import type { BaseTribe } from "./base.ts"
 import type { WithBroadcast } from "./with-broadcast.ts"
@@ -95,7 +95,6 @@ export interface Dispatcher {
 export interface WithDispatcher {
   readonly dispatcher: Dispatcher
 }
-
 
 function relPath(p: string): string {
   const cwd = process.cwd()
@@ -307,7 +306,20 @@ export function withDispatcher<
 
             const isActive = (sid: string): boolean => Array.from(clients.values()).some((c) => c.ctx.sessionId === sid)
 
-            const adopted = adoptIdentity(db, identityToken, isActive)
+            // 15413 — daemon-restart-reconnect adoption. When the daemon
+            // SIGHUP-re-execs, the listening socket fd survives but the
+            // previously-accepted client connections close on the old
+            // process's exit. Adapters reconnect; without this lookup the
+            // fresh accept() looks like a brand-new session and the auto-
+            // namer re-issues agentN — severing the prior name + chief-claim
+            // mapping. (pid, cwd) is the safe key here: same client process
+            // → same OS pid + cwd. Falls back to identityToken (weaker —
+            // sha256(claude_session_id|cwd|role); see the 2026-05-14
+            // adoption-by-identityToken removal note in resolve-name.ts).
+            const clientPid = Number(p.pid ?? 0)
+            const clientCwd = String(p.project ?? "")
+            const pidCwdAdopted = adoptByPidCwd(db, clientPid, clientCwd, isActive)
+            const adopted = pidCwdAdopted ?? adoptIdentity(db, identityToken, isActive)
 
             if (!p.role && adopted?.role) {
               const adoptedRole = adopted.role
@@ -325,10 +337,17 @@ export function withDispatcher<
             // Counting connected sessions (not DB rows) means a disconnected
             // codex frees `codex1` for the next spawn.
             const takenNames = new Set(Array.from(clients.values()).map((c) => c.name))
+            // 15413 — when we adopted via (pid, cwd), inject the prior name
+            // into resolveName's param so its existing "p.name set → return
+            // verbatim" path picks it up. This is intentionally NOT done for
+            // identityToken-only matches (the 2026-05-14 ban on adoption-by-
+            // identityToken still stands — only the strictly-stable (pid,
+            // cwd) form gets to override the name).
+            const pForResolve = pidCwdAdopted ? { ...p, name: pidCwdAdopted.name } : p
             const name = deduplicateName(
               resolveName({
                 db,
-                p,
+                p: pForResolve,
                 adopted,
                 claudeSessionName,
                 claudeSessionId,
@@ -336,7 +355,7 @@ export function withDispatcher<
                 isActive,
                 projectId,
                 takenNames,
-                clientPid: Number(p.pid ?? 0),
+                clientPid,
               }),
             )
             const domains = (p.domains as string[]) ?? []

@@ -174,6 +174,52 @@ export function adoptIdentity(
   return prior
 }
 
+/**
+ * Find a prior, non-active session row whose (client pid, cwd) matches the
+ * incoming register call. This is the daemon-restart-reconnect case (15413):
+ * the daemon SIGHUP-re-execs successfully and the SQLite session row
+ * survives, but the previously-accepted client sockets close on the old
+ * process's exit. The stdio-adapter reconnects; its accept() looks like a
+ * fresh connection so the auto-namer reassigns agent1..N — severing the
+ * (renamed) session-id ↔ connection-id mapping.
+ *
+ * (pid, cwd) is the right key here: the CLIENT process didn't die (it's the
+ * same adapter), so its OS PID and cwd are bit-for-bit identical across the
+ * daemon's re-exec. Reusing the row preserves the prior session's name +
+ * role + sessionId (and therefore the chief-claim row that keys on it).
+ *
+ * Sibling to adoptIdentity() — but stronger guarantee. identityToken is
+ * sha256(claude_session_id|cwd|role), which can collide if a different
+ * Claude Code session reused the same claude_session_id (caused the
+ * 2026-05-14 stale-@agent/4 bug, leading to adoption-by-identityToken being
+ * removed from resolveName). (pid, cwd) cannot have that failure mode: a
+ * matching pid means the SAME live OS process. The window for OS pid reuse
+ * narrows to "client process exited AND daemon restarted AND OS reissued
+ * that pid to a new process AND that new process happened to register with
+ * the same cwd" — for which we additionally gate on `isActive` returning
+ * false (the prior row is genuinely disconnected) and the pid being alive
+ * via the daemon's clients map (a fresh accept() from the reused pid would
+ * already have its own row by then).
+ *
+ * Returns null when pid==0 (unknown), cwd is empty, no match, or the prior
+ * row is still actively connected.
+ */
+export function adoptByPidCwd(
+  db: import("bun:sqlite").Database,
+  pid: number,
+  cwd: string,
+  isActive: (sessionId: string) => boolean,
+): PriorSession | null {
+  if (!pid || pid <= 0) return null
+  if (!cwd) return null
+  const prior = db
+    .prepare("SELECT id, name, role FROM sessions WHERE pid = ? AND cwd = ? ORDER BY updated_at DESC LIMIT 1")
+    .get(pid, cwd) as PriorSession | null
+  if (!prior) return null
+  if (isActive(prior.id)) return null
+  return prior
+}
+
 // ---------------------------------------------------------------------------
 // resolveName — the main entry point. Layered fallback:
 //

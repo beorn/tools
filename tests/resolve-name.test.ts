@@ -11,6 +11,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import { Database } from "bun:sqlite"
 import {
+  adoptByPidCwd,
   adoptByProjectAndRole,
   adoptIdentity,
   assignFlavorName,
@@ -36,6 +37,8 @@ function makeDb(): Database {
     project_id TEXT,
     claude_session_id TEXT,
     identity_token TEXT,
+    pid INTEGER,
+    cwd TEXT,
     updated_at INTEGER NOT NULL
   )`)
   return db
@@ -50,11 +53,13 @@ function insertSession(
     project_id?: string | null
     claude_session_id?: string | null
     identity_token?: string | null
+    pid?: number | null
+    cwd?: string | null
     updated_at?: number
   },
 ): void {
   db.prepare(
-    "INSERT INTO sessions (id, name, role, project_id, claude_session_id, identity_token, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO sessions (id, name, role, project_id, claude_session_id, identity_token, pid, cwd, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     fields.id,
     fields.name,
@@ -62,6 +67,8 @@ function insertSession(
     fields.project_id ?? null,
     fields.claude_session_id ?? null,
     fields.identity_token ?? null,
+    fields.pid ?? null,
+    fields.cwd ?? null,
     fields.updated_at ?? Date.now(),
   )
 }
@@ -420,6 +427,85 @@ describe("adoptIdentity", () => {
   it("returns null without an identity token", () => {
     const db = makeDb()
     expect(adoptIdentity(db, null, noActive)).toBeNull()
+  })
+})
+
+// adoptByPidCwd — 15413 daemon-restart reconnect adoption.
+//
+// The contract: when the daemon SIGHUP-re-execs, the client's stdio-adapter
+// keeps its OS pid + cwd; the prior session row in SQLite has those values.
+// Match → reuse name + id + role. No match → null (the registrant gets a
+// fresh sessionId + auto-name as before).
+describe("adoptByPidCwd", () => {
+  it("returns prior row matching (pid, cwd) when not active", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km" })
+    const got = adoptByPidCwd(db, 12345, "/repo/km", noActive)
+    expect(got?.name).toBe("@agent/8")
+    expect(got?.id).toBe("p1")
+    expect(got?.role).toBe("member")
+  })
+
+  it("returns null when the prior session is still active", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km" })
+    // isActive=true → the row belongs to a still-connected client; don't adopt.
+    expect(adoptByPidCwd(db, 12345, "/repo/km", () => true)).toBeNull()
+  })
+
+  it("returns null when pid is 0 or negative (unknown caller pid)", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "ghost", role: "member", pid: 0, cwd: "/repo/km" })
+    expect(adoptByPidCwd(db, 0, "/repo/km", noActive)).toBeNull()
+    expect(adoptByPidCwd(db, -1, "/repo/km", noActive)).toBeNull()
+  })
+
+  it("returns null when cwd is empty", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "ghost", role: "member", pid: 12345, cwd: "" })
+    expect(adoptByPidCwd(db, 12345, "", noActive)).toBeNull()
+  })
+
+  it("requires both pid AND cwd to match — pid alone is not enough", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km" })
+    // Same pid, different cwd → no match (different project).
+    expect(adoptByPidCwd(db, 12345, "/other/path", noActive)).toBeNull()
+  })
+
+  it("requires both pid AND cwd to match — cwd alone is not enough", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km" })
+    // Same cwd, different pid → no match (different client process).
+    expect(adoptByPidCwd(db, 99999, "/repo/km", noActive)).toBeNull()
+  })
+
+  it("returns most-recently-updated when multiple rows match", () => {
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "stale", role: "member", pid: 12345, cwd: "/repo/km", updated_at: 1000 })
+    insertSession(db, { id: "p2", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km", updated_at: 2000 })
+    const got = adoptByPidCwd(db, 12345, "/repo/km", noActive)
+    expect(got?.name).toBe("@agent/8")
+    expect(got?.id).toBe("p2")
+  })
+
+  it("scenario: SIGHUP-reconnect preserves the renamed @agent/N name", () => {
+    // Concrete 15413 trace:
+    //   1. Adapter (pid=12345, cwd=/repo/km) registers, gets auto-name agent1.
+    //   2. User calls tribe.rename({ new_name: "@agent/8" }); DB stores it.
+    //   3. SIGHUP → daemon re-execs. Adapter's connection drops + reconnects.
+    //   4. Fresh accept() → without this lookup the registrant gets agent1
+    //      again (the prior row's session-id is no longer in the live map,
+    //      so isActive returns false; the row is adoptable).
+    //   5. adoptByPidCwd finds (12345, /repo/km) → returns the @agent/8 row.
+    //   6. Dispatcher injects p.name = "@agent/8"; resolveName returns it
+    //      verbatim. The chief-claim row keyed on sessionId 'p1' is intact.
+    const db = makeDb()
+    insertSession(db, { id: "p1", name: "@agent/8", role: "member", pid: 12345, cwd: "/repo/km" })
+    const adopted = adoptByPidCwd(db, 12345, "/repo/km", noActive)
+    expect(adopted).not.toBeNull()
+    expect(adopted?.name).toBe("@agent/8")
+    expect(adopted?.id).toBe("p1") // chief-claim mapping stays intact
   })
 })
 
