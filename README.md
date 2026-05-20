@@ -22,7 +22,6 @@ claude plugin install github@bearly     # GitHub notifications
 | Plugin                                    | Type        | What                                                                                         |
 | ----------------------------------------- | ----------- | -------------------------------------------------------------------------------------------- |
 | [tribe](plugins/tribe/)                   | MCP channel | Cross-session coordination — discover, message, and coordinate multiple Claude Code sessions |
-| [tty](plugins/tty/)                       | MCP server  | Headless terminal testing — spawn PTY sessions, send keystrokes, capture screenshots         |
 | [github](plugins/github/)                 | MCP channel | GitHub notifications — build failures, PR activity, push events as channel messages          |
 | [llm](plugins/llm/)                       | CLI skill   | Multi-LLM research — deep research, second opinions, multi-model debate                      |
 | [recall](plugins/recall/)                 | CLI skill   | Session history search — FTS5-indexed search with LLM synthesis and file recovery            |

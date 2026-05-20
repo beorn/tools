@@ -13,12 +13,6 @@
       "source": "./plugins/tribe"
     },
     {
-      "name": "tty",
-      "description": "Headless terminal testing — spawn PTY sessions, send keystrokes, capture screenshots and text via xterm.js emulation",
-      "version": "0.1.0",
-      "source": "./plugins/tty"
-    },
-    {
       "name": "llm",
       "description": "Multi-LLM research — deep research, second opinions, and multi-model debate via GPT, Gemini, Grok, and Perplexity",
       "version": "0.1.0",

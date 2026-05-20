@@ -117,7 +117,6 @@ memwatch is independent of the other layers and can ship standalone.
 | `refactor`       | Batch rename, replace, API migration                        | `bun tools/refactor.ts`    |
 | `llm`            | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`         |
 | `recall`         | Session history search, LLM synthesis                       | `bun tools/recall.ts`      |
-| `tty`            | TTY testing MCP server                                      | `bun tools/tty.ts`         |
 | `worktree`       | Git worktree management with submodules                     | `bun tools/worktree.ts`    |
 | `qmd-watchdog`   | Supervise `qmd embed` runs — RSS ceiling, no-progress timer | `bun tools/qmd-watchdog.ts`|
 
