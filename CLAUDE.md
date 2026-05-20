@@ -49,9 +49,13 @@ These live in `tools/` and run from source. They will eventually become independ
 | `refactor`       | Batch rename, replace, API migration                        | `bun tools/refactor.ts`       |
 | `llm`            | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`            |
 | `recall`         | Session history search, LLM synthesis                       | `bun tools/recall.ts`         |
-| `tty`            | TTY testing MCP server                                      | `bun tools/tty.ts`            |
+| ~~`tty`~~        | ~~TTY testing MCP server~~ — **folded into `termless mcp`** (see note below) | `termless mcp` (via `@termless/cli`) |
 | `worktree`       | Git worktree management with submodules — **now lives in km/tools/worktree.ts** (see note below) | `bun tools/worktree.ts` (km root) |
 | `github-channel` | GitHub notifications (deprecated — use tribe github plugin) | `bun tools/github-channel.ts` |
+
+### Note: `tty` moved out of vendor/bearly
+
+Per [`@km/infra/mcp-tty-ghostty-backend-toggle`](https://github.com/beorn/km/blob/main/%40km/infra/mcp-tty-ghostty-backend-toggle.md): the canonical `tty` MCP tool now lives in `@termless/cli` (run as `termless mcp`), not in this submodule. The deprecated `bun tools/tty.ts` + `tools/lib/playwright-tty/` are deleted in Phase 9. The migration was driven by the native canvas pipeline (`@napi-rs/canvas` + `ghostty-web` in pure Bun) that eliminated termless's Chromium dependency, making bearly's Playwright-based tty wrapper redundant — `termless mcp`'s `screenshot` tool routes through `Terminal.screenshot()` for the same (or better) fidelity, with no Chromium and a resvg cross-platform fallback. Existing MCP client configs that pointed at the bearly `playwright-tty` MCP server should switch to `termless mcp`.
 
 ### Note: `worktree` moved out of vendor/bearly
 
@@ -84,7 +88,7 @@ See `skills/` for Claude Code skill definitions:
 
 - `batch-refactor/` — Batch refactoring workflow
 - `llm/` — Multi-LLM queries
-- `tty/` — Terminal app testing
+- ~~`tty/`~~ — Terminal app testing (folded into `termless mcp`; see Tools table note above)
 - `tribe/` — Tribe coordination
 
 ## Development
