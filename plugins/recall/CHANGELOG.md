@@ -14,7 +14,7 @@
 
 ### Composes with
 
-- `vendor/accountly/src/recall.ts` — index-time gate (rejects to `chats-rejected/` before qmd indexes) plus query-time backstop in `cmdHook()` (drops bad qmd hits silently). Cross-session contamination root-fix in `renderSessionMarkdown` (drops fragments whose `sessionId` differs from the file's primary `sessionId`).
+- `plugins/recall/src/qmd-export.ts` — index-time gate (rejects to `chats-rejected/` before qmd indexes) plus query-time backstop in `cmdHook()` (drops bad qmd hits silently). Cross-session contamination root-fix in `renderSessionMarkdown` (drops fragments whose `sessionId` differs from the file's primary `sessionId`).
 - `@bearly/bg-recall` — uses `analyzeQuality` at the daemon's pre-scoring layer.
 
 bead km-tribe.recall-quality-gate

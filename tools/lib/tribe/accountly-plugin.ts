@@ -155,7 +155,7 @@ export const accountlyPlugin: TribePluginApi = {
       }
 
       try {
-        const cliPath = resolve(process.cwd(), "vendor/accountly/src/cli.ts")
+        const cliPath = resolve(process.cwd(), "packages/km-accounts/src/cli.ts")
         if (!existsSync(cliPath)) {
           if (api.claimDedup("accountly:cli-missing")) {
             api.broadcast(

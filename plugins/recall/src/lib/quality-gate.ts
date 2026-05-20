@@ -21,8 +21,8 @@
  *      tend to fire on the joined boundary). The deeper fix lives in the
  *      export path, not here.
  *
- * Used at index time (accountly recall write path) and at query time
- * (accountly cmdHook backstop). Cheap lexical, no LLM, no I/O.
+ * Used at index time (qmd-export recall write path) and at query time
+ * (qmd-export cmdHook backstop). Cheap lexical, no LLM, no I/O.
  *
  * Imports from this module are intentionally narrow so the function can be
  * embedded anywhere a string needs to be vetted before it reaches the model.
