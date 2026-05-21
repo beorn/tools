@@ -220,6 +220,62 @@ describe("tribe channel bus", () => {
     )
   }, 15_000)
 
+  it("resets the inbox-pull cursor to tail when a pull-only MCP client reconnects", async () => {
+    // Codex-style: a delivery="pull" client (no wakeup) reconnects via the
+    // (pid, cwd) adoption path. The adopted row carries a stale
+    // last_inbox_pull_seq; without a reset the reconnected session would
+    // re-deliver week-old DMs (or, if the seq ran ahead, silently skip new
+    // ones). tribe.fetch keys off last_inbox_pull_seq, so a clean fetch that
+    // omits the pre-reconnect DM proves both offset columns were reset.
+    const tmp = mkdtempSync(join(tmpdir(), "tribe-channel-bus-pull-adopt-"))
+    cleanupPaths.push(tmp)
+    const socketPath = join(tmp, "tribe.sock")
+    const dbPath = join(tmp, "tribe.db")
+    daemon = await spawnDaemon(socketPath, dbPath)
+
+    const project = join(tmp, "codex-project")
+    const codexPid = 515_151
+
+    const firstCodex = await connectToDaemon(socketPath)
+    clients.push(firstCodex)
+    await firstCodex.call("register", {
+      name: "codex-mcp",
+      role: "member",
+      project,
+      pid: codexPid,
+      delivery: "pull",
+    })
+    firstCodex.close()
+    clients.pop()
+
+    const chief = await connectToDaemon(socketPath)
+    clients.push(chief)
+    await chief.call("register", { name: "chief", role: "chief", project: join(tmp, "chief"), delivery: "push" })
+    await chief.call("tribe.send", { to: "codex-mcp", message: "stale-dm-before-reconnect", type: "notify" })
+
+    const adoptedCodex = await connectToDaemon(socketPath)
+    clients.push(adoptedCodex)
+    await adoptedCodex.call("register", {
+      role: "member",
+      project,
+      pid: codexPid,
+      delivery: "pull",
+    })
+
+    const afterAdoption = parseToolText<{ events: Array<{ content: string }> }>(
+      await adoptedCodex.call("tribe.fetch", { limit: 50 }),
+    )
+    expect(afterAdoption.events.map((event) => event.content)).not.toContain("stale-dm-before-reconnect")
+
+    await chief.call("tribe.send", { to: "codex-mcp", message: "fresh-dm-after-reconnect", type: "notify" })
+    await waitFor(async () => {
+      const fetched = parseToolText<{ events: Array<{ content: string }> }>(
+        await adoptedCodex.call("tribe.fetch", { limit: 50 }),
+      )
+      return fetched.events.some((event) => event.content === "fresh-dm-after-reconnect")
+    })
+  }, 15_000)
+
   it("archives expired messages before trimming the hot log", () => {
     const tmp = mkdtempSync(join(tmpdir(), "tribe-channel-bus-archive-"))
     cleanupPaths.push(tmp)
