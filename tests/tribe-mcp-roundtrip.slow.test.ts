@@ -16,6 +16,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, unlinkSync } from "node:
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { Database } from "bun:sqlite"
 import { resolveProjectId } from "../tools/lib/tribe/config.ts"
 import { connectToDaemon, type DaemonClient } from "../tools/lib/tribe/socket.ts"
 
@@ -317,6 +318,106 @@ describe("tribe MCP round-trip against one daemon protocol", () => {
         (event) => event.from === "raw-mcp" && event.to === "*" && event.content === fromDaemonNativeMcp,
       )
     })
+
+    expect(alice.stderr()).toBe("")
+    expect(bob.stderr()).toBe("")
+  }, 30_000)
+
+  it("persists the DM body row in the daemon journal when the recipient is connected", async () => {
+    // Regression: km-tribe DM-body-drop. The stdio adapter used to have a
+    // peer-direct fast path (`trySendDirect` → `sendDirect` → recipient's peer
+    // socket) that delivered a DM socket-to-socket and only logged an
+    // `event.message.sent` audit pointer to the daemon — the actual body row
+    // was NEVER written to `messages`. A recipient that read the log later
+    // (pull / reconnect) saw nothing. Broadcasts persisted; DMs to a connected
+    // peer did not. The fix removes the peer-direct path so every send routes
+    // through the daemon, which both persists the row AND fans it out.
+    //
+    // Invariant: after one connected adapter sends a DM to another connected
+    // adapter, the daemon's `messages` table has a `kind='direct'` row
+    // carrying the full body addressed to the recipient.
+    daemon = await spawnDaemon(socketPath, dbPath)
+    const projectCwd = mkdtempSync(join(tmp, "project-"))
+
+    const alice = createStdioMcpClient({
+      name: "dm-alice",
+      socketPath,
+      cwd: projectCwd,
+      logPath: join(tmp, "dm-alice-mcp.log"),
+      delivery: "pull",
+    })
+    const bob = createStdioMcpClient({
+      name: "dm-bob",
+      socketPath,
+      cwd: projectCwd,
+      logPath: join(tmp, "dm-bob-mcp.log"),
+      delivery: "pull",
+    })
+    mcpClients.push(alice, bob)
+
+    await Promise.all([
+      alice.request("initialize", {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      }),
+      bob.request("initialize", {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      }),
+    ])
+
+    // Wait until both adapters are registered and mutually visible — this is
+    // the exact condition under which the old peer-direct path would have
+    // engaged (recipient connected with an advertised peer socket).
+    await waitFor(async () => {
+      const members = parseToolText<{ sessions: Array<{ name: string }> }>(await alice.callTool("members", {}))
+      const names = members.sessions.map((s) => s.name)
+      return names.includes("dm-alice") && names.includes("dm-bob")
+    })
+
+    const dmBody = `dm-body-must-persist ${randomUUID()}`
+    const sendResult = parseToolText<{ sent?: boolean }>(
+      await alice.callTool("send", { to: "dm-bob", message: dmBody, type: "query" }),
+    )
+    expect(sendResult.sent).toBe(true)
+
+    // The body row must be in the durable journal — query SQLite directly.
+    await waitFor(() => {
+      const db = new Database(dbPath, { readonly: true })
+      try {
+        const row = db
+          .prepare("SELECT id FROM messages WHERE kind = 'direct' AND recipient = ? AND content = ?")
+          .get("dm-bob", dmBody)
+        return row !== null
+      } finally {
+        db.close()
+      }
+    }, 8000)
+
+    // Assert the full shape of the persisted row.
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      const row = db
+        .prepare("SELECT kind, type, sender, recipient, content FROM messages WHERE content = ?")
+        .get(dmBody) as { kind: string; type: string; sender: string; recipient: string; content: string } | null
+      expect(row, "DM body row missing from daemon journal").not.toBeNull()
+      expect(row!.kind).toBe("direct")
+      expect(row!.sender).toBe("dm-alice")
+      expect(row!.recipient).toBe("dm-bob")
+      expect(row!.content).toBe(dmBody)
+    } finally {
+      db.close()
+    }
+
+    // And it is pull-readable by the recipient via tribe.fetch.
+    await waitFor(async () => {
+      const fetched = parseToolText<{ events: Array<{ from: string; content: string }> }>(
+        await bob.callTool("fetch", { limit: 100, advance: false }),
+      )
+      return fetched.events.some((e) => e.from === "dm-alice" && e.content === dmBody)
+    }, 8000)
 
     expect(alice.stderr()).toBe("")
     expect(bob.stderr()).toBe("")
