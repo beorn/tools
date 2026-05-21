@@ -8,15 +8,14 @@ Install the marketplace, then pick the plugins you want:
 
 ```bash
 # Add marketplace (one time)
-claude plugin marketplace add github:beorn/bearly
+claude plugin marketplace add beorn/bearly
 
 # Install plugins
-claude plugin install tribe@bearly      # Cross-session coordination
-claude plugin install tty@bearly        # Headless terminal testing
-claude plugin install llm@bearly        # Multi-LLM research
-claude plugin install recall@bearly     # Session history search
-claude plugin install batch-refactor@bearly  # Batch rename/refactor
-claude plugin install github@bearly     # GitHub notifications
+claude plugin install tribe@bearly            # Cross-session coordination
+claude plugin install llm@bearly              # Multi-LLM research
+claude plugin install recall@bearly           # Session history search
+claude plugin install batch-refactor@bearly   # Batch rename/refactor
+claude plugin install github@bearly           # GitHub notifications
 ```
 
 | Plugin                                    | Type        | What                                                                                         |
@@ -26,6 +25,35 @@ claude plugin install github@bearly     # GitHub notifications
 | [llm](plugins/llm/)                       | CLI skill   | Multi-LLM research — deep research, second opinions, multi-model debate                      |
 | [recall](plugins/recall/)                 | CLI skill   | Session history search — FTS5-indexed search with LLM synthesis and file recovery            |
 | [batch-refactor](plugins/batch-refactor/) | CLI skill   | Batch rename, refactor, and migrate across files with confidence-based auto-apply            |
+
+The marketplace is defined by [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json); each
+listed plugin carries its own [`.claude-plugin/plugin.json`](plugins/tribe/.claude-plugin/plugin.json)
+manifest, which is the source of truth for that plugin's version.
+
+### Two install routes
+
+Tribe (and any other MCP-channel plugin) can be wired into Claude Code two ways — **one source, two routes**:
+
+- **Marketplace route** — for external users. `claude plugin marketplace add beorn/bearly` then
+  `claude plugin install tribe@bearly`. Claude Code resolves the plugin from this repo and caches it.
+- **Inline `.mcp.json` route** — for developers who vendor bearly as a git submodule. The host repo's
+  `.mcp.json` points an `mcpServers` entry directly at `vendor/bearly/plugins/tribe/server.mjs`. This
+  always tracks the vendored submodule commit — no marketplace cache to go stale. (km uses this route.)
+
+Do not enable both routes for the same plugin in one project — two `tribe` MCP registrations shadow
+each other, and the cached marketplace copy can drift from the vendored source.
+
+### Internal plugins (not in the marketplace)
+
+Some directories under `plugins/` are **internal-only** — libraries or folded-away tools, not
+installable Claude Code plugins. They have no `.claude-plugin/plugin.json` and are intentionally
+absent from `marketplace.json`:
+
+| Directory                    | Status                                                                                 |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `plugins/injection-envelope` | Internal library (`@bearly/injection-envelope`, `private`) — prompt-injection defense   |
+| `plugins/shared-mcp`         | Internal library (`@bearly/shared-mcp`, `private`) — shared MCP wire used by tribe etc. |
+| `plugins/tty`                | Retired — terminal-testing MCP folded into `termless mcp` (`@termless/cli`); no longer ships here |
 
 ## CLI Tools
 
