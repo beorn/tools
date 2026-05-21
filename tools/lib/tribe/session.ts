@@ -302,20 +302,20 @@ export function tryInitialRename(ctx: TribeContext, transcriptPath: string | nul
 // Cleanup
 // ---------------------------------------------------------------------------
 
-/** Delete old messages based on TTL (7 days). `event_log` was merged into
- *  `messages WHERE kind='event'` by migration v8, so the single
- *  `DELETE FROM messages` statement reclaims both direct/broadcast traffic
- *  and journal events. The `reads` table was dropped by migration v9
- *  (km-tribe.delivery-correctness P1.3). */
+/** Archive old messages before trimming the hot log. `event_log` was merged
+ *  into `messages WHERE kind='event'` by migration v8, so this retention path
+ *  covers both direct/broadcast traffic and journal events. */
 export function cleanupOldData(ctx: TribeContext): void {
   const SHORT_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
   const now_ms = Date.now()
+  const cutoff = now_ms - SHORT_TTL
 
-  const msgsDel = ctx.db.prepare("DELETE FROM messages WHERE ts < $cutoff").run({ $cutoff: now_ms - SHORT_TTL })
+  const archived = ctx.stmts.archiveExpiredMessages.run({ $cutoff: cutoff, $archived_at: now_ms })
+  const msgsDel = ctx.stmts.deleteExpiredMessages.run({ $cutoff: cutoff })
   // Clean dedup keys older than 1 day (they only need to survive the poll race window)
   ctx.stmts.cleanupDedup.run({ $cutoff: now_ms - 24 * 60 * 60 * 1000 })
 
   if ((msgsDel.changes ?? 0) > 0) {
-    log.info?.(`cleanup: ${msgsDel.changes} msgs deleted`)
+    log.info?.(`cleanup: ${archived.changes ?? 0} msgs archived, ${msgsDel.changes} msgs deleted`)
   }
 }

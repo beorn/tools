@@ -5,7 +5,8 @@
  * Three responsibilities:
  *
  *   1. Per-session delivery filter (focus / normal / ambient + snooze) and
- *      per-client coalescing into batched `<channel>` notifications.
+ *      per-client coalescing into batched wakeup notifications. The durable
+ *      message log is the bus; push only tells clients to fetch it.
  *   2. Ad-hoc `broadcastNotification(method, params, exclude)` — writes a
  *      JSON-RPC notification to every connected socket (excluding `exclude`).
  *   3. `broadcastLog(msg, type)` — writes daemon warn/error log lines onto
@@ -25,7 +26,6 @@
 import { addWriter, createLogger } from "loggily"
 import { type MessageInsertedInfo, type TribeContext } from "../context.ts"
 import { activityFromMessage, writeActivity } from "../activity-log.ts"
-import { type BeadSnapshot, readBeadSnapshot } from "../bead-snapshot.ts"
 import { createCoalescer, type PendingBroadcast } from "../broadcast-coalescer.ts"
 import { deriveReplyHint, sendMessage, type ReplyHint } from "../messaging.ts"
 import { makeNotification } from "../socket.ts"
@@ -34,63 +34,26 @@ import type { BaseTribe } from "./base.ts"
 import type { WithClientRegistry } from "./with-client-registry.ts"
 import type { WithDaemonContext } from "./with-daemon-context.ts"
 import type { WithDatabase } from "./with-database.ts"
-import type { WithProjectRoot } from "./with-project-root.ts"
 
 const log = createLogger("tribe:broadcast")
 
-// ---------------------------------------------------------------------------
-// Notification-only marker — see comments in tribe-daemon.ts for the full
-// rationale. The MCP wrapper only renders source/from/type/message_id by
-// default, so the "do not respond" signal must be encoded in the type string.
-// ---------------------------------------------------------------------------
-
-const NOTIFICATION_ONLY_MARKER = "notification-only:do-not-acknowledge-or-respond-to"
-
-function isNotificationOnlyType(type: string): boolean {
-  if (type === "session" || type === "status" || type === "delta") return true
-  if (type.startsWith("chief:")) return true
-  if (type.startsWith("github:")) return true
-  return false
-}
-
-function markedType(type: string): string {
-  return isNotificationOnlyType(type) ? `${NOTIFICATION_ONLY_MARKER}:${type}` : type
-}
-
 function singleEventNotification(ev: PendingBroadcast): string {
-  const params: Record<string, unknown> = {
-    from: ev.sender,
-    type: markedType(ev.type),
-    content: ev.content,
-    bead_id: ev.bead_id,
+  return makeNotification("wakeup", {
+    latest_seq: ev.rowid,
     message_id: ev.id,
+    count: 1,
     topic: ev.topic,
-  }
-  // km-tribe.task-assignment-stale-snapshot: surface fresh bead state +
-  // re-issue counter on assign envelopes so the receiver can see current
-  // status/title/notes regardless of how stale the chief's in-context cache
-  // is. Only attached when both fields are populated by the broadcast
-  // pipeline (i.e. type === 'assign' and bead_id is set).
-  if (ev.beadState) params.bead_state = ev.beadState
-  if (ev.reissueCount !== undefined) params.reissue_count = ev.reissueCount
-  return makeNotification("channel", params)
+  })
 }
 
 function batchedNotification(events: PendingBroadcast[], dropped: number): string {
-  const lines = events.map((e) => `[${e.sender}] ${e.type}: ${e.content.replace(/\n/g, " ")}`)
-  if (dropped > 0) lines.push(`(+${dropped} more events truncated)`)
-  const total = events.length + dropped
-  const header = `${total} tribe event${total === 1 ? "" : "s"}`
-  const content = `${header}\n${lines.join("\n")}`
   const last = events[events.length - 1]
-  return makeNotification("channel", {
-    from: "daemon",
-    type: markedType("delta"),
-    content,
-    bead_id: null,
+  return makeNotification("wakeup", {
+    latest_seq: last?.rowid ?? null,
     message_id: last?.id ?? null,
-    events_count: total,
-    topic: null,
+    count: events.length + dropped,
+    dropped,
+    topic: last?.topic ?? null,
   })
 }
 
@@ -197,16 +160,14 @@ export interface WithBroadcast {
 /**
  * withBroadcast — install the broadcast capability on the daemon value and
  * route the daemon's own ctx.onMessageInserted through the activity-log +
- * fanout tap. Must come AFTER withClientRegistry, withDatabase,
- * withDaemonContext, AND withProjectRoot in the pipe — projectRoot is read on
- * every assign-typed delivery to enrich the channel envelope with fresh bead
- * state (see km-tribe.task-assignment-stale-snapshot).
+ * fanout tap. Must come AFTER withClientRegistry, withDatabase, and
+ * withDaemonContext in the pipe.
  */
-export function withBroadcast<
-  T extends BaseTribe & WithDatabase & WithDaemonContext & WithClientRegistry & WithProjectRoot,
->(): (t: T) => T & WithBroadcast {
+export function withBroadcast<T extends BaseTribe & WithDatabase & WithDaemonContext & WithClientRegistry>(): (
+  t: T,
+) => T & WithBroadcast {
   return (t) => {
-    const { db, stmts, daemonCtx, registry, projectRoot } = t
+    const { db, stmts, daemonCtx, registry } = t
     const { clients } = registry
 
     function notify(method: string, params?: Record<string, unknown>, exclude?: string): void {
@@ -288,30 +249,6 @@ export function withBroadcast<
         senderRole: info.senderRole,
       })
 
-      // km-tribe.task-assignment-stale-snapshot: enrich assign-typed envelopes
-      // with fresh bead state from `.beads/backup/issues.jsonl` and a re-issue
-      // counter so receivers don't have to trust the sender's in-context
-      // snapshot. Both lookups are best-effort and silently fall back when the
-      // bead journal isn't reachable.
-      let beadState: BeadSnapshot | null = null
-      let reissueCount: number | undefined
-      if (info.type === "assign" && info.bead_id) {
-        beadState = readBeadSnapshot(info.bead_id, projectRoot)
-        try {
-          const row = stmts.countPriorAssigns.get({
-            $sender: info.sender,
-            $recipient: info.recipient,
-            $bead_id: info.bead_id,
-            $rowid: info.rowid,
-          }) as { count: number } | undefined
-          // Prior count is exclusive of this message — first delivery → 0,
-          // second delivery for the same triple → 1.
-          reissueCount = row?.count ?? 0
-        } catch {
-          /* statement absent (e.g. unmigrated DB) — leave reissueCount undefined */
-        }
-      }
-
       const pending: PendingBroadcast = {
         id: info.id,
         ts: info.ts,
@@ -322,8 +259,6 @@ export function withBroadcast<
         bead_id: info.bead_id,
         replyHint,
         topic: info.topic,
-        beadState,
-        reissueCount,
       }
 
       for (const [connId, client] of clients) {

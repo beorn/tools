@@ -26,6 +26,8 @@ export function openDatabase(path: string): Database {
 		identity_token TEXT,
 		started_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
+		last_delivered_ts INTEGER,
+		last_delivered_seq INTEGER NOT NULL DEFAULT 0,
 		last_inbox_pull_seq INTEGER NOT NULL DEFAULT 0,
 		filter_mode  TEXT NOT NULL DEFAULT 'normal',
 		filter_until INTEGER,
@@ -74,6 +76,23 @@ export function openDatabase(path: string): Database {
 		delivery   TEXT NOT NULL DEFAULT 'push',
 		topic      TEXT,
 		room_id    TEXT
+	)`)
+
+  db.run(`CREATE TABLE IF NOT EXISTS messages_archive (
+		seq         INTEGER NOT NULL,
+		id          TEXT PRIMARY KEY,
+		type        TEXT NOT NULL,
+		sender      TEXT NOT NULL,
+		recipient   TEXT NOT NULL,
+		kind        TEXT NOT NULL DEFAULT 'direct',
+		content     TEXT NOT NULL,
+		bead_id     TEXT,
+		ref         TEXT,
+		ts          INTEGER NOT NULL,
+		delivery    TEXT NOT NULL DEFAULT 'push',
+		topic       TEXT,
+		room_id     TEXT,
+		archived_at INTEGER NOT NULL
 	)`)
 
   // `cursors` and `reads` tables removed by migration v9 — the event-bus
@@ -146,6 +165,8 @@ export function openDatabase(path: string): Database {
   db.run("DROP INDEX IF EXISTS idx_messages_plugin_kind_ts")
   db.run("CREATE INDEX IF NOT EXISTS idx_messages_topic_ts ON messages(topic, ts)")
   db.run("CREATE INDEX IF NOT EXISTS idx_messages_room_ts ON messages(room_id, ts)")
+  db.run("CREATE INDEX IF NOT EXISTS idx_messages_archive_ts ON messages_archive(ts)")
+  db.run("CREATE INDEX IF NOT EXISTS idx_messages_archive_seq ON messages_archive(seq)")
 
   return db
 }
@@ -565,10 +586,36 @@ const MIGRATIONS: readonly Migration[] = [
         } else if (!sessionCols.has("filter_mute")) {
           db.run("ALTER TABLE sessions ADD COLUMN filter_mute TEXT")
         } else if (sessionCols.has("filter_kinds")) {
-          db.run("UPDATE sessions SET filter_mute = filter_kinds WHERE filter_mute IS NULL AND filter_kinds IS NOT NULL")
+          db.run(
+            "UPDATE sessions SET filter_mute = filter_kinds WHERE filter_mute IS NULL AND filter_kinds IS NOT NULL",
+          )
           db.run("ALTER TABLE sessions DROP COLUMN filter_kinds")
         }
       }
+    },
+  },
+  {
+    version: 14,
+    name: "message-archive",
+    up(db) {
+      db.run(`CREATE TABLE IF NOT EXISTS messages_archive (
+				seq         INTEGER NOT NULL,
+				id          TEXT PRIMARY KEY,
+				type        TEXT NOT NULL,
+				sender      TEXT NOT NULL,
+				recipient   TEXT NOT NULL,
+				kind        TEXT NOT NULL DEFAULT 'direct',
+				content     TEXT NOT NULL,
+				bead_id     TEXT,
+				ref         TEXT,
+				ts          INTEGER NOT NULL,
+				delivery    TEXT NOT NULL DEFAULT 'push',
+				topic       TEXT,
+				room_id     TEXT,
+				archived_at INTEGER NOT NULL
+			)`)
+      db.run("CREATE INDEX IF NOT EXISTS idx_messages_archive_ts ON messages_archive(ts)")
+      db.run("CREATE INDEX IF NOT EXISTS idx_messages_archive_seq ON messages_archive(seq)")
     },
   },
 ]
@@ -636,11 +683,37 @@ export function createStatements(db: Database) {
     // Cleanup old dedup entries (called by retention)
     cleanupDedup: db.prepare("DELETE FROM dedup WHERE ts < $cutoff"),
 
+    archiveExpiredMessages: db.prepare(`
+		INSERT OR IGNORE INTO messages_archive (
+			seq, id, type, sender, recipient, kind, content, bead_id, ref, ts,
+			delivery, topic, room_id, archived_at
+		)
+		SELECT
+			rowid, id, type, sender, recipient, kind, content, bead_id, ref, ts,
+			delivery, topic, room_id, $archived_at
+		FROM messages
+		WHERE ts < $cutoff
+	`),
+
+    deleteExpiredMessages: db.prepare("DELETE FROM messages WHERE ts < $cutoff"),
+
     updateLastDelivered: db.prepare(
       "UPDATE sessions SET last_delivered_ts = $ts, last_delivered_seq = $seq, updated_at = $ts WHERE id = $id",
     ),
 
     getLastDelivered: db.prepare("SELECT last_delivered_ts, last_delivered_seq FROM sessions WHERE id = $id"),
+
+    getMessageTailSeq: db.prepare("SELECT COALESCE(MAX(rowid), 0) AS seq FROM messages"),
+
+    resetSessionDeliveryOffsets: db.prepare(`
+      UPDATE sessions
+      SET
+        last_delivered_ts = $ts,
+        last_delivered_seq = $seq,
+        last_inbox_pull_seq = $seq,
+        updated_at = $ts
+      WHERE id = $id
+    `),
 
     // ---------------- km-tribe.event-classification ----------------
 

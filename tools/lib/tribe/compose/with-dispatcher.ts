@@ -11,7 +11,7 @@
  *     fallthrough in `default`.
  *   - The session-name resolution helpers (`adoptIdentity`,
  *     `adoptByProjectAndRole`, `resolveName`, `deduplicateName`,
- *     `applyClient`, `replayOrBootstrap`, `announceJoin`).
+ *     `applyClient`, `resetOffsetsToTail`, `announceJoin`).
  *
  * Runtime hooks injected via `withDispatcher({...})`:
  *   - `onActiveClient()` — invoked from accept (a fresh client connected).
@@ -224,54 +224,10 @@ export function withDispatcher<
       return client
     }
 
-    function replayOrBootstrap(connId: string, client: ClientSession, adopted: PriorSession | null): void {
-      const priorCursor = stmts.getLastDelivered.get({ $id: client.ctx.sessionId }) as {
-        last_delivered_ts: number | null
-        last_delivered_seq: number | null
-      } | null
-
-      if (adopted) {
-        const PAGE_SIZE = 200
-        let sinceSeq = priorCursor?.last_delivered_seq ?? 0
-        const isWatch = client.role === "watch"
-        const replayQuery = isWatch
-          ? `SELECT rowid, id, type, sender, recipient, content, bead_id, ts FROM messages WHERE rowid > ? AND sender != ? ORDER BY rowid ASC LIMIT ${PAGE_SIZE}`
-          : `SELECT rowid, id, type, sender, recipient, content, bead_id, ts FROM messages WHERE rowid > ? AND (recipient = ? OR recipient = '*') AND sender != ? ORDER BY rowid ASC LIMIT ${PAGE_SIZE}`
-        const stmt = db.prepare(replayQuery)
-        for (;;) {
-          const replayParams = isWatch ? [sinceSeq, client.name] : [sinceSeq, client.name, client.name]
-          const page = stmt.all(...replayParams) as Array<{
-            rowid: number
-            id: string
-            type: string
-            sender: string
-            recipient: string
-            content: string
-            bead_id: string | null
-            ts: number
-          }>
-          if (page.length === 0) break
-          for (const msg of page) {
-            broadcast.pushToClient(connId, "channel", {
-              from: msg.sender,
-              type: msg.type,
-              content: msg.content,
-              bead_id: msg.bead_id,
-              message_id: msg.id,
-            })
-            broadcast.persistDeliveredCursor(client.ctx.sessionId, msg.ts, msg.rowid)
-            sinceSeq = msg.rowid
-          }
-          if (page.length < PAGE_SIZE) break
-        }
-        return
-      }
-
-      const latest = db.prepare("SELECT MAX(rowid) as max_seq FROM messages").get() as {
-        max_seq: number | null
-      } | null
-      const bootstrapSeq = latest?.max_seq ?? 0
-      broadcast.persistDeliveredCursor(client.ctx.sessionId, Date.now(), bootstrapSeq)
+    function resetOffsetsToTail(client: ClientSession): void {
+      const latest = stmts.getMessageTailSeq.get() as { seq: number } | null
+      const tailSeq = latest?.seq ?? 0
+      stmts.resetSessionDeliveryOffsets.run({ $id: client.ctx.sessionId, $ts: Date.now(), $seq: tailSeq })
     }
 
     function announceJoin(client: ClientSession): void {
@@ -406,7 +362,7 @@ export function withDispatcher<
               ctx: clientCtx,
             })
 
-            replayOrBootstrap(connId, client, adopted)
+            resetOffsetsToTail(client)
             announceJoin(client)
 
             const chiefInfo = registry.getChiefInfo()

@@ -1,13 +1,10 @@
 /**
  * Broadcast coalescer — merges multiple `broadcast`-kind messages to the same
- * recipient within a short window into one MCP notification.
+ * recipient within a short window into one wakeup notification.
  *
- * Why: each raw `<channel source="plugin:tribe:tribe" …>…</channel>` tag that
- * arrives during a Claude Code turn goes into that turn's context as a
- * system-reminder. Under heavy tribe activity the transcript fills with these
- * tags and the model pattern-matches to "transcript continuation," which
- * amplifies any malformed hook stdout into role-prefix hallucination cascades.
- * Coalescing bursts cuts the number of tags and reduces context saturation.
+ * Why: the daemon's socket push is wakeup-only. Coalescing bursts prevents
+ * redundant wakeups while preserving every message in the durable SQLite log
+ * for the client to drain with `tribe.fetch`.
  *
  * Design:
  *  - Per-connection queue + single flush timer.
@@ -16,8 +13,8 @@
  *  - Cap at `maxEventsPerBatch` events per flush; excess is truncated with a
  *    "+N more events truncated" marker so one burst can't itself become
  *    context-saturating.
- *  - Single event out of a burst keeps the original notification shape
- *    (back-compat). N>1 uses a consolidated `type: "delta"` notification.
+ *  - Single event and N>1 bursts both use the notification shape supplied by
+ *    the caller.
  *  - Direct messages are NEVER batched — the caller is responsible for
  *    routing direct messages around the coalescer.
  */

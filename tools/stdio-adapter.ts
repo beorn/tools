@@ -124,6 +124,40 @@ function sendChannel(content: string, meta: Record<string, string | undefined>):
   mcp.notification({ method: "notifications/claude/channel", params: { content: safeContent, meta } }).catch(() => {})
 }
 
+const NOTIFICATION_ONLY_MARKER = "notification-only:do-not-acknowledge-or-respond-to"
+
+function isNotificationOnlyType(type: string): boolean {
+  if (type === "session" || type === "status" || type === "delta") return true
+  if (type.startsWith("chief:")) return true
+  if (type.startsWith("github:")) return true
+  return false
+}
+
+function markedType(type: string): string {
+  return isNotificationOnlyType(type) ? `${NOTIFICATION_ONLY_MARKER}:${type}` : type
+}
+
+type TribeFetchResult = {
+  events?: Array<{
+    id?: string
+    type?: string
+    from?: string
+    content?: string
+    bead?: string | null
+    topic?: string | null
+  }>
+}
+
+function parseToolText<T>(result: unknown): T | null {
+  const text = (result as { content?: Array<{ text?: string }> }).content?.[0]?.text
+  if (typeof text !== "string") return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
 function startPeerServer(): NetServer {
   // Ensure directory exists
   const socketDir = dirname(PEER_SOCKET_PATH)
@@ -629,11 +663,56 @@ function tryAutoRenameOnClaim(content: string): void {
     })
 }
 
+function forwardFetchedEvent(event: NonNullable<TribeFetchResult["events"]>[number]): void {
+  const content = String(event.content ?? "")
+  const type = markedType(String(event.type ?? "notify"))
+  if (type === "bead:claimed") tryAutoRenameOnClaim(content)
+  sendChannel(content, {
+    from: String(event.from ?? "unknown"),
+    type,
+    bead: event.bead ? String(event.bead) : undefined,
+    message_id: event.id ? String(event.id) : undefined,
+  })
+}
+
+let drainInFlight = false
+let drainAgain = false
+
+function drainDaemonInbox(): void {
+  if (drainInFlight) {
+    drainAgain = true
+    return
+  }
+  drainInFlight = true
+  void (async () => {
+    try {
+      do {
+        drainAgain = false
+        for (;;) {
+          const result = parseToolText<TribeFetchResult>(await daemon.call("tribe.fetch", { limit: 500 }))
+          const events = result?.events ?? []
+          for (const event of events) forwardFetchedEvent(event)
+          if (events.length < 500) break
+        }
+      } while (drainAgain)
+    } catch (err) {
+      log.warn?.(`Failed to drain tribe inbox after wakeup: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      drainInFlight = false
+      if (drainAgain) drainDaemonInbox()
+    }
+  })()
+}
+
 // Forward daemon notifications to Claude Code
 daemon.onNotification((method, params) => {
+  if (method === "wakeup") {
+    drainDaemonInbox()
+    return
+  }
   if (method === "channel") {
     const content = String(params?.content ?? "")
-    const type = String(params?.type ?? "notify")
+    const type = markedType(String(params?.type ?? "notify"))
     // Auto-rename on bead claim by this session
     if (type === "bead:claimed") tryAutoRenameOnClaim(content)
     sendChannel(content, {
