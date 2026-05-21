@@ -1,5 +1,5 @@
 /**
- * Tribe session — registration, cursor recovery, transcript naming, cleanup.
+ * Tribe session — registration, delivery offsets, transcript naming, cleanup.
  */
 
 import { existsSync, readFileSync } from "node:fs"
@@ -185,10 +185,9 @@ export function registerSession(
   // km-tribe.delivery-correctness P1.3: the old cursor-init block seeded a
   // per-session entry in the now-dropped `cursors` table with multi-strategy
   // recovery (identity_token → claude_session_id → pid → skip-to-latest).
-  // Nothing in the post-event-bus code path reads from `cursors`. The daemon
-  // seeds `sessions.last_delivered_seq` directly in replayOrBootstrap, using
-  // identity_token adoption for stable-identity recovery — this redundant
-  // block went away with the table.
+  // Nothing in the post-event-bus code path reads from `cursors`. Reconnects
+  // now reset `sessions.last_delivered_seq`/`last_inbox_pull_seq` to the log
+  // tail during registration, so no stale delivery cursor is inherited.
 }
 
 // ---------------------------------------------------------------------------
