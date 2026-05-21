@@ -1,11 +1,16 @@
 /**
- * withHotReload — SIGHUP-driven re-exec that preserves the listening fd.
+ * withHotReload — SIGHUP-driven re-exec for picking up new daemon code.
  *
  * Two pieces:
  *
- *   1. `reload()` — spawn(process.execPath, argv, { stdio: [..., fd] }) so the
- *      new process inherits the listening Unix socket. The old process exits
- *      after a short delay to let the child bind.
+ *   1. `reload()` — close + unlink the listening socket, then spawn a DETACHED
+ *      replacement (`detached:true` + `unref()`, no `--fd`) that binds the
+ *      freed socket path fresh. The old process exits after a short delay.
+ *      The replacement survives the old process's exit. (Earlier versions
+ *      passed the listening fd to the child for zero-gap handoff, but Bun's
+ *      `node:net` cannot `listen({ fd })` — fd inheritance crash-looped the
+ *      child. Close-then-fresh-bind costs a sub-second reconnect window but
+ *      works under Bun.)
  *
  *   2. Source file watcher — fs.watch on the daemon's source directories;
  *      coalesced via debounce; emits SIGHUP to the current process on change.
@@ -18,7 +23,7 @@
  */
 
 import { spawn } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, watch, type FSWatcher } from "node:fs"
+import { existsSync, readdirSync, readFileSync, unlinkSync, watch, type FSWatcher } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname as pathDirname, resolve as pathResolve } from "node:path"
 import { createLogger } from "loggily"
@@ -93,20 +98,46 @@ export function withHotReload<T extends BaseTribe & WithSocketServer>(
       // (prevents duplicate event delivery in the new process).
       opts.stopPlugins()
 
-      const socketFd = (t.socket.server as unknown as { _handle?: { fd?: number } })._handle?.fd
-      if (socketFd == null) {
-        log.info?.("Cannot hot-reload: no socket fd available")
-        return
+      // Re-exec strategy: close-then-spawn-detached-fresh.
+      //
+      // The previous strategy passed the listening socket fd to the child
+      // (`--fd=N` + `stdio[3]=fd`) so it could inherit the bound socket. That
+      // only works under Node — Bun's `node:net` throws "Bun does not support
+      // listening on a file descriptor" on `server.listen({ fd })`. Under Bun
+      // the child crash-looped on startup, the old daemon exited anyway, and
+      // every session saw "No daemon running" (reproduced 2026-05-21 via the
+      // `tribe.reload` MCP tool, which routes here through SIGHUP).
+      //
+      // Instead: the OLD daemon closes + unlinks the socket, then spawns the
+      // replacement DETACHED (its own session via `detached:true` + `unref()`,
+      // so it survives this process's exit) with a FRESH bind — no `--fd`.
+      // The child binds the now-free socket path. There is a sub-second
+      // window with no listener; adapters reconnect transparently via
+      // `createReconnectingClient`'s backoff. Crucially the daemon SURVIVES
+      // a reload — `detached` severs it from the dying parent's lifecycle.
+      // Mark the socket as handed off BEFORE closing so the scope-cleanup
+      // defer in withSocketServer skips its own unlink (it would otherwise
+      // race the replacement daemon's fresh bind).
+      t.socket.handedOff = true
+      try {
+        t.socket.server.close()
+      } catch {
+        /* already closing */
+      }
+      try {
+        if (existsSync(t.socket.socketPath)) unlinkSync(t.socket.socketPath)
+      } catch {
+        /* not present or no permission */
       }
 
       const argv = process.argv.slice(1).filter((a) => !a.startsWith("--fd"))
-      argv.push(`--fd=${socketFd}`)
 
       const child = spawn(process.execPath, argv, {
-        stdio: ["ignore", "inherit", "inherit", socketFd],
-        detached: false,
+        stdio: "ignore",
+        detached: true,
         env: process.env,
       })
+      child.unref()
 
       child.on("error", (err) => {
         log.info?.(`Hot-reload spawn failed: ${err.message}`)

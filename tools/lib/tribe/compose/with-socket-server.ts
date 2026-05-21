@@ -34,6 +34,13 @@ export interface SocketServer {
   readonly inheritedFd: boolean
   /** Wall-clock ms when bind completed — used for join-suppress window etc. */
   readonly startedAt: number
+  /**
+   * Set by `withHotReload.reload()` once the socket has been closed + unlinked
+   * and a replacement daemon spawned. Signals the scope-cleanup defer below to
+   * SKIP its own `unlinkSync` — otherwise the dying daemon's delayed cleanup
+   * could delete the freshly-bound socket of the replacement daemon.
+   */
+  handedOff: boolean
 }
 
 export interface WithSocketServer {
@@ -107,16 +114,25 @@ export function withSocketServer<T extends BaseTribe & WithConfig>(): (t: T) => 
       log.info?.(`Listening on ${socketPath}`)
     }
 
-    // Cleanup — close the server and (when not inheriting) unlink the socket
-    // file. Hot-reload short-circuits server.close() by letting the new
-    // process inherit the listening fd before this scope closes.
+    const socket: SocketServer = {
+      server,
+      socketPath,
+      inheritedFd,
+      startedAt: Date.now(),
+      handedOff: false,
+    }
+
+    // Cleanup — close the server and unlink the socket file. Skipped when this
+    // daemon handed the socket off to a replacement during hot-reload: in that
+    // case `reload()` already closed + unlinked, and the replacement may have
+    // re-bound a fresh socket at the same path that we must NOT delete.
     t.scope.defer(() => {
       try {
         server.close()
       } catch {
         /* already closing */
       }
-      if (!inheritedFd) {
+      if (!inheritedFd && !socket.handedOff) {
         try {
           unlinkSync(socketPath)
         } catch {
@@ -124,13 +140,6 @@ export function withSocketServer<T extends BaseTribe & WithConfig>(): (t: T) => 
         }
       }
     })
-
-    const socket: SocketServer = {
-      server,
-      socketPath,
-      inheritedFd,
-      startedAt: Date.now(),
-    }
     return { ...t, socket }
   }
 }

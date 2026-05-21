@@ -161,13 +161,53 @@ describe("tribe-daemon hot-reload exit", () => {
     expect(pidAlive(donorPid)).toBe(false)
   })
 
-  // NOTE: A "two back-to-back SIGHUPs" test was attempted but blocked on a
-  // separate hot-reload bug: the donor's scope dispose calls unlinkSync on
-  // the socket path (with-socket-server.ts:119-125 — `if (!inheritedFd)`).
-  // The successor inherited the listening fd in-kernel, but the path on
-  // disk is gone after the donor exits, so future PATH-based connections
-  // fail. Tracked separately under @km/bearly/hot-reload-socket-unlink.
-  // The single-SIGHUP test above is the core regression assertion for
-  // this bead — it proves the donor's process.exit fires inside the
-  // contract window, which is what the zombie-CPU pattern violated.
+  // Successor survival — the regression assertion for the `tribe.reload`
+  // daemon-death bug (km/tribe/reload-kills-daemon, 2026-05-21).
+  //
+  // Before the fix, hot-reload re-exec'd the successor with `--fd=<socketFd>`
+  // so it could inherit the listening socket. Bun's `node:net` cannot
+  // `listen({ fd })` — the successor crash-looped on startup while the donor
+  // exited anyway. Net result: NO daemon, "No daemon running" everywhere.
+  // Separately, the donor's scope-cleanup `unlinkSync` could race-delete the
+  // successor's socket path (was tracked as @km/bearly/hot-reload-socket-unlink).
+  //
+  // The fix (with-hot-reload.ts): donor closes + unlinks the socket, then
+  // spawns a DETACHED successor that binds the freed path FRESH. The
+  // `handedOff` flag on SocketServer suppresses the donor's scope-cleanup
+  // unlink so it can't race-delete the successor's fresh socket.
+  it("successor binds the socket and survives the donor exit", async () => {
+    daemon = await spawnDaemon(socketPath, dbPath)
+    const donorPid = daemon.pid!
+    process.on("exit", () => {
+      if (pidAlive(donorPid)) {
+        try {
+          process.kill(donorPid, "SIGKILL")
+        } catch {
+          /* ignore */
+        }
+      }
+    })
+
+    daemon.kill("SIGHUP")
+
+    // Donor must exit inside the contract window.
+    await waitFor(() => !pidAlive(donorPid), 3000)
+    expect(pidAlive(donorPid)).toBe(false)
+
+    // A successor daemon must be listening on the SAME socket path — the
+    // path-based connection is what every adapter + CLI uses.
+    await waitFor(() => existsSync(socketPath), 6000)
+    expect(existsSync(socketPath)).toBe(true)
+
+    // Probe it: a PATH-based connection must reach a live daemon. tribe-cli
+    // resolves the socket from TRIBE_SOCKET, so point it at the test socket.
+    const out = spawnSync(
+      process.execPath,
+      [resolve(dirname(new URL(import.meta.url).pathname), "../tools/tribe-cli.ts"), "status"],
+      { encoding: "utf8", timeout: 8000, env: { ...process.env, TRIBE_SOCKET: socketPath } },
+    )
+    expect(out.status).toBe(0)
+    // The successor PID is leaked relative to the test's ChildProcess handle;
+    // afterEach's pgrep-by-tmpDir sweep reaps it.
+  })
 })

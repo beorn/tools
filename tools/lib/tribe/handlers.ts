@@ -680,21 +680,25 @@ function handleReload(ctx: TribeContext, a: ToolArgs, cleanup: () => void): Tool
   logEvent(ctx, "session.reload", undefined, { name: ctx.getName(), reason })
   log.info?.(`reloading: ${reason}`)
 
-  // Schedule re-exec after responding to the tool call
+  // Schedule the re-exec after the tool response is flushed.
+  //
+  // We deliberately do NOT spawn the replacement daemon here. A naive
+  // `Bun.spawn([execPath, ...process.argv])` re-exec races the old daemon to
+  // re-bind the socket, sees "Another daemon is already listening", and exits
+  // immediately; meanwhile the old daemon also exits. Net result: NO daemon,
+  // and every session sees "No daemon running". (Reproduced 2026-05-21 — a
+  // session calling `tribe.reload` repeatedly killed the daemon.)
+  //
+  // Instead we SIGHUP ourselves. The daemon's `withSignals` factory routes
+  // SIGHUP → `withHotReload.reload()`, which closes + unlinks the socket then
+  // spawns a DETACHED replacement that binds the freed path fresh — the
+  // replacement survives this process's exit, and adapters reconnect
+  // transparently. This is the same hardened path `tribe reload` (the CLI)
+  // already uses.
   setTimeout(() => {
     cleanup()
-    // Re-exec the same script with the same args — picks up latest code from disk
-    const args = process.argv.slice(1) // drop the bun/node executable
-    log.info?.(`exec: ${process.execPath} ${args.join(" ")}`)
-    // Use Bun.spawn to replace the process
-    const child = Bun.spawn([process.execPath, ...args], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-      env: process.env,
-    })
-    // Forward exit
-    void child.exited.then((code) => process.exit(code ?? 0)).catch(() => process.exit(1))
+    log.info?.(`SIGHUP self (pid=${process.pid}) — hot-reload via detached re-exec`)
+    process.kill(process.pid, "SIGHUP")
   }, 100) // small delay so the tool response gets sent first
 
   return {
