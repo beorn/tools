@@ -228,9 +228,7 @@ export function activityFromMessage(msg: {
   }
 
   const clean = msg.content.replace(/\s+/g, " ").trim()
-  const preview = stripLoneSurrogates(
-    clean.length <= 200 ? clean : truncateSurrogateSafe(clean, 199) + "…",
-  )
+  const preview = stripLoneSurrogates(clean.length <= 200 ? clean : truncateSurrogateSafe(clean, 199) + "…")
 
   return {
     ts: msg.ts,
