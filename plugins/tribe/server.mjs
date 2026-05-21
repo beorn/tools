@@ -2238,6 +2238,28 @@ function sendChannel(content, meta) {
   const safeContent = defangModelInput(content);
   mcp.notification({ method: "notifications/claude/channel", params: { content: safeContent, meta } }).catch(() => {});
 }
+function isNotificationOnlyType(type) {
+  if (type === "session" || type === "status" || type === "delta")
+    return true;
+  if (type.startsWith("chief:"))
+    return true;
+  if (type.startsWith("github:"))
+    return true;
+  return false;
+}
+function markedType(type) {
+  return isNotificationOnlyType(type) ? `${NOTIFICATION_ONLY_MARKER}:${type}` : type;
+}
+function parseToolText(result) {
+  const text = result.content?.[0]?.text;
+  if (typeof text !== "string")
+    return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 function startPeerServer() {
   const socketDir = dirname6(PEER_SOCKET_PATH);
   if (!existsSync6(socketDir))
@@ -2369,6 +2391,46 @@ function tryAutoRenameOnClaim(content) {
     } catch {}
   }).catch(() => {});
 }
+function forwardFetchedEvent(event) {
+  const content = String(event.content ?? "");
+  const type = markedType(String(event.type ?? "notify"));
+  if (type === "bead:claimed")
+    tryAutoRenameOnClaim(content);
+  sendChannel(content, {
+    from: String(event.from ?? "unknown"),
+    type,
+    bead: event.bead ? String(event.bead) : undefined,
+    message_id: event.id ? String(event.id) : undefined
+  });
+}
+function drainDaemonInbox() {
+  if (drainInFlight) {
+    drainAgain = true;
+    return;
+  }
+  drainInFlight = true;
+  (async () => {
+    try {
+      do {
+        drainAgain = false;
+        for (;; ) {
+          const result = parseToolText(await daemon.call("tribe.fetch", { limit: 500 }));
+          const events = result?.events ?? [];
+          for (const event of events)
+            forwardFetchedEvent(event);
+          if (events.length < 500)
+            break;
+        }
+      } while (drainAgain);
+    } catch (err) {
+      log5.warn?.(`Failed to drain tribe inbox after wakeup: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      drainInFlight = false;
+      if (drainAgain)
+        drainDaemonInbox();
+    }
+  })();
+}
 let __stack = [];
 try {
   if (process.env.DEBUG_LOG) {
@@ -2398,6 +2460,7 @@ try {
   var PEER_SOCKET_PATH = resolvePeerSocketPath(mySessionId);
   var peerServer = null;
   var mcp;
+  var NOTIFICATION_ONLY_MARKER = "notification-only:do-not-acknowledge-or-respond-to";
   peerServer = startPeerServer();
   var identityToken = createHash3("sha256").update(`${CLAUDE_SESSION_ID ?? ""}|${process.cwd()}|${args.role ?? "member"}`).digest("hex").slice(0, 16);
   var DELIVERY = process.env.TRIBE_DELIVERY === "pull" ? "pull" : "push";
@@ -2612,10 +2675,16 @@ Tribe messages:
     }
   }
   var autoRenamed = false;
+  var drainInFlight = false;
+  var drainAgain = false;
   daemon.onNotification((method, params) => {
+    if (method === "wakeup") {
+      drainDaemonInbox();
+      return;
+    }
     if (method === "channel") {
       const content = String(params?.content ?? "");
-      const type = String(params?.type ?? "notify");
+      const type = markedType(String(params?.type ?? "notify"));
       if (type === "bead:claimed")
         tryAutoRenameOnClaim(content);
       sendChannel(content, {
