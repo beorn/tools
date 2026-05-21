@@ -39,6 +39,18 @@
  *   3. Cap consecutive newlines at 2. Multi-newline dumps mimic
  *      transcript structure; tighten to running-prose layout.
  *
+ *   4. Replace any *lone* UTF-16 surrogate with U+FFFD. Lone surrogates are
+ *      legal in JS strings but illegal in transmitted JSON: when the Claude
+ *      Code harness `JSON.stringify`s a conversation that contains one, the
+ *      Anthropic API rejects the whole request body with
+ *      `400 ... no low surrogate in string`, hard-blocking the agent for the
+ *      rest of its session. A single poisoned channel message is enough.
+ *      They get here when some upstream truncation (`str.slice(0, n)`,
+ *      byte-length cap, regex) cuts a string mid-surrogate-pair. This is the
+ *      universal safety net — `defangModelInput` is the single chokepoint all
+ *      injected payloads pass through before reaching the model's context, so
+ *      stripping here means no truncation bug anywhere can poison an agent.
+ *
  * What this is NOT for: user-typed text. The hook's `userPrompt`
  * parameter is high-trust by definition (the user typed it). Defanging
  * it would distort code samples and other literal content the user
@@ -70,6 +82,15 @@ const ROLE_PREFIX_RE = /(^|\n)(Human|Assistant|User|H):(?=\s|$)/g
  */
 const ZWSP = String.fromCharCode(0x200b)
 
+/**
+ * Match a *lone* UTF-16 surrogate code unit — a high surrogate
+ * (U+D800–U+DBFF) not followed by a low surrogate, or a low surrogate
+ * (U+DC00–U+DFFF) not preceded by a high surrogate. Well-formed surrogate
+ * pairs (emoji, astral-plane characters) do NOT match and pass through
+ * untouched.
+ */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
 function defangRolePrefix(_match: string, lead: string, role: string): string {
   return `${lead}${role[0]}${ZWSP}${role.slice(1)}:`
 }
@@ -88,4 +109,5 @@ export function defangModelInput(text: string): string {
     .replace(LOG_LINE_RE, "[log-redacted]")
     .replace(ROLE_PREFIX_RE, defangRolePrefix)
     .replace(/\n{3,}/g, "\n\n")
+    .replace(LONE_SURROGATE_RE, "�")
 }

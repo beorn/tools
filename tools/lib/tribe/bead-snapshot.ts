@@ -22,6 +22,7 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { stripLoneSurrogates, truncateSurrogateSafe } from "./validation.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,8 +69,8 @@ function asString(v: unknown): string | null {
 }
 
 function clipNotes(raw: string): { excerpt: string; truncated: boolean } {
-  if (raw.length <= NOTES_EXCERPT_LIMIT) return { excerpt: raw, truncated: false }
-  return { excerpt: raw.slice(0, NOTES_EXCERPT_LIMIT), truncated: true }
+  if (raw.length <= NOTES_EXCERPT_LIMIT) return { excerpt: stripLoneSurrogates(raw), truncated: false }
+  return { excerpt: stripLoneSurrogates(truncateSurrogateSafe(raw, NOTES_EXCERPT_LIMIT)), truncated: true }
 }
 
 // ---------------------------------------------------------------------------

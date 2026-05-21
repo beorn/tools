@@ -152,6 +152,51 @@ describe("defangModelInput — properties", () => {
 })
 
 /**
+ * Transformation 4 — lone-surrogate stripping.
+ *
+ * A lone UTF-16 surrogate is legal in a JS string but illegal in transmitted
+ * JSON. When the Claude Code harness `JSON.stringify`s a conversation that
+ * contains one, the Anthropic API rejects the whole request body with
+ * `400 ... no low surrogate in string`, hard-blocking the agent. `defang` is
+ * the single chokepoint all injected payloads pass through (`sendChannel` in
+ * the stdio-adapter), so stripping here is the universal safety net.
+ */
+describe("defangModelInput — lone-surrogate stripping", () => {
+  // A lone surrogate appears anywhere in a string iff this matches.
+  const HAS_LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+  test("replaces a lone high surrogate with U+FFFD", () => {
+    const out = defangModelInput("channel preview ends here\uD83D")
+    expect(HAS_LONE_SURROGATE.test(out)).toBe(false)
+    expect(out).toContain("�")
+  })
+
+  test("replaces a lone low surrogate with U+FFFD", () => {
+    const out = defangModelInput("\uDE00 starts with a lone low surrogate")
+    expect(HAS_LONE_SURROGATE.test(out)).toBe(false)
+  })
+
+  test("leaves well-formed surrogate pairs (emoji / astral) untouched", () => {
+    const clean = "deployed 😀 — released 🎉 — astral 𝕏 ok"
+    expect(defangModelInput(clean)).toBe(clean)
+  })
+
+  test("output of a poisoned input is always valid JSON", () => {
+    // A truncation that split an emoji 😀 mid-pair leaves a lone high surrogate.
+    const truncatedMidEmoji = ("a".repeat(100) + "😀").slice(0, 101)
+    expect(HAS_LONE_SURROGATE.test(truncatedMidEmoji)).toBe(true)
+    const out = defangModelInput(truncatedMidEmoji)
+    expect(HAS_LONE_SURROGATE.test(out)).toBe(false)
+    expect(() => JSON.parse(JSON.stringify(out))).not.toThrow()
+  })
+
+  test("idempotent — applying twice is the same as once", () => {
+    const input = "x\uD800y emoji 😀 z"
+    expect(defangModelInput(defangModelInput(input))).toBe(defangModelInput(input))
+  })
+})
+
+/**
  * Deterministic PRNG (mulberry32) — seeded test data is reproducible
  * across runs, so a property failure can be re-investigated with the
  * same fixture seed.

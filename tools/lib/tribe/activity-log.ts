@@ -28,6 +28,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { createLogger, type ConditionalLogger } from "loggily"
+import { stripLoneSurrogates, truncateSurrogateSafe } from "./validation.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -227,7 +228,9 @@ export function activityFromMessage(msg: {
   }
 
   const clean = msg.content.replace(/\s+/g, " ").trim()
-  const preview = clean.length <= 200 ? clean : clean.slice(0, 199) + "…"
+  const preview = stripLoneSurrogates(
+    clean.length <= 200 ? clean : truncateSurrogateSafe(clean, 199) + "…",
+  )
 
   return {
     ts: msg.ts,
@@ -290,7 +293,9 @@ export function writeGateActivity(args: {
 }): void {
   const session = args.sessionId ?? process.env.CLAUDE_SESSION_ID ?? `pid-${process.pid}`
   const reasonClean = args.reason.replace(/\s+/g, " ").trim()
-  const preview = reasonClean.length <= 200 ? reasonClean : reasonClean.slice(0, 199) + "…"
+  const preview = stripLoneSurrogates(
+    reasonClean.length <= 200 ? reasonClean : truncateSurrogateSafe(reasonClean, 199) + "…",
+  )
   writeActivity({
     ts: Date.now(),
     source: "gate",
