@@ -37,10 +37,6 @@ function makeOpts(): HandlerOpts {
     cleanup: () => {},
     userRenamed: false,
     setUserRenamed: () => {},
-    getChiefId: () => null,
-    getChiefInfo: () => null,
-    claimChief: () => {},
-    releaseChief: () => {},
     getActiveSessionIds: () => new Set<string>(),
     getActiveSessionInfo: () => [] as ActiveSessionInfo[],
   }

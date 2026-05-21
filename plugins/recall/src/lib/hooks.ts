@@ -25,9 +25,9 @@ import { createLogger } from "loggily"
 import { hookRecall } from "../history/recall"
 import { getDb, closeDb, getIndexMeta } from "../history/db"
 import { summarizeUnprocessedDays } from "./summarize-daily"
-import { withDaemonCall } from "../../../tribe/lore/lib/socket.ts"
-import { resolveLoreSocketPath } from "../../../tribe/lore/lib/config.ts"
-import { TRIBE_METHODS, LORE_PROTOCOL_VERSION, type InjectDeltaResult } from "../../../tribe/lore/lib/rpc.ts"
+import { withDaemonCall } from "../../../tribe/recall/lib/socket.ts"
+import { resolveRecallSocketPath } from "../../../tribe/recall/lib/config.ts"
+import { TRIBE_METHODS, RECALL_PROTOCOL_VERSION, type InjectDeltaResult } from "../../../tribe/recall/lib/rpc.ts"
 // Route every UserPromptSubmit emission through the envelope so the unified
 // activity log catches it (km-tribe.activity-log phase 2).
 import { emitHookJson as envelopeEmitHookJson } from "../../../injection-envelope/src/emit.ts"
@@ -182,7 +182,7 @@ export async function cmdSessionStart(): Promise<void> {
     // the daemon in 1s we give up and rely on the sentinel.
     let daemonStatus = "skipped"
     if (process.env.TRIBE_NO_DAEMON !== "1") {
-      daemonStatus = await registerWithLoreDaemon({ claudePid, sessionId, transcriptPath, cwd })
+      daemonStatus = await registerWithRecallDaemon({ claudePid, sessionId, transcriptPath, cwd })
     }
 
     // If the FTS5 index is stale (>1h since last rebuild), kick off an
@@ -251,19 +251,19 @@ export async function cmdSessionEnd(): Promise<void> {
  * string for the log line. Never throws — daemon registration is best-effort
  * and the sentinel file is the ground-truth fallback.
  */
-async function registerWithLoreDaemon(input: {
+async function registerWithRecallDaemon(input: {
   claudePid: number
   sessionId: string
   transcriptPath?: string
   cwd: string
 }): Promise<string> {
   const outcome = await withDaemonCall(
-    { socketPath: resolveLoreSocketPath(), deadlineMs: 1500, callTimeoutMs: 1000 },
+    { socketPath: resolveRecallSocketPath(), deadlineMs: 1500, callTimeoutMs: 1000 },
     async (client) => {
       await client.call(TRIBE_METHODS.hello, {
         clientName: "recall-hook",
         clientVersion: "0.1.0",
-        protocolVersion: LORE_PROTOCOL_VERSION,
+        protocolVersion: RECALL_PROTOCOL_VERSION,
       })
       await client.call(TRIBE_METHODS.sessionRegister, input)
     },
@@ -296,12 +296,12 @@ type InjectDeltaOutcome =
  */
 async function tryInjectDeltaViaDaemon(prompt: string, sessionId?: string): Promise<InjectDeltaOutcome> {
   const outcome = await withDaemonCall(
-    { socketPath: resolveLoreSocketPath(), deadlineMs: 2500, callTimeoutMs: 2000 },
+    { socketPath: resolveRecallSocketPath(), deadlineMs: 2500, callTimeoutMs: 2000 },
     async (client): Promise<InjectDeltaOutcome> => {
       await client.call(TRIBE_METHODS.hello, {
         clientName: "recall-hook",
         clientVersion: "0.1.0",
-        protocolVersion: LORE_PROTOCOL_VERSION,
+        protocolVersion: RECALL_PROTOCOL_VERSION,
       })
       const result = (await client.call(TRIBE_METHODS.injectDelta, { prompt, sessionId })) as InjectDeltaResult
       if (result.skipped) {

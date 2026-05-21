@@ -45,14 +45,14 @@ import { handleToolCall, isRemovedTribeMethod, removedTribeMethodMessage, TRIBE_
 import { logEvent, sendMessage } from "../messaging.ts"
 import { registerSession, NameConflictError } from "../session.ts"
 import { adoptByPidCwd, adoptIdentity, resolveName, type PriorSession } from "../resolve-name.ts"
-import { type LoreConnState } from "../lore-handlers.ts"
+import { type RecallConnState } from "../recall-handlers.ts"
 import type { BaseTribe } from "./base.ts"
 import type { WithBroadcast } from "./with-broadcast.ts"
 import type { WithClientRegistry, ClientSession } from "./with-client-registry.ts"
 import type { WithConfig } from "./with-config.ts"
 import type { WithDaemonContext } from "./with-daemon-context.ts"
 import type { WithDatabase } from "./with-database.ts"
-import type { WithLore } from "./with-lore.ts"
+import type { WithRecall } from "./with-recall.ts"
 import type { WithSocketServer } from "./with-socket-server.ts"
 
 const log = createLogger("tribe:dispatcher")
@@ -106,13 +106,13 @@ export function withDispatcher<
     WithConfig &
     WithDatabase &
     WithDaemonContext &
-    WithLore &
+    WithRecall &
     WithClientRegistry &
     WithBroadcast &
     WithSocketServer,
 >(hooks: DispatcherRuntimeHooks = {}): (t: T) => T & WithDispatcher {
   return (t) => {
-    const { db, stmts, daemonCtx, lore: loreHandlers, registry, broadcast, socket } = t
+    const { db, stmts, daemonCtx, recall: recallHandlers, registry, broadcast, socket } = t
     const { clients, socketToClient } = registry
     const onActiveClient = hooks.onActiveClient ?? (() => {})
     const onIdle = hooks.onIdle ?? (() => {})
@@ -140,10 +140,6 @@ export function withDispatcher<
       cleanup: () => {},
       userRenamed: false,
       setUserRenamed: () => {},
-      getChiefId: () => registry.getChiefId(),
-      getChiefInfo: () => registry.getChiefInfo(),
-      claimChief: (sessionId: string, name: string) => registry.claimChief(sessionId, name, logActivity),
-      releaseChief: (sessionId: string) => registry.releaseChief(sessionId, logActivity),
       getActiveSessionIds: () => registry.getActiveSessionIds(),
       getActiveSessionInfo: () => registry.getActiveSessionInfo(),
       getDebugState: () => ({
@@ -154,8 +150,6 @@ export function withDispatcher<
           pid: c.pid,
           registeredAt: c.registeredAt,
         })),
-        chief: registry.getChiefInfo(),
-        chiefClaim: registry.getChiefClaim(),
         cursors: db.prepare("SELECT id, name, last_delivered_ts, last_delivered_seq FROM sessions").all() as Array<{
           id: string
           name: string
@@ -217,7 +211,7 @@ export function withDispatcher<
         conn: relPath(socket.socketPath),
         ctx: fields.ctx,
         registeredAt: Date.now(),
-        lore: existing.lore,
+        recall: existing.recall,
       }
       clients.set(connId, client)
       onActiveClient()
@@ -279,7 +273,7 @@ export function withDispatcher<
 
             if (!p.role && adopted?.role) {
               const adoptedRole = adopted.role
-              if (adoptedRole === "chief" || adoptedRole === "member" || adoptedRole === "watch") {
+              if (adoptedRole === "member" || adoptedRole === "watch") {
                 role = adoptedRole
               }
             }
@@ -365,9 +359,6 @@ export function withDispatcher<
             resetOffsetsToTail(client)
             announceJoin(client)
 
-            const chiefInfo = registry.getChiefInfo()
-            const chiefName = chiefInfo?.name ?? "none"
-
             const coordState = db
               .prepare("SELECT key, value FROM coordination WHERE project_id = ?")
               .all(projectId) as Array<{ key: string; value: string | null }>
@@ -376,7 +367,6 @@ export function withDispatcher<
               sessionId: clientCtx.sessionId,
               name,
               role,
-              chief: chiefName,
               protocolVersion: TRIBE_PROTOCOL_VERSION,
               coordinationState: coordState,
               daemon: { pid: process.pid, uptime: Math.floor((Date.now() - socket.startedAt) / 1000) },
@@ -391,9 +381,6 @@ export function withDispatcher<
           case TRIBE_COORD_METHODS.health:
           case TRIBE_COORD_METHODS.reload:
           case TRIBE_COORD_METHODS.retro:
-          case TRIBE_COORD_METHODS.chief:
-          case TRIBE_COORD_METHODS.claimChief:
-          case TRIBE_COORD_METHODS.releaseChief:
           case TRIBE_COORD_METHODS.debug:
           case TRIBE_COORD_METHODS.filter: {
             const client = clients.get(connId)
@@ -569,11 +556,11 @@ export function withDispatcher<
             }
 
             // Lore (memory) RPC surface.
-            if (loreHandlers && loreHandlers.isLoreMethod(method)) {
+            if (recallHandlers && recallHandlers.isRecallMethod(method)) {
               const client = clients.get(connId)
-              const loreConn = client?.lore ?? ({ sessionId: null, claudePid: null } as LoreConnState)
+              const recallConn = client?.recall ?? ({ sessionId: null, claudePid: null } as RecallConnState)
               try {
-                const result = await loreHandlers.dispatch(loreConn, method, p)
+                const result = await recallHandlers.dispatch(recallConn, method, p)
                 return makeResponse(id, result as Record<string, unknown>)
               } catch (err) {
                 const errorWithCode = err as Error & { code?: number }
@@ -625,7 +612,7 @@ export function withDispatcher<
         conn: "",
         ctx: daemonCtx,
         registeredAt: Date.now(),
-        lore: { sessionId: null, claudePid: null },
+        recall: { sessionId: null, claudePid: null },
       }
       clients.set(connId, placeholder)
       socketToClient.set(sock, connId)
@@ -654,11 +641,7 @@ export function withDispatcher<
         broadcast.discardConnection(connId)
         clients.delete(connId)
         socketToClient.delete(sock)
-        if (loreHandlers && client) loreHandlers.dropConn(client.lore.sessionId)
-        if (registry.getChiefClaim() === client?.ctx.sessionId) {
-          registry.setChiefClaim(null)
-          logActivity("chief:released", `${client.name} released chief (disconnect)`)
-        }
+        if (recallHandlers && client) recallHandlers.dropConn(client.recall.sessionId)
         if (clients.size === 0) onIdle()
       })
 

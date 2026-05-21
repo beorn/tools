@@ -10,13 +10,13 @@ import { randomUUID } from "node:crypto"
 import { existsSync, unlinkSync, writeFileSync } from "node:fs"
 import { spawn, type ChildProcess } from "node:child_process"
 import { resolve, dirname } from "node:path"
-import { connectToDaemon, type LoreClient } from "../../plugins/tribe/lore/lib/socket.ts"
+import { connectToDaemon, type LoreClient } from "../../plugins/tribe/recall/lib/socket.ts"
 import {
   TRIBE_METHODS,
-  LORE_PROTOCOL_VERSION,
+  RECALL_PROTOCOL_VERSION,
   type WorkspaceStateResult,
   type CurrentBriefResult,
-} from "../../plugins/tribe/lore/lib/rpc.ts"
+} from "../../plugins/tribe/recall/lib/rpc.ts"
 import { extractSessionFocus } from "../../plugins/recall/src/lib/session-context.ts"
 
 // km-bear.unified-daemon Phase 5c: lore handlers are hosted by the tribe daemon.
@@ -65,7 +65,7 @@ type Harness = {
 
 async function spawnDaemon(focusPollMs = 500): Promise<Harness> {
   const socketPath = tmpPath("sock")
-  const loreDbPath = tmpPath("db")
+  const recallDbPath = tmpPath("db")
   const tribeDbPath = tmpPath("tribe.db")
   const child = spawn(
     process.execPath,
@@ -75,8 +75,8 @@ async function spawnDaemon(focusPollMs = 500): Promise<Harness> {
       socketPath,
       "--db",
       tribeDbPath,
-      "--lore-db",
-      loreDbPath,
+      "--recall-db",
+      recallDbPath,
       "--quit-timeout",
       "10",
       "--focus-poll-ms",
@@ -99,13 +99,13 @@ async function spawnDaemon(focusPollMs = 500): Promise<Harness> {
   await client.call(TRIBE_METHODS.hello, {
     clientName: "t",
     clientVersion: "0",
-    protocolVersion: LORE_PROTOCOL_VERSION,
+    protocolVersion: RECALL_PROTOCOL_VERSION,
   })
   return {
     child,
     client,
     socketPath,
-    dbPath: loreDbPath,
+    dbPath: recallDbPath,
     async teardown() {
       client.close()
       if (!child.killed) {
@@ -121,9 +121,9 @@ async function spawnDaemon(focusPollMs = 500): Promise<Harness> {
       for (const p of [
         socketPath,
         socketPath.replace(/\.sock$/, ".pid"),
-        loreDbPath,
-        `${loreDbPath}-wal`,
-        `${loreDbPath}-shm`,
+        recallDbPath,
+        `${recallDbPath}-wal`,
+        `${recallDbPath}-shm`,
         tribeDbPath,
         `${tribeDbPath}-wal`,
         `${tribeDbPath}-shm`,

@@ -268,7 +268,7 @@ export interface ResolveNameContext {
  * /up skills sync the tribe session name to the hat at claim time.
  */
 export function resolveName(ctx: ResolveNameContext): string {
-  const { p, claudeSessionName, role, takenNames, clientPid } = ctx
+  const { p, claudeSessionName, takenNames, clientPid } = ctx
 
   // 1. p.name set — split into flavor-default (auto-number) vs explicit (verbatim)
   if (p.name) {
@@ -281,10 +281,7 @@ export function resolveName(ctx: ResolveNameContext): string {
   // 2. claudeSessionName — claude-code-supplied display name from the harness.
   if (claudeSessionName) return claudeSessionName
 
-  // 3. Chief role keeps the special name (explicit identity assertion).
-  if (role === "chief") return "chief"
-
-  // 4. Default: agent-<N> auto-number. The daemon can't reliably tell which
+  // 3. Default: agent-<N> auto-number. The daemon can't reliably tell which
   //    flavor (codex/claude/kimi) it's talking to from the register call —
   //    sessions rename to a meaningful name from inside via tribe.rename or
   //    tribe.join after they know their own identity.

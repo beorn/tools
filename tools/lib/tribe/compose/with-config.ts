@@ -10,14 +10,14 @@
 import { parseArgs } from "node:util"
 import { resolveSocketPath } from "../socket.ts"
 import { parseTribeArgs, resolveDbPath } from "../config.ts"
-import { resolveLoreDbPath } from "../../../../plugins/tribe/lore/lib/config.ts"
-import { resolveSummarizerMode, type SummarizerMode } from "../../../../plugins/tribe/lore/lib/summarizer.ts"
+import { resolveRecallDbPath } from "../../../../plugins/tribe/recall/lib/config.ts"
+import { resolveSummarizerMode, type SummarizerMode } from "../../../../plugins/tribe/recall/lib/summarizer.ts"
 import type { BaseTribe } from "./base.ts"
 
 export interface TribeConfig {
   readonly socketPath: string
   readonly dbPath: string
-  readonly loreDbPath: string
+  readonly recallDbPath: string
   /** Quit timeout in seconds. -1 disables auto-quit, 0 quits immediately on idle. */
   readonly quitTimeoutSec: number
   /** Inherit an already-bound listening fd (set by the SIGHUP re-exec). */
@@ -25,7 +25,7 @@ export interface TribeConfig {
   readonly focusPollMs: number
   readonly summaryPollMs: number
   readonly summarizerMode: SummarizerMode
-  readonly loreEnabled: boolean
+  readonly recallEnabled: boolean
 }
 
 export interface WithConfig {
@@ -51,7 +51,7 @@ export function withConfig<T extends BaseTribe>(opts: ConfigOpts = {}): (t: T) =
         fd: { type: "string" },
         "quit-timeout": { type: "string", default: "1800" },
         foreground: { type: "boolean", default: false },
-        "lore-db": { type: "string" },
+        "recall-db": { type: "string" },
         "focus-poll-ms": { type: "string", default: process.env.TRIBE_FOCUS_POLL_MS ?? "60000" },
         "summary-poll-ms": { type: "string", default: process.env.TRIBE_SUMMARY_POLL_MS ?? "120000" },
         "summarizer-model": { type: "string", default: process.env.TRIBE_SUMMARIZER_MODEL ?? "off" },
@@ -66,13 +66,13 @@ export function withConfig<T extends BaseTribe>(opts: ConfigOpts = {}): (t: T) =
     const config: TribeConfig = {
       socketPath: resolveSocketPath(daemonArgs.socket as string | undefined),
       dbPath: String(resolveDbPath(tribeArgs)),
-      loreDbPath: resolveLoreDbPath(daemonArgs["lore-db"] as string | undefined),
+      recallDbPath: resolveRecallDbPath(daemonArgs["recall-db"] as string | undefined),
       quitTimeoutSec: parseInt(String(daemonArgs["quit-timeout"]), 10),
       inheritFd: daemonArgs.fd ? parseInt(String(daemonArgs.fd), 10) : null,
       focusPollMs: Math.max(100, parseInt(String(daemonArgs["focus-poll-ms"]), 10) || 60_000),
       summaryPollMs: Math.max(500, parseInt(String(daemonArgs["summary-poll-ms"]), 10) || 120_000),
       summarizerMode: resolveSummarizerMode(String(daemonArgs["summarizer-model"])),
-      loreEnabled: !daemonArgs["no-lore"],
+      recallEnabled: !daemonArgs["no-lore"],
     }
 
     return { ...t, config }

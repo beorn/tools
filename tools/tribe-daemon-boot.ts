@@ -3,7 +3,7 @@
  *
  * This is the structural skeleton that builds the daemon value top-down.
  * It uses the factory layer in `tools/lib/tribe/compose/` to assemble
- * everything that's cleanly decomposable (config, db, ctx, lore, tools,
+ * everything that's cleanly decomposable (config, db, ctx, recall, tools,
  * pluginApi, plugins) and exposes seams for the still-imperative parts
  * of `tribe-daemon.ts` (socket server, JSON-RPC dispatcher, hot-reload,
  * idle-quit) to attach to.
@@ -14,10 +14,10 @@
  *   project root
  *   └── tribe-daemon
  *       ├── config + db (filesystem boundary)
- *       ├── daemon ctx + lore handlers (in-process state)
+ *       ├── daemon ctx + recall handlers (in-process state)
  *       ├── tool registry — populated before surfaces
  *       │   ├── messaging tools (tribe.send / broadcast / members / …)
- *       │   └── lore tools (tribe.ask / brief / plan / …)
+ *       │   └── recall tools (tribe.ask / brief / plan / …)
  *       ├── observer plugins (git, beads, github, health, accountly, dolt-reaper)
  *       └── runtime (socket server, dispatcher, hot-reload, idle quit, signals)
  *
@@ -41,12 +41,12 @@ import { accountlyPlugin } from "./lib/tribe/accountly-plugin.ts"
 import { doltReaperPlugin } from "./lib/tribe/dolt-reaper-plugin.ts"
 import {
   createBaseTribe,
-  loreTools,
+  recallTools,
   messagingTools,
   withConfig,
   withDaemonContext,
   withDatabase,
-  withLore,
+  withRecall,
   withPlugins,
   withPluginApi,
   withProjectRoot,
@@ -71,7 +71,7 @@ export interface BootTribeDaemonOpts {
  *
  * Construction order is enforced by types — try to call e.g. `withDatabase()`
  * without `withConfig()` upstream and TypeScript stops you. Cleanup cascades
- * through the daemon's root scope: closing it disposes db, lore, plugins,
+ * through the daemon's root scope: closing it disposes db, recall, plugins,
  * and any other resources later `withX` factories defer.
  */
 export function bootTribeDaemon(opts: BootTribeDaemonOpts) {
@@ -88,17 +88,17 @@ export function bootTribeDaemon(opts: BootTribeDaemonOpts) {
     withProjectRoot(),
     withDatabase(),
     withDaemonContext(),
-    withLore(),
+    withRecall(),
     withTools(),
     withTool(messagingTools()),
     withPluginApi(opts.pluginApi),
     withPlugins(observerPlugins),
   )
 
-  // Add lore tools after lore is initialised — withTool() throws on duplicate
+  // Add recall tools after recall is initialised — withTool() throws on duplicate
   // names, so we only call it when the registry doesn't already have them.
-  if (tribe.lore) {
-    for (const t of loreTools(tribe.lore)) {
+  if (tribe.recall) {
+    for (const t of recallTools(tribe.recall)) {
       tribe.tools.set(t.name, t)
     }
   }

@@ -29,7 +29,7 @@ import { dirname, join, resolve } from "node:path"
 import { connectToDaemon, type DaemonClient } from "../tools/lib/tribe/socket.ts"
 import {
   TRIBE_METHODS,
-  LORE_PROTOCOL_VERSION,
+  RECALL_PROTOCOL_VERSION,
   type HelloResult,
   type InjectDeltaResult,
   type SessionHeartbeatResult,
@@ -37,7 +37,7 @@ import {
   type SessionsListResult,
   type StatusResult,
   type WorkspaceStateResult,
-} from "../plugins/tribe/lore/lib/rpc.ts"
+} from "../plugins/tribe/recall/lib/rpc.ts"
 
 const DAEMON_SCRIPT = resolve(dirname(new URL(import.meta.url).pathname), "../tools/tribe-daemon.ts")
 
@@ -50,10 +50,10 @@ async function waitFor(fn: () => boolean | Promise<boolean>, timeout = 8000, int
   throw new Error(`waitFor timed out after ${timeout}ms`)
 }
 
-async function spawnDaemon(socketPath: string, dbPath: string, loreDbPath: string): Promise<ChildProcess> {
+async function spawnDaemon(socketPath: string, dbPath: string, recallDbPath: string): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
-    [DAEMON_SCRIPT, "--socket", socketPath, "--db", dbPath, "--lore-db", loreDbPath, "--quit-timeout", "-1"],
+    [DAEMON_SCRIPT, "--socket", socketPath, "--db", dbPath, "--recall-db", recallDbPath, "--quit-timeout", "-1"],
     {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
@@ -101,7 +101,7 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
   let tmpDir: string
   let socketPath: string
   let dbPath: string
-  let loreDbPath: string
+  let recallDbPath: string
   let daemon: ChildProcess | null = null
   const clients: DaemonClient[] = []
 
@@ -109,7 +109,7 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "tribe-unified-"))
     socketPath = join(tmpDir, "tribe.sock")
     dbPath = join(tmpDir, "tribe.db")
-    loreDbPath = join(tmpDir, "lore.db")
+    recallDbPath = join(tmpDir, "lore.db")
     daemon = null
   })
 
@@ -134,39 +134,39 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
   }
 
   it("handshake — tribe.hello returns protocol version + daemon pid", async () => {
-    daemon = await spawnDaemon(socketPath, dbPath, loreDbPath)
+    daemon = await spawnDaemon(socketPath, dbPath, recallDbPath)
     const c = await connect()
     const hello = (await c.call(TRIBE_METHODS.hello, {
       clientName: "unified-daemon-smoke",
       clientVersion: "0.0.0",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })) as HelloResult
-    expect(hello.protocolVersion).toBe(LORE_PROTOCOL_VERSION)
+    expect(hello.protocolVersion).toBe(RECALL_PROTOCOL_VERSION)
     expect(typeof hello.daemonPid).toBe("number")
     expect(hello.daemonPid).toBe(daemon.pid)
   }, 20_000)
 
-  it("tribe.status reports the lore db path we passed via --lore-db", async () => {
-    daemon = await spawnDaemon(socketPath, dbPath, loreDbPath)
+  it("tribe.status reports the recall db path we passed via --recall-db", async () => {
+    daemon = await spawnDaemon(socketPath, dbPath, recallDbPath)
     const c = await connect()
     await c.call(TRIBE_METHODS.hello, {
       clientName: "unified-daemon-smoke",
       clientVersion: "0.0.0",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })
     const status = (await c.call(TRIBE_METHODS.status, {})) as StatusResult
-    expect(status.dbPath).toBe(loreDbPath)
+    expect(status.dbPath).toBe(recallDbPath)
     expect(status.socketPath).toBe(socketPath)
     expect(status.sessionCount).toBe(0)
   }, 20_000)
 
   it("session_register → sessions_list → workspace all agree on one alive session", async () => {
-    daemon = await spawnDaemon(socketPath, dbPath, loreDbPath)
+    daemon = await spawnDaemon(socketPath, dbPath, recallDbPath)
     const c = await connect()
     await c.call(TRIBE_METHODS.hello, {
       clientName: "unified-daemon-smoke",
       clientVersion: "0.0.0",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })
 
     const sid = "11111111-2222-3333-4444-555555555555"
@@ -195,12 +195,12 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
   }, 20_000)
 
   it("inject_delta on an empty prompt is reported as skipped (not errored)", async () => {
-    daemon = await spawnDaemon(socketPath, dbPath, loreDbPath)
+    daemon = await spawnDaemon(socketPath, dbPath, recallDbPath)
     const c = await connect()
     await c.call(TRIBE_METHODS.hello, {
       clientName: "unified-daemon-smoke",
       clientVersion: "0.0.0",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })
 
     const out = (await c.call(TRIBE_METHODS.injectDelta, {
@@ -214,7 +214,7 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
   }, 20_000)
 
   it("tribe coord + lore RPCs share one socket — both succeed in the same session", async () => {
-    daemon = await spawnDaemon(socketPath, dbPath, loreDbPath)
+    daemon = await spawnDaemon(socketPath, dbPath, recallDbPath)
     const c = await connect()
 
     // Tribe coord register (different from lore's session_register)
@@ -225,9 +225,9 @@ describe("unified daemon — lore RPC surface on the tribe socket", () => {
     const hello = (await c.call(TRIBE_METHODS.hello, {
       clientName: "unified-daemon-smoke",
       clientVersion: "0.0.0",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })) as HelloResult
-    expect(hello.protocolVersion).toBe(LORE_PROTOCOL_VERSION)
+    expect(hello.protocolVersion).toBe(RECALL_PROTOCOL_VERSION)
 
     // Tribe coord status and lore status both reachable
     const daemonInfo = (await c.call("cli_daemon")) as Record<string, unknown>

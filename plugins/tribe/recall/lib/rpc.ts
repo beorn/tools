@@ -17,11 +17,11 @@
  *   removed. Daemons only speak the canonical tribe.* namespace. Clients
  *   running pre-0.10 that send legacy names now receive "method not found".
  *
- * Constant name retained as LORE_PROTOCOL_VERSION for import stability —
+ * Constant name retained as RECALL_PROTOCOL_VERSION for import stability —
  * renaming would ripple across daemon, proxy, CLI, and tests for no
  * behavioural gain.
  */
-export const LORE_PROTOCOL_VERSION = 4
+export const RECALL_PROTOCOL_VERSION = 4
 
 // ---------------------------------------------------------------------------
 // Method names — canonical tribe.* wire protocol, single source of truth.
@@ -298,7 +298,7 @@ export type StatusResult = {
 // Error codes
 // ---------------------------------------------------------------------------
 
-export const LORE_ERRORS = {
+export const RECALL_ERRORS = {
   internal: -32000,
   unknownMethod: -32601,
   invalidParams: -32602,

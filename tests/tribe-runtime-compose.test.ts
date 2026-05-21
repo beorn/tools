@@ -23,7 +23,7 @@ import {
   withDispatcher,
   withHotReload,
   withIdleQuit,
-  withLore,
+  withRecall,
   withProjectRoot,
   withRuntime,
   withSignals,
@@ -56,26 +56,26 @@ afterEach(() => {
   }
 })
 
-function bootShape(overrides: { socketPath?: string; dbPath?: string; loreEnabled?: boolean } = {}) {
+function bootShape(overrides: { socketPath?: string; dbPath?: string; recallEnabled?: boolean } = {}) {
   return pipe(
     createBaseTribe({ scope: createScope("test") }),
     withConfig({
       override: {
         socketPath: overrides.socketPath ?? tmpSock(),
         dbPath: overrides.dbPath ?? tmpDb(),
-        loreDbPath: tmpDb(),
+        recallDbPath: tmpDb(),
         quitTimeoutSec: -1,
         inheritFd: null,
         focusPollMs: 1000,
         summaryPollMs: 2000,
         summarizerMode: "off" as const,
-        loreEnabled: overrides.loreEnabled ?? false,
+        recallEnabled: overrides.recallEnabled ?? false,
       },
     }),
     withProjectRoot("/test"),
     withDatabase(),
     withDaemonContext(),
-    withLore(),
+    withRecall(),
     withTools(),
     withTool(messagingTools()),
     withClientRegistry(),
@@ -88,38 +88,15 @@ function bootShape(overrides: { socketPath?: string; dbPath?: string; loreEnable
 // ---------------------------------------------------------------------------
 
 describe("withClientRegistry", () => {
-  it("exposes empty maps + chief lease accessors at composition time", async () => {
+  it("exposes empty maps at composition time — no chief accessors (F12)", async () => {
     const t = bootShape()
     expect(t.registry.clients.size).toBe(0)
     expect(t.registry.socketToClient.size).toBe(0)
-    expect(t.registry.getChiefClaim()).toBeNull()
-    expect(t.registry.getChiefId()).toBeNull()
     expect(t.registry.getActiveSessionIds().size).toBe(0)
     expect(t.registry.getActiveSessionInfo()).toEqual([])
-    await t.scope[Symbol.asyncDispose]()
-  })
-
-  it("setChiefClaim + getChiefClaim round-trip", async () => {
-    const t = bootShape()
-    t.registry.setChiefClaim("session-x")
-    expect(t.registry.getChiefClaim()).toBe("session-x")
-    t.registry.setChiefClaim(null)
-    expect(t.registry.getChiefClaim()).toBeNull()
-    await t.scope[Symbol.asyncDispose]()
-  })
-
-  it("claimChief / releaseChief invokes the log callback", async () => {
-    const t = bootShape()
-    const events: Array<[string, string]> = []
-    const log = (type: string, content: string): void => {
-      events.push([type, content])
-    }
-    t.registry.claimChief("s1", "alice", log)
-    expect(t.registry.getChiefClaim()).toBe("s1")
-    expect(events[0]).toEqual(["chief:claimed", "alice claimed chief"])
-    t.registry.releaseChief("s1", log)
-    expect(t.registry.getChiefClaim()).toBeNull()
-    expect(events[1]?.[0]).toBe("chief:released")
+    // The registry is role-agnostic — there is no chief lease surface.
+    expect("getChiefClaim" in t.registry).toBe(false)
+    expect("claimChief" in t.registry).toBe(false)
     await t.scope[Symbol.asyncDispose]()
   })
 
@@ -141,7 +118,7 @@ describe("withClientRegistry", () => {
       conn: "",
       ctx: t.daemonCtx,
       registeredAt: Date.now(),
-      lore: { sessionId: null, claudePid: null },
+      recall: { sessionId: null, claudePid: null },
     })
     expect(t.registry.clients.size).toBe(1)
     await t.scope[Symbol.asyncDispose]()
@@ -228,19 +205,19 @@ describe("withIdleQuit", () => {
         override: {
           socketPath: tmpSock(),
           dbPath: tmpDb(),
-          loreDbPath: tmpDb(),
+          recallDbPath: tmpDb(),
           quitTimeoutSec: 60,
           inheritFd: null,
           focusPollMs: 1000,
           summaryPollMs: 2000,
           summarizerMode: "off" as const,
-          loreEnabled: false,
+          recallEnabled: false,
         },
       }),
       withProjectRoot("/test"),
       withDatabase(),
       withDaemonContext(),
-      withLore(),
+      withRecall(),
       withTools(),
       withTool(messagingTools()),
       withClientRegistry(),
@@ -427,7 +404,7 @@ describe("end-to-end pipe assembly", () => {
     expect(tribe.projectRoot).toBe("/test")
     expect(tribe.db).toBeDefined()
     expect(tribe.daemonCtx.getRole()).toBe("daemon")
-    expect(tribe.lore).toBeNull()
+    expect(tribe.recall).toBeNull()
     expect(tribe.tools.size).toBeGreaterThan(0)
     expect(tribe.registry.clients).toBeDefined()
     expect(tribe.broadcast).toBeDefined()

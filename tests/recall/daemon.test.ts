@@ -11,10 +11,10 @@ import { randomUUID } from "node:crypto"
 import { existsSync, unlinkSync } from "node:fs"
 import { spawn, type ChildProcess } from "node:child_process"
 import { resolve, dirname } from "node:path"
-import { connectToDaemon, type LoreClient } from "../../plugins/tribe/lore/lib/socket.ts"
+import { connectToDaemon, type LoreClient } from "../../plugins/tribe/recall/lib/socket.ts"
 import {
   TRIBE_METHODS,
-  LORE_PROTOCOL_VERSION,
+  RECALL_PROTOCOL_VERSION,
   type HelloResult,
   type StatusResult,
   type SessionsListResult,
@@ -22,7 +22,7 @@ import {
   type SessionHeartbeatResult,
   type PlanOnlyResult,
   type InjectDeltaResult,
-} from "../../plugins/tribe/lore/lib/rpc.ts"
+} from "../../plugins/tribe/recall/lib/rpc.ts"
 
 // km-bear.unified-daemon Phase 5c: the standalone lore daemon was deleted.
 // These tests now spawn the unified tribe daemon, which hosts the same
@@ -53,7 +53,7 @@ type DaemonHarness = {
 
 async function spawnLoreDaemon(extraArgs: string[] = []): Promise<DaemonHarness> {
   const socketPath = tmpPath("sock")
-  const loreDbPath = tmpPath("db")
+  const recallDbPath = tmpPath("db")
   const tribeDbPath = tmpPath("tribe.db")
   const child = spawn(
     process.execPath,
@@ -63,8 +63,8 @@ async function spawnLoreDaemon(extraArgs: string[] = []): Promise<DaemonHarness>
       socketPath,
       "--db",
       tribeDbPath,
-      "--lore-db",
-      loreDbPath,
+      "--recall-db",
+      recallDbPath,
       "--quit-timeout",
       "5",
       ...extraArgs,
@@ -89,12 +89,12 @@ async function spawnLoreDaemon(extraArgs: string[] = []): Promise<DaemonHarness>
   await client.call(TRIBE_METHODS.hello, {
     clientName: "test",
     clientVersion: "0.0.0",
-    protocolVersion: LORE_PROTOCOL_VERSION,
+    protocolVersion: RECALL_PROTOCOL_VERSION,
   })
   return {
     child,
     socketPath,
-    dbPath: loreDbPath,
+    dbPath: recallDbPath,
     client,
     async teardown() {
       client.close()
@@ -111,9 +111,9 @@ async function spawnLoreDaemon(extraArgs: string[] = []): Promise<DaemonHarness>
       for (const p of [
         socketPath,
         socketPath.replace(/\.sock$/, ".pid"),
-        loreDbPath,
-        `${loreDbPath}-wal`,
-        `${loreDbPath}-shm`,
+        recallDbPath,
+        `${recallDbPath}-wal`,
+        `${recallDbPath}-shm`,
         tribeDbPath,
         `${tribeDbPath}-wal`,
         `${tribeDbPath}-shm`,
@@ -142,9 +142,9 @@ describe("lore daemon — handshake", () => {
     const hello = (await h.client.call(TRIBE_METHODS.hello, {
       clientName: "t",
       clientVersion: "1",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })) as HelloResult
-    expect(hello.protocolVersion).toBe(LORE_PROTOCOL_VERSION)
+    expect(hello.protocolVersion).toBe(RECALL_PROTOCOL_VERSION)
     expect(hello.daemonPid).toBe(h.child.pid)
     expect(typeof hello.startedAt).toBe("number")
     expect(hello.daemonVersion).toMatch(/\d+\.\d+\.\d+/)

@@ -45,7 +45,6 @@ describe("loadPlugins", () => {
       hasRecentMessage: () => false,
       getActiveSessions: () => [],
       getSessionNames: () => [],
-      hasChief: () => false,
     }
     return { api, broadcasts }
   }
@@ -185,7 +184,6 @@ async function attachPlugin(
     hasRecentMessage: () => false,
     getActiveSessions: () => [],
     getSessionNames: () => [],
-    hasChief: () => true,
   }
   return { api, close: () => client.close() }
 }

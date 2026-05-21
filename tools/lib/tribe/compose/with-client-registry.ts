@@ -1,6 +1,5 @@
 /**
- * withClientRegistry — owns the in-memory map of connected clients plus the
- * derived chief lease.
+ * withClientRegistry — owns the in-memory map of connected clients.
  *
  * The registry is a plain Map<connId, ClientSession> on the daemon value. Three
  * surfaces consume it:
@@ -8,9 +7,11 @@
  *   - the broadcaster (fan messages to every connected socket)
  *   - the idle-quit (when registry is empty, start the countdown)
  *
- * Chief is derived from connection order via `deriveChief*`, with an optional
- * explicit lease (`chiefClaim`) that pins the role to a specific session until
- * it disconnects or releases.
+ * The tribe-wire daemon is role-agnostic (F12 of
+ * @km/tribe/15496-coordination-drift): there is no chief/member distinction
+ * and nothing to derive. The only filtering the registry does is by
+ * connection-lifecycle tag — `daemon` / `watch` / `pending` sessions are not
+ * "participating members" for the active-session helpers.
  *
  * This split exists so the imperative socket / dispatch / idle-quit layers can
  * all read/write the same backing state through one shape, instead of via
@@ -18,11 +19,16 @@
  */
 
 import type { Socket as NetSocket } from "node:net"
-import { deriveChiefId, deriveChiefInfo, isChiefEligible } from "../chief.ts"
-import type { LoreConnState } from "../lore-handlers.ts"
+import type { RecallConnState } from "../recall-handlers.ts"
 import type { TribeContext } from "../context.ts"
 import type { TribeRole } from "../config.ts"
 import type { BaseTribe } from "./base.ts"
+
+/** A session participates as a regular tribe member iff it is not the daemon
+ *  itself, a read-only watcher, or a half-registered pending connection. */
+function isParticipant(c: { role: TribeRole }): boolean {
+  return c.role === "member"
+}
 
 export type ClientSession = {
   socket: NetSocket
@@ -41,11 +47,11 @@ export type ClientSession = {
   conn: string
   ctx: TribeContext
   registeredAt: number
-  /** Per-connection lore state — tracks sessionId/claudePid for lore handlers
+  /** Per-connection recall state — tracks sessionId/claudePid for recall handlers
    *  (set on tribe.hello / tribe.session_register). Kept separate from the
    *  tribe-side sessionId because a single proxy connection may carry both
    *  coordination + memory traffic interleaved. */
-  lore: LoreConnState
+  recall: RecallConnState
 }
 
 export interface ClientRegistry {
@@ -53,14 +59,7 @@ export interface ClientRegistry {
   readonly clients: Map<string, ClientSession>
   /** socket → connId — reverse index for socket-keyed cleanup */
   readonly socketToClient: Map<NetSocket, string>
-  /** sessionId of the explicit chief claimer, or null when derivation applies. */
-  getChiefClaim(): string | null
-  setChiefClaim(sessionId: string | null): void
-  /** Take chief lease for a session. Logs activity via the supplied callback. */
-  claimChief(sessionId: string, name: string, log: (type: string, content: string) => void): void
-  /** Release chief lease for a session if currently held. Logs activity. */
-  releaseChief(sessionId: string, log: (type: string, content: string) => void): void
-  /** ctx.sessionIds of every currently-connected eligible client. */
+  /** ctx.sessionIds of every currently-connected participating member. */
   getActiveSessionIds(): Set<string>
   getActiveSessionInfo(): Array<{
     id: string
@@ -70,10 +69,6 @@ export interface ClientRegistry {
     claudeSessionId: string | null
     registeredAt: number
   }>
-  /** Resolve the current chief sessionId — claim first, else longest-connected. */
-  getChiefId(): string | null
-  /** Resolve the current chief info (sessionId + name + role + …) or null. */
-  getChiefInfo(): ReturnType<typeof deriveChiefInfo>
 }
 
 export interface WithClientRegistry {
@@ -84,37 +79,21 @@ export function withClientRegistry<T extends BaseTribe>(): (t: T) => T & WithCli
   return (t) => {
     const clients = new Map<string, ClientSession>()
     const socketToClient = new Map<NetSocket, string>()
-    let chiefClaim: string | null = null
 
     const registry: ClientRegistry = {
       clients,
       socketToClient,
-      getChiefClaim: () => chiefClaim,
-      setChiefClaim: (sessionId) => {
-        chiefClaim = sessionId
-      },
-      claimChief(sessionId, name, log) {
-        chiefClaim = sessionId
-        log("chief:claimed", `${name} claimed chief`)
-      },
-      releaseChief(sessionId, log) {
-        if (chiefClaim !== sessionId) return
-        chiefClaim = null
-        const c = Array.from(clients.values()).find((x) => x.ctx.sessionId === sessionId)
-        const who = c?.name ?? "unknown"
-        log("chief:released", `${who} released chief`)
-      },
       getActiveSessionIds(): Set<string> {
         const ids = new Set<string>()
         for (const c of clients.values()) {
-          if (!isChiefEligible(c)) continue
+          if (!isParticipant(c)) continue
           ids.add(c.ctx.sessionId)
         }
         return ids
       },
       getActiveSessionInfo() {
         return Array.from(clients.values())
-          .filter(isChiefEligible)
+          .filter(isParticipant)
           .map((c) => ({
             id: c.ctx.sessionId,
             name: c.name,
@@ -124,8 +103,6 @@ export function withClientRegistry<T extends BaseTribe>(): (t: T) => T & WithCli
             registeredAt: c.registeredAt,
           }))
       },
-      getChiefId: () => deriveChiefId(clients.values(), chiefClaim),
-      getChiefInfo: () => deriveChiefInfo(clients.values(), chiefClaim),
     }
 
     // Drop all client refs on shutdown so disposal doesn't leave dangling
@@ -133,7 +110,6 @@ export function withClientRegistry<T extends BaseTribe>(): (t: T) => T & WithCli
     t.scope.defer(() => {
       clients.clear()
       socketToClient.clear()
-      chiefClaim = null
     })
 
     return { ...t, registry }

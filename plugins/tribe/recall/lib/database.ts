@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite"
 // Schema
 // ---------------------------------------------------------------------------
 
-export function openLoreDatabase(path: string): Database {
+export function openRecallDatabase(path: string): Database {
   const db = new Database(path, { create: true })
   db.run("PRAGMA journal_mode = WAL")
   db.run("PRAGMA busy_timeout = 5000")
@@ -144,7 +144,7 @@ export type FocusUpsert = {
   updatedAt: number
 }
 
-export type LoreRepo = {
+export type RecallRepo = {
   upsertSession(input: SessionUpsert): SessionRow
   heartbeatSession(claudePid: number, now: number): SessionRow | null
   listSessions(): SessionRow[]
@@ -167,7 +167,7 @@ export type LoreRepo = {
   close(): void
 }
 
-export function createLoreRepo(db: Database): LoreRepo {
+export function createRecallRepo(db: Database): RecallRepo {
   const upsertStmt = db.prepare(`
     INSERT INTO sessions (claude_pid, session_id, transcript_path, cwd, project, started_at, last_seen, status)
     VALUES ($pid, $sessionId, $transcriptPath, $cwd, $project, $now, $now, 'alive')

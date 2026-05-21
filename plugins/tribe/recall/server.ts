@@ -24,7 +24,7 @@
  *                             $XDG_RUNTIME_DIR/tribe.sock)
  *
  * Usage (registered in .mcp.json):
- *   { "command": "bun", "args": ["vendor/bearly/plugins/tribe/lore/server.ts"] }
+ *   { "command": "bun", "args": ["vendor/bearly/plugins/tribe/recall/server.ts"] }
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
@@ -40,7 +40,7 @@ import { resolveSocketPath as resolveTribeSocketPath } from "../../../tools/lib/
 import { ensureTribeDaemonIfConfigured } from "../../../tools/lib/tribe/autostart.ts"
 import {
   TRIBE_METHODS,
-  LORE_PROTOCOL_VERSION,
+  RECALL_PROTOCOL_VERSION,
   type AskResult,
   type CurrentBriefResult,
   type PlanOnlyResult,
@@ -102,7 +102,7 @@ async function getDaemon(): Promise<LoreClient | null> {
     await client.call(TRIBE_METHODS.hello, {
       clientName: "/tribe/lore",
       clientVersion: "0.14.1",
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
     })
     daemonClient = client
     // If the reconnecting client eventually gives up, disable for this session.

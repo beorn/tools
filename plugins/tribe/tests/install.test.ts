@@ -33,7 +33,7 @@ function makeEnv(dir: string, overrides: Partial<InstallEnv> = {}): InstallEnv {
     tribeCliPath: resolve(dir, "bearly/tools/tribe-cli.ts"),
     bunPath: "/usr/local/bin/bun",
     cwd: resolve(dir, "project"),
-    loreServerPath: resolve(dir, "bearly/plugins/tribe/lore/server.ts"),
+    recallServerPath: resolve(dir, "bearly/plugins/tribe/recall/server.ts"),
     mcpName: "tribe",
     autostartConfigPath: resolve(dir, "claude/tribe/config.json"),
     ...overrides,
@@ -52,7 +52,7 @@ function setupFixture(): string {
   mkdirSync(resolve(root, "project"), { recursive: true })
   // Create the tribe-cli.ts and server.ts files so existence checks pass.
   writeFileSync(resolve(root, "bearly/tools/tribe-cli.ts"), "// stub")
-  writeFileSync(resolve(root, "bearly/plugins/tribe/lore/server.ts"), "// stub")
+  writeFileSync(resolve(root, "bearly/plugins/tribe/recall/server.ts"), "// stub")
   return root
 }
 
@@ -169,20 +169,20 @@ describe("planInstall", () => {
     expect(servers.tty).toBeDefined()
     // cwd and server are siblings here (project/ vs bearly/) → relative starts
     // with .., so absolute path is emitted.
-    expect(servers.tribe).toEqual({ command: "bun", args: [env.loreServerPath] })
+    expect(servers.tribe).toEqual({ command: "bun", args: [env.recallServerPath] })
   })
 
   test("emits project-relative path when server lives under cwd (km-style submodule)", () => {
     // Simulate the km layout: the project root contains vendor/bearly/…
     const kmEnv = makeEnv(root, {
       cwd: root,
-      loreServerPath: resolve(root, "bearly/plugins/tribe/lore/server.ts"),
+      recallServerPath: resolve(root, "bearly/plugins/tribe/recall/server.ts"),
     })
     writeJson(resolve(kmEnv.cwd, ".mcp.json"), { mcpServers: {} })
     const plan = planInstall(kmEnv)
     expect(plan.mcp.action).toBe("add")
     const servers = plan.nextMcp!.mcpServers as Record<string, unknown>
-    expect(servers.tribe).toEqual({ command: "bun", args: ["bearly/plugins/tribe/lore/server.ts"] })
+    expect(servers.tribe).toEqual({ command: "bun", args: ["bearly/plugins/tribe/recall/server.ts"] })
   })
 
   test("plans autostart: daemon when no config file exists", () => {
@@ -313,8 +313,8 @@ describe("planUninstall", () => {
   test("removes mcpServers.tribe and legacy mcpServers.lore if it points at tribe/lore server", () => {
     writeJson(resolve(env.cwd, ".mcp.json"), {
       mcpServers: {
-        tribe: { command: "bun", args: [env.loreServerPath] },
-        lore: { command: "bun", args: ["vendor/bearly/plugins/tribe/lore/server.ts"] },
+        tribe: { command: "bun", args: [env.recallServerPath] },
+        lore: { command: "bun", args: ["vendor/bearly/plugins/tribe/recall/server.ts"] },
         other: { command: "bun", args: ["unrelated.ts"] },
       },
     })
@@ -372,7 +372,7 @@ describe("doctorReport", () => {
       ),
     })
     writeJson(resolve(env.cwd, ".mcp.json"), {
-      mcpServers: { tribe: { command: "bun", args: [env.loreServerPath] } },
+      mcpServers: { tribe: { command: "bun", args: [env.recallServerPath] } },
     })
     const report = await doctorReport(env)
     for (const { claudeName } of TRIBE_HOOK_EVENTS) {

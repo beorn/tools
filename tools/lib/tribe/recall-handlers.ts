@@ -7,12 +7,12 @@
  * session/workspace/inject_delta).
  *
  * This module keeps the lore library code exactly where it was (in
- * `plugins/tribe/lore/lib/*.ts` and `plugins/recall/src/lib/*.ts`) and
+ * `plugins/tribe/recall/lib/*.ts` and `plugins/recall/src/lib/*.ts`) and
  * exposes a factory that the tribe daemon wires up inside its JSON-RPC
  * dispatcher. Conceptually identical to the standalone daemon — two DB
  * files, one process.
  *
- * Lifecycle: `createLoreHandlers({ dbPath, ... })` opens the lore database,
+ * Lifecycle: `createRecallHandlers({ dbPath, ... })` opens the lore database,
  * starts the focus poller + summarizer poller + janitor, and returns
  * `{ dispatch, setConnSession, dropConn, close }`. The tribe daemon calls
  * `dispatch` from its `handleRequest` when it sees a `tribe.*` method name
@@ -22,16 +22,16 @@
 
 import { createLogger } from "loggily"
 import {
-  createLoreRepo,
-  openLoreDatabase,
+  createRecallRepo,
+  openRecallDatabase,
   sessionRowToInfo,
-  type LoreRepo,
+  type RecallRepo,
   type SessionRow,
-} from "../../../plugins/tribe/lore/lib/database.ts"
+} from "../../../plugins/tribe/recall/lib/database.ts"
 import {
   TRIBE_METHODS,
-  LORE_ERRORS,
-  LORE_PROTOCOL_VERSION,
+  RECALL_ERRORS,
+  RECALL_PROTOCOL_VERSION,
   type AskParams,
   type AskResult,
   type CurrentBriefParams,
@@ -52,12 +52,12 @@ import {
   type SessionsListResult,
   type StatusResult,
   type WorkspaceStateResult,
-} from "../../../plugins/tribe/lore/lib/rpc.ts"
+} from "../../../plugins/tribe/recall/lib/rpc.ts"
 import {
   resolveSummarizerMode,
   summarizeTail,
   type SummarizerMode,
-} from "../../../plugins/tribe/lore/lib/summarizer.ts"
+} from "../../../plugins/tribe/recall/lib/summarizer.ts"
 import { recallAgent } from "../../../plugins/recall/src/lib/agent.ts"
 import { planQuery, planVariants } from "../../../plugins/recall/src/lib/plan.ts"
 import { buildQueryContext } from "../../../plugins/recall/src/lib/context.ts"
@@ -69,17 +69,17 @@ import { createMemorySeenStore, runInjectDelta, type SeenStore } from "../../../
 // Public surface
 // ---------------------------------------------------------------------------
 
-export type LoreConnState = {
+export type RecallConnState = {
   /** Lore session id — set via tribe.session_register or carried over from hello. */
   sessionId: string | null
   claudePid: number | null
 }
 
-export type LoreHandlers = {
+export type RecallHandlers = {
   /** Return true iff the method name belongs to the lore wire protocol. */
-  isLoreMethod(method: string): boolean
+  isRecallMethod(method: string): boolean
   /** Dispatch a lore RPC. Returns the plain result (not a JSON-RPC envelope) or throws. */
-  dispatch(conn: LoreConnState, method: string, params: Record<string, unknown>): Promise<unknown>
+  dispatch(conn: RecallConnState, method: string, params: Record<string, unknown>): Promise<unknown>
   /** Drop per-connection state (inject-dedup) when the socket closes. */
   dropConn(sessionId: string | null): void
   /** Shut down pollers + close the lore db. Idempotent. */
@@ -90,7 +90,7 @@ export type LoreHandlers = {
   readonly daemonVersion: string
 }
 
-export type LoreHandlerOpts = {
+export type RecallHandlerOpts = {
   dbPath: string
   socketPath: string
   daemonVersion: string
@@ -104,14 +104,14 @@ export type LoreHandlerOpts = {
 // Factory
 // ---------------------------------------------------------------------------
 
-const LORE_METHOD_SET = new Set<string>(Object.values(TRIBE_METHODS))
+const RECALL_METHOD_SET = new Set<string>(Object.values(TRIBE_METHODS))
 
-export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
-  const log = createLogger("tribe:lore")
+export function createRecallHandlers(opts: RecallHandlerOpts): RecallHandlers {
+  const log = createLogger("tribe:recall")
   setRecallLogging(process.env.TRIBE_LOG === "1")
 
-  const db = openLoreDatabase(opts.dbPath)
-  const repo: LoreRepo = createLoreRepo(db)
+  const db = openRecallDatabase(opts.dbPath)
+  const repo: RecallRepo = createRecallRepo(db)
   const startedAt = Date.now()
 
   const focusPollMs = Math.max(100, opts.focusPollMs ?? 60_000)
@@ -131,24 +131,24 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
   }
 
   // ---------------------------------------------------------------------------
-  // Handlers (ported verbatim from plugins/tribe/lore/daemon.ts)
+  // Handlers (ported verbatim from plugins/tribe/recall/daemon.ts)
   // ---------------------------------------------------------------------------
 
-  async function handleHello(_conn: LoreConnState, params: HelloParams): Promise<HelloResult> {
-    if (params.protocolVersion !== LORE_PROTOCOL_VERSION) {
+  async function handleHello(_conn: RecallConnState, params: HelloParams): Promise<HelloResult> {
+    if (params.protocolVersion !== RECALL_PROTOCOL_VERSION) {
       throw new Error(
-        `protocol version mismatch: client ${params.clientName} speaks v${params.protocolVersion}, daemon speaks v${LORE_PROTOCOL_VERSION}`,
+        `protocol version mismatch: client ${params.clientName} speaks v${params.protocolVersion}, daemon speaks v${RECALL_PROTOCOL_VERSION}`,
       )
     }
     return {
-      protocolVersion: LORE_PROTOCOL_VERSION,
+      protocolVersion: RECALL_PROTOCOL_VERSION,
       daemonVersion,
       daemonPid: process.pid,
       startedAt,
     }
   }
 
-  async function handleAsk(_conn: LoreConnState, params: AskParams): Promise<AskResult> {
+  async function handleAsk(_conn: RecallConnState, params: AskParams): Promise<AskResult> {
     const result = await recallAgent(params.query, {
       limit: params.limit,
       since: params.since,
@@ -176,7 +176,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
     }
   }
 
-  async function handleCurrentBrief(conn: LoreConnState, params: CurrentBriefParams): Promise<CurrentBriefResult> {
+  async function handleCurrentBrief(conn: RecallConnState, params: CurrentBriefParams): Promise<CurrentBriefResult> {
     const override = params.sessionIdOverride ?? conn.sessionId ?? undefined
 
     const CACHE_FRESH_MS = 2 * 60 * 1000
@@ -213,7 +213,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
     }
   }
 
-  async function handlePlanOnly(_conn: LoreConnState, params: PlanOnlyParams): Promise<PlanOnlyResult> {
+  async function handlePlanOnly(_conn: RecallConnState, params: PlanOnlyParams): Promise<PlanOnlyResult> {
     const context = buildQueryContext()
     try {
       const call = await planQuery(params.query, context, { round: 1 })
@@ -244,7 +244,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
     }
   }
 
-  function handleSessionRegister(conn: LoreConnState, params: SessionRegisterParams): SessionRegisterResult {
+  function handleSessionRegister(conn: RecallConnState, params: SessionRegisterParams): SessionRegisterResult {
     const now = Date.now()
     const row = repo.upsertSession({
       claudePid: params.claudePid,
@@ -264,7 +264,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
     return { ok: true, registeredAt: row.started_at }
   }
 
-  function handleSessionHeartbeat(conn: LoreConnState, params: SessionHeartbeatParams): SessionHeartbeatResult {
+  function handleSessionHeartbeat(conn: RecallConnState, params: SessionHeartbeatParams): SessionHeartbeatResult {
     const now = Date.now()
     const row = repo.heartbeatSession(params.claudePid, now)
     if (row && !conn.claudePid) {
@@ -333,7 +333,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
     return { ...summary, tail: focus?.tail ?? "" }
   }
 
-  async function handleInjectDelta(conn: LoreConnState, params: InjectDeltaParams): Promise<InjectDeltaResult> {
+  async function handleInjectDelta(conn: RecallConnState, params: InjectDeltaParams): Promise<InjectDeltaResult> {
     const sessionId = params.sessionId ?? conn.sessionId ?? "unknown"
     const store = injectStoreFor(sessionId)
     const core = await runInjectDelta(params.prompt ?? "", store, {
@@ -368,7 +368,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
   // Dispatch
   // ---------------------------------------------------------------------------
 
-  async function dispatch(conn: LoreConnState, method: string, params: Record<string, unknown>): Promise<unknown> {
+  async function dispatch(conn: RecallConnState, method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case TRIBE_METHODS.hello:
         return handleHello(conn, params as unknown as HelloParams)
@@ -394,7 +394,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
         return handleStatus()
       default: {
         const err = new Error(`Unknown lore method: ${method}`) as Error & { code?: number }
-        err.code = LORE_ERRORS.unknownMethod
+        err.code = RECALL_ERRORS.unknownMethod
         throw err
       }
     }
@@ -520,7 +520,7 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
   }
 
   return {
-    isLoreMethod: (method: string): boolean => LORE_METHOD_SET.has(method),
+    isRecallMethod: (method: string): boolean => RECALL_METHOD_SET.has(method),
     dispatch,
     dropConn,
     close,
@@ -531,4 +531,4 @@ export function createLoreHandlers(opts: LoreHandlerOpts): LoreHandlers {
 }
 
 // Re-export the summarizer mode resolver so the daemon can parse args.
-export { resolveSummarizerMode } from "../../../plugins/tribe/lore/lib/summarizer.ts"
+export { resolveSummarizerMode } from "../../../plugins/tribe/recall/lib/summarizer.ts"

@@ -17,7 +17,8 @@ export const TOOLS_LIST = [
         message: { type: "string", description: "Message content" },
         type: {
           type: "string",
-          description: "Message type",
+          description:
+            "Message type. The tribe-wire daemon delivers every type to every session — no type is role-gated.",
           enum: ["assign", "status", "query", "response", "notify", "request", "verdict"],
           default: "notify",
         },
@@ -61,7 +62,7 @@ export const TOOLS_LIST = [
   },
   {
     name: "members",
-    description: "List active tribe sessions with their roles and domains",
+    description: "List active tribe sessions with their domains",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -90,16 +91,11 @@ export const TOOLS_LIST = [
   },
   {
     name: "join",
-    description: "Re-announce this session's name, role, and domains after compaction or rejoin.",
+    description: "Re-announce this session's name and domains after compaction or rejoin.",
     inputSchema: {
       type: "object" as const,
       properties: {
         name: { type: "string", description: "Session name" },
-        role: {
-          type: "string",
-          description: "Session role. 'chief' = coordinator, 'member' = default worker, 'watch' = read-only observer.",
-          enum: ["chief", "member", "watch"],
-        },
         domains: {
           type: "array",
           items: { type: "string" },
@@ -112,7 +108,7 @@ export const TOOLS_LIST = [
           enum: ["push", "pull"],
         },
       },
-      required: ["name", "role"],
+      required: ["name"],
     },
   },
   {
@@ -147,35 +143,8 @@ export const TOOLS_LIST = [
     },
   },
   {
-    name: "chief",
-    description: "Show the current chief — derived from connection order, or explicitly claimed via tribe.claim-chief.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {},
-    },
-  },
-  {
     name: "debug",
-    description:
-      "Dump daemon internals for troubleshooting — clients, chief derivation, chief claim, per-session cursors.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {},
-    },
-  },
-  {
-    name: "claim-chief",
-    description:
-      "Claim the chief role explicitly. Idempotent. Overrides the default connection-order derivation until released.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {},
-    },
-  },
-  {
-    name: "release-chief",
-    description:
-      "Release an explicit chief claim, letting the role fall back to connection-order derivation. Idempotent.",
+    description: "Dump daemon internals for troubleshooting — clients, per-session cursors.",
     inputSchema: {
       type: "object" as const,
       properties: {},

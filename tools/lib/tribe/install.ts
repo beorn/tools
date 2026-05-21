@@ -27,7 +27,7 @@ import {
   writeTribeConfig,
   type TribeAutostart,
 } from "./autostart-config.ts"
-import { resolveLoreSocketPath } from "../../../plugins/tribe/lore/lib/config.ts"
+import { resolveRecallSocketPath } from "../../../plugins/tribe/recall/lib/config.ts"
 
 // ---------------------------------------------------------------------------
 // Marker — used to identify tribe-installed hook entries
@@ -57,8 +57,8 @@ export interface InstallEnv {
   bunPath: string
   /** Current working directory — where to look for `.mcp.json`. */
   cwd: string
-  /** Absolute path to the tribe lore MCP server script. */
-  loreServerPath: string
+  /** Absolute path to the tribe recall MCP server script. */
+  recallServerPath: string
   /** Key under `mcpServers` to use (default `tribe`). */
   mcpName: string
   /** Path to the autostart config file (default `~/.claude/tribe/config.json`). */
@@ -76,7 +76,7 @@ export function defaultInstallEnv(overrides: Partial<InstallEnv> = {}): InstallE
     tribeCliPath: resolve(toolsDir, "tribe-cli.ts"),
     bunPath: process.execPath,
     cwd: process.cwd(),
-    loreServerPath: resolve(bearlyRoot, "plugins/tribe/lore/server.ts"),
+    recallServerPath: resolve(bearlyRoot, "plugins/tribe/recall/server.ts"),
     mcpName: "tribe",
     autostartConfigPath: resolveConfigPath(),
     ...overrides,
@@ -234,8 +234,8 @@ export function planInstall(env: InstallEnv, opts: { autostart?: TribeAutostart 
     // Emit a project-relative path if the server lives under cwd (portable
     // when the project is cloned with bearly as a submodule). Otherwise
     // absolute (e.g. bearly installed via npm in node_modules).
-    const rel = relative(env.cwd, env.loreServerPath)
-    const serverArg = rel.startsWith("..") ? env.loreServerPath : rel
+    const rel = relative(env.cwd, env.recallServerPath)
+    const serverArg = rel.startsWith("..") ? env.recallServerPath : rel
     const desired = { command: "bun", args: [serverArg] }
     const existing = servers[env.mcpName]
     if (existing && existing.command === desired.command && sameArgs(existing.args, desired.args)) {
@@ -385,11 +385,14 @@ export function planUninstall(env: InstallEnv): UninstallPlan {
         ? { ...(mcpJson.mcpServers as Record<string, { command?: string; args?: string[] }>) }
         : {}
     ) as Record<string, { command?: string; args?: string[] }>
-    const loreBasename = "tribe/lore/server.ts"
+    // Match both the legacy `tribe/lore/server.ts` path and the post-rename
+    // `tribe/recall/server.ts` path so the uninstaller cleans up stale
+    // `lore`-keyed entries from either era.
+    const recallServerBasenames = ["tribe/recall/server.ts", "tribe/lore/server.ts"]
     const removeKey = (key: string): boolean => {
       const e = servers[key]
       if (!e) return false
-      // Only remove if it looks like our tribe/lore server (guards against
+      // Only remove if it looks like our tribe recall server (guards against
       // users who happen to have an unrelated `lore` server configured).
       if (key === env.mcpName) {
         delete servers[key]
@@ -398,7 +401,7 @@ export function planUninstall(env: InstallEnv): UninstallPlan {
       if (
         key === "lore" &&
         Array.isArray(e.args) &&
-        e.args.some((a) => typeof a === "string" && a.includes(loreBasename))
+        e.args.some((a) => typeof a === "string" && recallServerBasenames.some((b) => a.includes(b)))
       ) {
         delete servers[key]
         return true
@@ -603,7 +606,7 @@ export async function doctorReport(env: InstallEnv): Promise<DoctorReport> {
       message: `library (TRIBE_NO_DAEMON=1 overrides ${mode}${configExists ? "" : " default"})`,
     })
   } else if (mode === "daemon") {
-    const loreSocket = resolveLoreSocketPath()
+    const loreSocket = resolveRecallSocketPath()
     const loreAlive = existsSync(loreSocket)
     if (loreAlive) {
       checks.push({

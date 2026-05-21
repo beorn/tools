@@ -24,7 +24,7 @@ import { accountlyPlugin } from "./lib/tribe/accountly-plugin.ts"
 
 import {
   createBaseTribe,
-  loreTools,
+  recallTools,
   messagingTools,
   probeAndCleanSocket,
   withBroadcast,
@@ -35,7 +35,7 @@ import {
   withDispatcher,
   withHotReload,
   withIdleQuit,
-  withLore,
+  withRecall,
   withMCPServer,
   withProjectRoot,
   withRuntime,
@@ -48,7 +48,7 @@ import { pruneOldActivityLogs } from "./lib/tribe/activity-log.ts"
 const log = createLogger("tribe:daemon")
 
 // ---------------------------------------------------------------------------
-// Sync portion of the pipe — config, db, daemonCtx, lore, tools, registry,
+// Sync portion of the pipe — config, db, daemonCtx, recall, tools, registry,
 // broadcast pipeline. Stops here so the alive-probe (async) can run before
 // withSocketServer attempts to bind.
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ const partialShape = pipe(
   withProjectRoot(),
   withDatabase(),
   withDaemonContext(),
-  withLore(),
+  withRecall(),
   withTools(),
   withTool(messagingTools()),
   withClientRegistry(),
@@ -138,7 +138,7 @@ const withMCPShape = withMCPServer<typeof withDispatcherShape>({
   })),
   dispatch: async (toolName, args, ctx) => {
     // Route every registered tool through the dispatcher's handleRequest.
-    // The dispatcher's tribe.* / lore cases own connection context; for
+    // The dispatcher's tribe.* / recall cases own connection context; for
     // unknown methods it returns -32601 which we surface as an MCP error.
     if (!withDispatcherShape.tools.has(toolName)) return undefined
     const responseLine = await withDispatcherShape.dispatcher.handleRequest(
@@ -184,18 +184,18 @@ const tribe = withRuntime<typeof withSignalsShape>({
   },
 })(withSignalsShape)
 
-// Lore tools are conditional on lore being enabled — register them after the
-// pipe so the registry stays append-only when --no-lore is set. The dispatcher
+// Recall tools are conditional on recall being enabled — register them after the
+// pipe so the registry stays append-only when --no-recall is set. The dispatcher
 // reads the registry lazily, so late registration is safe.
-if (tribe.lore) {
-  for (const t of loreTools(tribe.lore)) tribe.tools.set(t.name, t)
+if (tribe.recall) {
+  for (const t of recallTools(tribe.recall)) tribe.tools.set(t.name, t)
 }
 
 log.info?.(`Starting tribe daemon`)
 log.info?.(`Socket: ${tribe.config.socketPath}`)
 log.info?.(`DB: ${tribe.config.dbPath}`)
 log.info?.(`PID: ${process.pid}`)
-if (tribe.lore) log.info?.(`Lore DB: ${tribe.config.loreDbPath}`)
+if (tribe.recall) log.info?.(`Recall DB: ${tribe.config.recallDbPath}`)
 log.info?.(`Daemon ready (pid=${process.pid}, clients=${tribe.registry.clients.size})`)
 
 // ---------------------------------------------------------------------------

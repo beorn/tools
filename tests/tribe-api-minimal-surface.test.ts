@@ -39,10 +39,6 @@ function makeOpts(): HandlerOpts {
     cleanup: () => {},
     userRenamed: false,
     setUserRenamed: () => {},
-    getChiefId: () => null,
-    getChiefInfo: () => null,
-    claimChief: () => {},
-    releaseChief: () => {},
     getActiveSessionIds: () => new Set<string>(),
     getActiveSessionInfo: () => [] as ActiveSessionInfo[],
   }
@@ -77,25 +73,19 @@ function parseTool<T>(result: Awaited<ReturnType<typeof handleToolCall>>): T {
 }
 
 describe("tribe API minimal surface", () => {
-  it("registers only the five public verbs plus admin verbs", () => {
+  it("registers only the public verbs plus admin verbs — no chief verbs (F12)", () => {
     const names = TOOLS_LIST.map((t) => t.name).sort()
     expect(names).toEqual(
-      [
-        "chief",
-        "claim-chief",
-        "debug",
-        "fetch",
-        "filter",
-        "health",
-        "join",
-        "members",
-        "release-chief",
-        "reload",
-        "rename",
-        "retro",
-        "send",
-      ].sort(),
+      ["debug", "fetch", "filter", "health", "join", "members", "reload", "rename", "retro", "send"].sort(),
     )
+    // F12 of @km/tribe/15496-coordination-drift — the tribe-wire daemon is
+    // role-agnostic; chief coordination verbs were removed entirely.
+    expect(names).not.toContain("chief")
+    expect(names).not.toContain("claim-chief")
+    expect(names).not.toContain("release-chief")
+    expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.chief")
+    expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.claim-chief")
+    expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.release-chief")
     expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.broadcast")
     expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.history")
     expect(Object.values(TRIBE_COORD_METHODS)).not.toContain("tribe.inbox")

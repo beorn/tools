@@ -28,7 +28,7 @@ import {
   withConfig,
   withDaemonContext,
   withDatabase,
-  withLore,
+  withRecall,
   withProjectRoot,
 } from "../tools/lib/tribe/compose/index.ts"
 import { sendMessage } from "../tools/lib/tribe/messaging.ts"
@@ -159,19 +159,19 @@ function bootShape(projectRoot: string, dbPath?: string) {
       override: {
         socketPath: tmpSock(),
         dbPath: dbPath ?? tmpDb(),
-        loreDbPath: tmpDb(),
+        recallDbPath: tmpDb(),
         quitTimeoutSec: -1,
         inheritFd: null,
         focusPollMs: 1000,
         summaryPollMs: 2000,
         summarizerMode: "off" as const,
-        loreEnabled: false,
+        recallEnabled: false,
       },
     }),
     withProjectRoot(projectRoot),
     withDatabase(),
     withDaemonContext(),
-    withLore(),
+    withRecall(),
     withTools(),
     withTool(messagingTools()),
     withClientRegistry(),
@@ -188,7 +188,7 @@ type CapturedFrame = {
 
 function attachFakeReceiver(
   t: ReturnType<typeof bootShape>,
-  opts: { name: string; role?: "chief" | "member"; sessionId?: string },
+  opts: { name: string; role?: "member" | "watch"; sessionId?: string },
 ): { frames: CapturedFrame[]; connId: string } {
   const frames: CapturedFrame[] = []
   const connId = `conn-${randomUUID().slice(0, 6)}`
@@ -236,7 +236,7 @@ function attachFakeReceiver(
     conn: "",
     ctx: { ...t.daemonCtx, sessionId },
     registeredAt: Date.now(),
-    lore: { sessionId: null, claudePid: null },
+    recall: { sessionId: null, claudePid: null },
   })
   return { frames, connId }
 }
@@ -265,7 +265,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
     t.stmts.upsertSession.run({
       $id: senderId,
       $name: "chief",
-      $role: "chief",
+      $role: "member",
       $domains: "[]",
       $pid: 0,
       $cwd: "/x",
@@ -275,7 +275,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
       $identity_token: null,
       $now: Date.now(),
     })
-    const senderCtx = { ...t.daemonCtx, sessionId: senderId, getName: () => "chief", getRole: () => "chief" as const }
+    const senderCtx = { ...t.daemonCtx, sessionId: senderId, getName: () => "chief", getRole: () => "member" as const }
     sendMessage(
       senderCtx as unknown as Parameters<typeof sendMessage>[0],
       "agent",
@@ -316,7 +316,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
     t.stmts.upsertSession.run({
       $id: senderId,
       $name: "chief",
-      $role: "chief",
+      $role: "member",
       $domains: "[]",
       $pid: 0,
       $cwd: "/x",
@@ -330,7 +330,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
       ...t.daemonCtx,
       sessionId: senderId,
       getName: () => "chief",
-      getRole: () => "chief" as const,
+      getRole: () => "member" as const,
     }
     // First assign — reissue_count should be 0 (or absent; treat both as "not a reissue").
     sendMessage(
@@ -415,7 +415,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
     t.stmts.upsertSession.run({
       $id: senderId,
       $name: "chief",
-      $role: "chief",
+      $role: "member",
       $domains: "[]",
       $pid: 0,
       $cwd: "/x",
@@ -429,7 +429,7 @@ describe("withBroadcast — assign envelope enrichment", () => {
       ...t.daemonCtx,
       sessionId: senderId,
       getName: () => "chief",
-      getRole: () => "chief" as const,
+      getRole: () => "member" as const,
     }
     sendMessage(
       senderCtx as unknown as Parameters<typeof sendMessage>[0],

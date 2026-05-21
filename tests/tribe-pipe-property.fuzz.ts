@@ -32,7 +32,7 @@ import { randomUUID } from "node:crypto"
 import { createScope, pipe, withTool, withTools } from "../packages/tribe-client/src/index.ts"
 import {
   createBaseTribe,
-  loreTools,
+  recallTools,
   messagingTools,
   withBroadcast,
   withClientRegistry,
@@ -42,7 +42,7 @@ import {
   withDispatcher,
   withHotReload,
   withIdleQuit,
-  withLore,
+  withRecall,
   withPlugin,
   withPluginApi,
   withProjectRoot,
@@ -93,7 +93,6 @@ const noopApi: TribeClientApi = {
   hasRecentMessage: () => false,
   getActiveSessions: () => [],
   getSessionNames: () => [],
-  hasChief: () => false,
 }
 
 /**
@@ -123,7 +122,7 @@ function makePlugin(name: string, available: boolean, cleanedRef: { value: boole
  * withSocketServer → withRuntime) is always present — withRuntime requires
  * all of these as type prerequisites, so a pipe missing any of them does not
  * type-check and is not a valid assembly. The optional factories
- * (withLore, withSignals, withHotReload, withIdleQuit, withDispatcher) are
+ * (withRecall, withSignals, withHotReload, withIdleQuit, withDispatcher) are
  * shuffled into the assembly per-iteration.
  */
 async function runOnePipe(
@@ -205,19 +204,19 @@ async function runOnePipe(
         override: {
           socketPath: sockPath,
           dbPath,
-          loreDbPath: lorePath,
+          recallDbPath: lorePath,
           quitTimeoutSec: -1,
           inheritFd: null,
           focusPollMs: 60_000,
           summaryPollMs: 120_000,
           summarizerMode: "off" as const,
-          loreEnabled: options.includeLore,
+          recallEnabled: options.includeLore,
         },
       }),
       withProjectRoot("/test"),
       withDatabase(),
       withDaemonContext(),
-      withLore(),
+      withRecall(),
       withTools(),
     )
 
@@ -228,8 +227,8 @@ async function runOnePipe(
     if (options.includeMessagingTools) {
       withTooling = withTool<typeof partial>(messagingTools())(withTooling)
     }
-    if (options.includeLoreTools && partial.lore) {
-      withTooling = withTool<typeof partial>(loreTools(partial.lore))(withTooling)
+    if (options.includeLoreTools && partial.recall) {
+      withTooling = withTool<typeof partial>(recallTools(partial.recall))(withTooling)
     }
     if (options.includeMcpTool) {
       // A trivial extra tool exercising the registry's deduplication path.
@@ -517,19 +516,19 @@ describe("tribe pipe — property/fuzz", () => {
               override: {
                 socketPath: sockPath,
                 dbPath,
-                loreDbPath: tmpDb(),
+                recallDbPath: tmpDb(),
                 quitTimeoutSec: -1,
                 inheritFd: null,
                 focusPollMs: 60_000,
                 summaryPollMs: 120_000,
                 summarizerMode: "off" as const,
-                loreEnabled: false,
+                recallEnabled: false,
               },
             }),
             withProjectRoot("/test"),
             withDatabase(),
             withDaemonContext(),
-            withLore(),
+            withRecall(),
             withTools(),
             withTool(messagingTools()),
             withClientRegistry(),
@@ -593,19 +592,19 @@ describe("tribe pipe — property/fuzz", () => {
             override: {
               socketPath: sockPath,
               dbPath,
-              loreDbPath: tmpDb(),
+              recallDbPath: tmpDb(),
               quitTimeoutSec: -1,
               inheritFd: null,
               focusPollMs: 60_000,
               summaryPollMs: 120_000,
               summarizerMode: "off" as const,
-              loreEnabled: false,
+              recallEnabled: false,
             },
           }),
           withProjectRoot("/test"),
           withDatabase(),
           withDaemonContext(),
-          withLore(),
+          withRecall(),
           withTools(),
           withClientRegistry(),
           withBroadcast(),

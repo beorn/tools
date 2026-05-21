@@ -40,7 +40,6 @@ const noopApi: TribeClientApi = {
   hasRecentMessage: () => false,
   getActiveSessions: () => [],
   getSessionNames: () => [],
-  hasChief: () => false,
 }
 
 describe("bootTribeDaemon", () => {
@@ -51,13 +50,13 @@ describe("bootTribeDaemon", () => {
       configOverride: {
         socketPath: "/tmp/x.sock",
         dbPath: tmpDb(),
-        loreDbPath: tmpDb(),
+        recallDbPath: tmpDb(),
         quitTimeoutSec: 60,
         inheritFd: null,
         focusPollMs: 1000,
         summaryPollMs: 2000,
         summarizerMode: "off",
-        loreEnabled: false,
+        recallEnabled: false,
       },
     })
 
@@ -68,7 +67,7 @@ describe("bootTribeDaemon", () => {
     expect(tribe.projectRoot).toBe(process.cwd())
     expect(tribe.db).toBeDefined()
     expect(tribe.daemonCtx.getRole()).toBe("daemon")
-    expect(tribe.lore).toBeNull() // loreEnabled=false
+    expect(tribe.recall).toBeNull() // recallEnabled=false
     expect(tribe.tools).toBeInstanceOf(Map)
     expect(tribe.tools.size).toBe(MESSAGING_TOOL_NAMES.length)
     expect(tribe.pluginApi).toBe(noopApi)
@@ -86,17 +85,17 @@ describe("bootTribeDaemon", () => {
       configOverride: {
         socketPath: "/tmp/x.sock",
         dbPath: tmpDb(),
-        loreDbPath: tmpDb(),
+        recallDbPath: tmpDb(),
         quitTimeoutSec: 60,
         inheritFd: null,
         focusPollMs: 60_000,
         summaryPollMs: 120_000,
         summarizerMode: "off",
-        loreEnabled: true,
+        recallEnabled: true,
       },
     })
 
-    expect(tribe.lore).not.toBeNull()
+    expect(tribe.recall).not.toBeNull()
     // Lore methods are registered alongside messaging methods.
     expect(tribe.tools.has("tribe.send")).toBe(true) // messaging
     expect(tribe.tools.has("tribe.ask")).toBe(true) // lore
@@ -113,13 +112,13 @@ describe("bootTribeDaemon", () => {
       configOverride: {
         socketPath: "/tmp/x.sock",
         dbPath: tmpDb(),
-        loreDbPath: tmpDb(),
+        recallDbPath: tmpDb(),
         quitTimeoutSec: 60,
         inheritFd: null,
         focusPollMs: 60_000,
         summaryPollMs: 120_000,
         summarizerMode: "off",
-        loreEnabled: true,
+        recallEnabled: true,
       },
     })
 

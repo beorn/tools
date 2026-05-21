@@ -90,7 +90,7 @@ export type ReconnectingClientOpts = {
 }
 
 function defaultDaemonScript(): string {
-  // plugins/tribe/lore/lib/socket.ts → tools/tribe-daemon.ts
+  // plugins/tribe/recall/lib/socket.ts → tools/tribe-daemon.ts
   return resolve(dirname(new URL(import.meta.url).pathname), "../../../../tools/tribe-daemon.ts")
 }
 

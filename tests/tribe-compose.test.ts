@@ -13,13 +13,13 @@ import { randomUUID } from "node:crypto"
 import { createScope, pipe, withTool, withTools } from "../packages/tribe-client/src/index.ts"
 import {
   createBaseTribe,
-  loreTools,
+  recallTools,
   MESSAGING_TOOL_NAMES,
   messagingTools,
   withConfig,
   withDaemonContext,
   withDatabase,
-  withLore,
+  withRecall,
   withPlugin,
   withPluginApi,
   withProjectRoot,
@@ -54,7 +54,6 @@ const noopApi: TribeClientApi = {
   hasRecentMessage: () => false,
   getActiveSessions: () => [],
   getSessionNames: () => [],
-  hasChief: () => false,
 }
 
 // ---------------------------------------------------------------------------
@@ -84,13 +83,13 @@ describe("withConfig", () => {
     const override = {
       socketPath: "/tmp/test.sock",
       dbPath: "/tmp/test.db",
-      loreDbPath: "/tmp/lore.db",
+      recallDbPath: "/tmp/lore.db",
       quitTimeoutSec: 60,
       inheritFd: null,
       focusPollMs: 1000,
       summaryPollMs: 2000,
       summarizerMode: "off" as const,
-      loreEnabled: false,
+      recallEnabled: false,
     }
     const t = pipe(createBaseTribe(), withConfig({ override }))
     expect(t.config).toEqual(override)
@@ -118,13 +117,13 @@ describe("withDatabase", () => {
         override: {
           socketPath: "/tmp/x.sock",
           dbPath,
-          loreDbPath: tmpDb(),
+          recallDbPath: tmpDb(),
           quitTimeoutSec: 60,
           inheritFd: null,
           focusPollMs: 1000,
           summaryPollMs: 2000,
           summarizerMode: "off",
-          loreEnabled: false,
+          recallEnabled: false,
         },
       }),
       withDatabase(),
@@ -149,13 +148,13 @@ describe("withDaemonContext", () => {
         override: {
           socketPath: "/tmp/x.sock",
           dbPath: tmpDb(),
-          loreDbPath: tmpDb(),
+          recallDbPath: tmpDb(),
           quitTimeoutSec: 60,
           inheritFd: null,
           focusPollMs: 1000,
           summaryPollMs: 2000,
           summarizerMode: "off",
-          loreEnabled: false,
+          recallEnabled: false,
         },
       }),
       withDatabase(),
@@ -169,26 +168,26 @@ describe("withDaemonContext", () => {
   })
 })
 
-describe("withLore", () => {
-  it("returns lore=null when loreEnabled=false", async () => {
+describe("withRecall", () => {
+  it("returns recall=null when recallEnabled=false", async () => {
     const t = pipe(
       createBaseTribe(),
       withConfig({
         override: {
           socketPath: "/tmp/x.sock",
           dbPath: tmpDb(),
-          loreDbPath: tmpDb(),
+          recallDbPath: tmpDb(),
           quitTimeoutSec: 60,
           inheritFd: null,
           focusPollMs: 1000,
           summaryPollMs: 2000,
           summarizerMode: "off",
-          loreEnabled: false,
+          recallEnabled: false,
         },
       }),
-      withLore(),
+      withRecall(),
     )
-    expect(t.lore).toBeNull()
+    expect(t.recall).toBeNull()
     await t.scope[Symbol.asyncDispose]()
   })
 })
@@ -213,11 +212,11 @@ describe("messagingTools()", () => {
   })
 })
 
-describe("loreTools()", () => {
-  it("produces tools that delegate to LoreHandlers.dispatch", async () => {
+describe("recallTools()", () => {
+  it("produces tools that delegate to RecallHandlers.dispatch", async () => {
     const dispatched: Array<{ method: string; params: Record<string, unknown> }> = []
     const fakeLore = {
-      isLoreMethod: () => true,
+      isRecallMethod: () => true,
       dispatch: async (_conn: unknown, method: string, params: Record<string, unknown>) => {
         dispatched.push({ method, params })
         return { ok: true, method }
@@ -228,7 +227,7 @@ describe("loreTools()", () => {
       startedAt: Date.now(),
       daemonVersion: "test",
     }
-    const tools = loreTools(fakeLore)
+    const tools = recallTools(fakeLore)
     expect(tools.length).toBeGreaterThan(0)
     const ask = tools.find((t) => t.name === "tribe.ask")
     expect(ask).toBeDefined()
@@ -297,19 +296,19 @@ describe("end-to-end pipe — boot order", () => {
         override: {
           socketPath: "/tmp/x.sock",
           dbPath: tmpDb(),
-          loreDbPath: tmpDb(),
+          recallDbPath: tmpDb(),
           quitTimeoutSec: 60,
           inheritFd: null,
           focusPollMs: 1000,
           summaryPollMs: 2000,
           summarizerMode: "off",
-          loreEnabled: false,
+          recallEnabled: false,
         },
       }),
       withProjectRoot("/test/root"),
       withDatabase(),
       withDaemonContext(),
-      withLore(),
+      withRecall(),
       withTools(),
       withTool(messagingTools()),
       withPluginApi(noopApi),
@@ -320,7 +319,7 @@ describe("end-to-end pipe — boot order", () => {
     expect(tribe.projectRoot).toBe("/test/root")
     expect(tribe.db).toBeDefined()
     expect(tribe.daemonCtx.getRole()).toBe("daemon")
-    expect(tribe.lore).toBeNull()
+    expect(tribe.recall).toBeNull()
     expect(tribe.tools.size).toBe(MESSAGING_TOOL_NAMES.length)
     expect(tribe.pluginApi).toBe(noopApi)
 

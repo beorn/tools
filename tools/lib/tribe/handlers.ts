@@ -103,9 +103,6 @@ export const TRIBE_COORD_METHODS = {
   join: "tribe.join",
   reload: "tribe.reload",
   retro: "tribe.retro",
-  chief: "tribe.chief",
-  claimChief: "tribe.claim-chief",
-  releaseChief: "tribe.release-chief",
   debug: "tribe.debug",
   filter: "tribe.filter",
 } as const
@@ -123,6 +120,12 @@ const REMOVED_TRIBE_METHODS = new Set([
   "inbox",
   "ping",
   "read",
+  // F12 of @km/tribe/15496-coordination-drift — the tribe-wire daemon is
+  // role-agnostic; chief-ness is an L3 fact (the `@chief` bead lease), not a
+  // daemon concept. These coordination-role methods were removed entirely.
+  "tribe.chief",
+  "tribe.claim-chief",
+  "tribe.release-chief",
 ])
 const REMOVED_TRIBE_METHOD_HINT = "use send/fetch/filter — see hub/bearly/design/tribe-message-bus.md"
 
@@ -158,18 +161,10 @@ export type HandlerOpts = {
   cleanup: () => void
   userRenamed: boolean
   setUserRenamed: (v: boolean) => void
-  /** Return the ctx.sessionId of the current chief (derived or explicitly claimed), or null. */
-  getChiefId: () => string | null
-  /** Return the current chief's id + name + whether the role was explicitly claimed. */
-  getChiefInfo: () => { id: string; name: string; claimed: boolean } | null
-  /** Explicitly claim chief for the given session. Idempotent. */
-  claimChief: (sessionId: string, name: string) => void
-  /** Release an explicit chief claim (if this session holds it). Idempotent. */
-  releaseChief: (sessionId: string) => void
   /**
-   * Return ctx.sessionId of every currently-connected eligible session — used
-   * to compute `alive` on DB-sourced session rows without a heartbeat timer.
-   * Excludes daemon / watch-* / pending-*.
+   * Return ctx.sessionId of every currently-connected participating session —
+   * used to compute `alive` on DB-sourced session rows without a heartbeat
+   * timer. Excludes daemon / watch / pending sessions.
    */
   getActiveSessionIds: () => Set<string>
   /** Realtime snapshot of connected sessions (daemon clients Map). */
@@ -203,12 +198,6 @@ export function handleToolCall(
       return handleReload(ctx, a, opts.cleanup)
     case TRIBE_COORD_METHODS.retro:
       return handleRetro(ctx, a)
-    case TRIBE_COORD_METHODS.chief:
-      return handleChief(ctx, opts)
-    case TRIBE_COORD_METHODS.claimChief:
-      return handleClaimChief(ctx, opts)
-    case TRIBE_COORD_METHODS.releaseChief:
-      return handleReleaseChief(ctx, opts)
     case TRIBE_COORD_METHODS.debug:
       return handleDebug(ctx, a, opts)
     case TRIBE_COORD_METHODS.filter:
@@ -242,28 +231,17 @@ function parseDomains(value: string): string[] {
   return Array.isArray(parsed) && parsed.every((v) => typeof v === "string") ? parsed : []
 }
 
-function handleSend(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResult {
+function handleSend(ctx: TribeContext, a: ToolArgs, _opts: HandlerOpts): ToolResult {
+  // The tribe-wire daemon is role-agnostic (F12 of
+  // @km/tribe/15496-coordination-drift): every message type is delivered to
+  // every session with no role gate. `assign` / `verdict` are ordinary
+  // message types — coordination authority is an L3 concern, not a daemon one.
   const msgType = (a.type as string) ?? "notify"
-  // Only the current chief can assign or verdict
-  if ((msgType === "assign" || msgType === "verdict") && opts.getChiefId() !== ctx.sessionId) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ error: "Only the current chief can send assign/verdict messages" }),
-        },
-      ],
-    }
-  }
   const sanitized = sanitizeMessage(a.message as string)
-  // Dead-letter fallback for `to: "chief"` when no chief exists:
-  // drain to '*' with a `[no-chief]` prefix so the message still reaches the
-  // tribe rather than vanishing into an unread queue no one polls.
-  const { recipient, content, routedFromChief } = routeChiefFallback(opts, a.to as string, sanitized)
   const result = sendMessage(
     ctx,
-    recipient,
-    content,
+    a.to as string,
+    sanitized,
     msgType,
     a.bead as string | undefined,
     a.ref as string | undefined,
@@ -271,29 +249,15 @@ function handleSend(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
   logEvent(ctx, `message.sent.${msgType}`, a.bead as string | undefined, {
     to: a.to,
     message_id: result.id,
-    routedFromChief: routedFromChief || undefined,
   })
   return {
     content: [
       {
         type: "text",
-        text: JSON.stringify({ sent: true, id: result.id, routedFromChief: routedFromChief || undefined }),
+        text: JSON.stringify({ sent: true, id: result.id }),
       },
     ],
   }
-}
-
-function routeChiefFallback(
-  opts: HandlerOpts,
-  to: string,
-  content: string,
-): { recipient: string; content: string; routedFromChief: boolean } {
-  if (to !== "chief") return { recipient: to, content, routedFromChief: false }
-  if (opts.getChiefId() !== null) {
-    return { recipient: to, content, routedFromChief: false }
-  }
-  // No chief — drain to the tribe so somebody sees it.
-  return { recipient: "*", content: `[no-chief] ${content}`, routedFromChief: true }
 }
 
 function handleSessions(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResult {
@@ -371,14 +335,6 @@ function handleRename(
     setUserRenamed: (v: boolean) => void
     /** Optional: when provided, allow reclaiming names held by non-active sessions. */
     getActiveSessionIds?: () => Set<string>
-    /** Optional: current chief id + name + whether the role was explicitly
-     *  claimed — used to detect a rename by the session holding the claim. */
-    getChiefInfo?: () => { id: string; name: string; claimed: boolean } | null
-    /** Optional: re-assert an explicit chief claim. Used so a rename by the
-     *  chief carries the claim to the new name instead of looking like the
-     *  chief left (which would drop the daemon back to connection-order
-     *  derivation and flap the chief identity). */
-    claimChief?: (sessionId: string, name: string) => void
   },
 ): ToolResult {
   const newName = a.new_name as string
@@ -425,24 +381,13 @@ function handleRename(
     log.info?.(`reclaimed name "${newName}" from dead session ${existing.id} (tombstoned as "${tombstoneName}")`)
   }
   const oldName = ctx.getName()
-  // A rename is the same session (same pid, same socket, same ctx.sessionId) —
-  // it must NOT look like the chief left. If this session currently holds the
-  // EXPLICIT chief claim, re-assert it across the rename so the claim moves
-  // old name → new name atomically. Without this, a stale claim (or any
-  // future name-anchored claim) drops the daemon back to connection-order
-  // derivation, and a random session becomes chief — the multi-way
-  // chief-identity flap reproduced 2026-05-20.
-  const chiefBefore = opts.getChiefInfo?.() ?? null
-  const heldExplicitClaim = chiefBefore?.claimed === true && chiefBefore.id === ctx.sessionId
+  // A rename is the same session (same pid, same socket, same ctx.sessionId).
+  // The tribe-wire daemon is role-agnostic (F12) — there is no chief claim to
+  // carry across the rename, so a rename can no longer flap a coordination
+  // identity. Chief-ness is an L3 fact (the `@chief` bead lease).
   ctx.stmts.renameSession.run({ $new_name: newName, $session_id: ctx.sessionId, $now: Date.now() })
   ctx.setName(newName)
   opts.setUserRenamed(true) // Explicit rename — name is now sticky, won't be overridden
-  if (heldExplicitClaim) {
-    // Re-assert with the new name. claimChief is idempotent and keyed by
-    // sessionId, so this carries the claim forward and refreshes the
-    // displayed/logged chief name to match the post-rename identity.
-    opts.claimChief?.(ctx.sessionId, newName)
-  }
   // Broadcast the rename
   sendMessage(ctx, "*", `Member "${oldName}" is now "${newName}"`, "notify")
   logEvent(ctx, "session.renamed", undefined, { old_name: oldName, new_name: newName })
@@ -512,11 +457,6 @@ function handleJoin(ctx: TribeContext, a: ToolArgs, opts: HandlerOpts): ToolResu
         `tribe.join takeover: "${joinName}" reclaimed from active session ${taken.id} (tombstoned as "${tombstoneName}")`,
       )
     }
-  }
-
-  // Joining with role=chief is now an explicit claim — derived chief otherwise.
-  if (joinRole === "chief") {
-    opts.claimChief(ctx.sessionId, joinName)
   }
 
   const prevName = ctx.getName()
@@ -723,68 +663,15 @@ async function handleRetro(ctx: TribeContext, a: ToolArgs): Promise<ToolResult> 
   return { content: [{ type: "text", text }] }
 }
 
-function handleChief(_ctx: TribeContext, opts: HandlerOpts): ToolResult {
-  const info = opts.getChiefInfo()
-  if (!info) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ chief: null, message: "No chief — no eligible sessions connected" }),
-        },
-      ],
-    }
-  }
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          {
-            holder_name: info.name,
-            holder_id: info.id,
-            claimed: info.claimed,
-            source: info.claimed ? "explicit-claim" : "derived-from-connection-order",
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  }
-}
-
-function handleClaimChief(ctx: TribeContext, opts: HandlerOpts): ToolResult {
-  opts.claimChief(ctx.sessionId, ctx.getName())
-  return {
-    content: [{ type: "text", text: JSON.stringify({ chief: ctx.getName(), claimed: true }) }],
-  }
-}
-
-function handleReleaseChief(ctx: TribeContext, opts: HandlerOpts): ToolResult {
-  opts.releaseChief(ctx.sessionId)
-  const info = opts.getChiefInfo()
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({ released: true, chief: info?.name ?? null }),
-      },
-    ],
-  }
-}
-
 function handleDebug(_ctx: TribeContext, _a: ToolArgs, opts: HandlerOpts): ToolResult {
   // Prefer the daemon-provided dump when available (richest snapshot: clients
-  // Map, chief claim, per-session cursors). Otherwise synthesize a minimal
-  // view from the generic accessors so in-process tests still get meaningful
-  // output without wiring getDebugState.
+  // Map, per-session cursors). Otherwise synthesize a minimal view from the
+  // generic accessors so in-process tests still get meaningful output without
+  // wiring getDebugState.
   const state = opts.getDebugState
     ? opts.getDebugState()
     : {
         clients: opts.getActiveSessionInfo(),
-        chief: opts.getChiefInfo(),
-        chiefClaim: null,
         cursors: [],
       }
   return { content: [{ type: "text", text: JSON.stringify(state) }] }

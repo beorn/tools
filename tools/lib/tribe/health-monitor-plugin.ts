@@ -1267,17 +1267,15 @@ export const healthMonitorPlugin: TribePluginApi = {
             }
           }
 
-          // Critical: also broadcast to everyone
+          // Critical: also broadcast to everyone.
           if (alert.severity === "critical") {
             api.broadcast(msg, `health:${alert.type}:${alert.severity}`, undefined, broadcastClass)
-          } else if (attributedSessions.size === 0 && api.hasChief()) {
-            // Warning with no attributed sessions (e.g. disk, worktree): send to chief
-            api.send("chief", msg, `health:${alert.type}:${alert.severity}`, undefined, dmClass)
-          } else {
-            // Warning: send to chief if unattributed processes exist
-            if (sessionLoad.has("unattributed") && api.hasChief()) {
-              api.send("chief", msg, `health:${alert.type}:${alert.severity}`, undefined, dmClass)
-            }
+          } else if (attributedSessions.size === 0 || sessionLoad.has("unattributed")) {
+            // Warning with no attributed sessions (e.g. disk, worktree) or with
+            // unattributed processes: the daemon is role-agnostic (F12) — there
+            // is no "chief" recipient, so broadcast to the whole tribe and let
+            // whoever holds the @chief lease (an L3 fact) act on it.
+            api.broadcast(msg, `health:${alert.type}:${alert.severity}`, undefined, broadcastClass)
           }
         }
 

@@ -279,19 +279,19 @@ describe("resolveName", () => {
     expect(name).toBe("@agent/3")
   })
 
-  it("preserves chief when p.name=chief", () => {
+  it("preserves an explicit p.name verbatim", () => {
     const name = resolveName({
       db,
-      p: { name: "chief" },
+      p: { name: "coordinator" },
       adopted: null,
       claudeSessionName: null,
       claudeSessionId: null,
-      role: "chief",
+      role: "member",
       isActive: noActive,
       projectId: "proj",
       takenNames: new Set(),
     })
-    expect(name).toBe("chief")
+    expect(name).toBe("coordinator")
   })
 
   it("defaults to agent1 when no name signal and role=member", () => {
@@ -312,19 +312,22 @@ describe("resolveName", () => {
     expect(name).toBe("agent1")
   })
 
-  it("defaults to chief when role=chief and no other signal", () => {
+  it("defaults to agent-<N> for watch sessions too — no role-special name", () => {
+    // F12: the daemon is role-agnostic. There is no "chief" auto-name; every
+    // session with no name signal gets an agent-<N> auto-number regardless of
+    // its connection-lifecycle role.
     const name = resolveName({
       db,
       p: {},
       adopted: null,
       claudeSessionName: null,
       claudeSessionId: null,
-      role: "chief",
+      role: "watch",
       isActive: noActive,
       projectId: "proj",
       takenNames: new Set(),
     })
-    expect(name).toBe("chief")
+    expect(name).toBe("agent1")
   })
 
   it("uses claudeSessionName when p.name absent", () => {

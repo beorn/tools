@@ -7,8 +7,8 @@
  * — the runtime topology":
  *
  *   createBaseTribe → withConfig → withProjectRoot → withDatabase
- *     → withDaemonContext → withLore → withTools → withTool(messagingTools())
- *     → withTool(loreTools(lore)) → withPluginApi → withPlugin(...)
+ *     → withDaemonContext → withRecall → withTools → withTool(messagingTools())
+ *     → withTool(recallTools(lore)) → withPluginApi → withPlugin(...)
  *
  * Each `withX` accepts a value extending its prerequisites (the type system
  * enforces order) and registers cleanup on the daemon's root `Scope`.
@@ -32,14 +32,14 @@ export type { WithDatabase } from "./with-database.ts"
 export { withDaemonContext } from "./with-daemon-context.ts"
 export type { WithDaemonContext } from "./with-daemon-context.ts"
 
-export { withLore } from "./with-lore.ts"
-export type { WithLore } from "./with-lore.ts"
+export { withRecall } from "./with-recall.ts"
+export type { WithRecall } from "./with-recall.ts"
 
 export { messagingTools, MESSAGING_TOOL_NAMES } from "./messaging-tools.ts"
 export type { MessagingToolExtra } from "./messaging-tools.ts"
 
-export { loreTools } from "./lore-tools.ts"
-export type { LoreToolExtra } from "./lore-tools.ts"
+export { recallTools } from "./recall-tools.ts"
+export type { RecallToolExtra } from "./recall-tools.ts"
 
 export { withPluginApi } from "./with-plugin-api.ts"
 export type { WithPluginApi } from "./with-plugin-api.ts"

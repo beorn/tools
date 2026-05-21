@@ -13,24 +13,26 @@ import { parseArgs } from "node:util"
 // ---------------------------------------------------------------------------
 
 /**
- * Session role — a typed tag on the session (stored in `sessions.role`) that
- * replaces the old name-prefix magic for eligibility checks.
+ * Session lifecycle tag — a typed marker on the session (stored in
+ * `sessions.role`) describing the *connection lifecycle*, NOT a coordination
+ * role. There is no chief/member distinction at L2: the tribe-wire daemon is
+ * role-agnostic and delivers every message type to every session. Chief-ness
+ * is an L3 fact (the `@chief` bead lease) the daemon neither knows nor cares
+ * about — see F12 of @km/tribe/15496-coordination-drift.
  *
- *   - "daemon"  — the daemon itself; never a chief, never a member.
- *   - "chief"   — the coordinating session (derived from connection order,
- *                 or explicitly claimed via `tribe.claim-chief`).
+ *   - "daemon"  — the daemon itself; not a participating session.
  *   - "member"  — a regular worker session. Default for newly-joined sessions.
- *   - "watch"   — a dashboard / observer (e.g. `tribe watch`). Never eligible
- *                 for chief; receives every message on its wire.
+ *   - "watch"   — a dashboard / observer (e.g. `tribe watch`); receives every
+ *                 message on its wire regardless of recipient.
  *   - "pending" — half-registered placeholder used between socket accept and
  *                 the client's first `register` call.
  */
-export type TribeRole = "daemon" | "chief" | "member" | "watch" | "pending"
+export type TribeRole = "daemon" | "member" | "watch" | "pending"
 
-/** Subset of roles that participate as regular tribe members (chief pool). */
-export type TribeParticipantRole = "chief" | "member"
+/** Subset of roles that participate as regular tribe members. */
+export type TribeParticipantRole = "member"
 
-export const TRIBE_ROLES: readonly TribeRole[] = ["daemon", "chief", "member", "watch", "pending"] as const
+export const TRIBE_ROLES: readonly TribeRole[] = ["daemon", "member", "watch", "pending"] as const
 
 export function isValidRole(r: unknown): r is TribeRole {
   return typeof r === "string" && (TRIBE_ROLES as readonly string[]).includes(r)
@@ -195,29 +197,17 @@ function migrateLegacyTribeDb(legacyPath: string, xdgPath: string): void {
   }
 }
 
-/** Auto-detect role: if a live chief exists in the sessions table, become member; otherwise chief.
- *  Chief is derived from connection order at runtime (see tribe-daemon `deriveChiefId`), so this
- *  role flag is only an initial hint — the daemon reconciles the actual chief from the client set. */
-export function detectRole(db: Database, args: TribeArgs): TribeRole {
+/** Resolve the connection-lifecycle tag for a registering session.
+ *  There is no chief/member auto-detection — every working session is a plain
+ *  "member". "watch" and "daemon" are always passed explicitly. */
+export function detectRole(_db: Database, args: TribeArgs): TribeRole {
   if (args.role && isValidRole(args.role)) return args.role
-  // "watch" and "pending" are always explicit — they're never the result of
-  // auto-detection. The daemon's own ctx is constructed with role="daemon"
-  // directly (bypassing this helper). For regular proxy clients the choice
-  // is chief vs member:
-  //
-  // Phase 2 of km-tribe.plateau: there's no heartbeat timer any more, so a
-  // DB-only query can't tell "currently connected" from "stale row". The
-  // daemon reconciles the actual chief at runtime (see `deriveChiefId`);
-  // this hint is best-effort — if any row claims chief role, default to
-  // member so we don't stomp. The daemon will fix us up on register.
-  const anyChief = db.prepare("SELECT name FROM sessions WHERE role = 'chief' LIMIT 1").get()
-  return anyChief ? "member" : "chief"
+  return "member"
 }
 
-/** Auto-generate name: chief gets "chief", members get "member-<N>" */
-export function detectName(db: Database, role: TribeRole, args: TribeArgs): string {
+/** Auto-generate name: members get "member-<N>" */
+export function detectName(db: Database, _role: TribeRole, args: TribeArgs): string {
   if (args.name) return String(args.name)
-  if (role === "chief") return "chief"
   // Use PID-based name to avoid race conditions (max+1 can collide)
   const pidName = `member-${process.pid}`
   const taken = db.prepare("SELECT id FROM sessions WHERE name = ?").get(pidName)

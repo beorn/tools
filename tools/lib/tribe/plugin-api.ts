@@ -96,7 +96,4 @@ export interface TribeClientApi {
 
   /** Optional: bare list of currently-connected session names. */
   getSessionNames(): string[]
-
-  /** Optional: is a chief currently connected? (alert targeting shortcut) */
-  hasChief(): boolean
 }

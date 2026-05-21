@@ -34,7 +34,7 @@ import type { WithBroadcast } from "./with-broadcast.ts"
 import type { WithClientRegistry } from "./with-client-registry.ts"
 import type { WithDaemonContext } from "./with-daemon-context.ts"
 import type { WithDatabase } from "./with-database.ts"
-import type { WithLore } from "./with-lore.ts"
+import type { WithRecall } from "./with-recall.ts"
 import type { WithSocketServer } from "./with-socket-server.ts"
 
 const log = createLogger("tribe:runtime")
@@ -42,7 +42,7 @@ const log = createLogger("tribe:runtime")
 type RuntimeShape = BaseTribe &
   WithDatabase &
   WithDaemonContext &
-  WithLore &
+  WithRecall &
   WithClientRegistry &
   WithBroadcast &
   WithSocketServer
@@ -110,9 +110,6 @@ function defaultBuildPluginApi<T extends RuntimeShape>(t: T): TribeClientApi {
         .filter((c) => c.role !== "watch" && c.role !== "pending")
         .map((c) => c.name)
     },
-    hasChief() {
-      return registry.getChiefId() !== null
-    },
   }
 }
 
@@ -155,10 +152,10 @@ export function withRuntime<T extends RuntimeShape>(opts: RuntimeOpts<T>): (t: T
       exited = true
       log.info?.("Shutting down...")
       stopPlugins()
-      // Close lore explicitly for ordering (the scope.defer in withLore would
+      // Close recall explicitly for ordering (the scope.defer in withRecall would
       // catch it too, but we want it before sockets so the focus poller and
       // summarizer don't keep writing as the db closes).
-      void t.lore?.close()
+      void t.recall?.close()
       // Close all client sockets cleanly.
       for (const [, client] of t.registry.clients) {
         try {

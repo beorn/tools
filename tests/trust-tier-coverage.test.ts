@@ -26,7 +26,7 @@ import {
 
 const TRUSTED_ROSTER: SessionRoster = [
   { name: "daemon", role: "daemon" },
-  { name: "alice", role: "chief" },
+  { name: "alice", role: "member" },
   { name: "bob", role: "member" },
 ]
 
@@ -43,10 +43,6 @@ function makeOpts(): HandlerOpts {
     cleanup: () => {},
     userRenamed: false,
     setUserRenamed: () => {},
-    getChiefId: () => null,
-    getChiefInfo: () => null,
-    claimChief: () => {},
-    releaseChief: () => {},
     getActiveSessionIds: () => new Set<string>(),
     getActiveSessionInfo: () => [] as ActiveSessionInfo[],
   }
@@ -56,7 +52,7 @@ function ctxFor(
   db: ReturnType<typeof openDatabase>,
   stmts: ReturnType<typeof createStatements>,
   name: string,
-  role: "member" | "chief" | "daemon" = "member",
+  role: "member" | "watch" | "daemon" = "member",
 ) {
   const sessionId = randomUUID()
   const now = Date.now()
@@ -109,7 +105,7 @@ describe("tribe trust-tier registry", () => {
 
   it("silently omits ids a caller cannot see under the roster-aware ACL", async () => {
     const f = fixture()
-    const alice = ctxFor(f.db, f.stmts, "alice", "chief")
+    const alice = ctxFor(f.db, f.stmts, "alice")
     const bob = ctxFor(f.db, f.stmts, "bob")
     const mallory = ctxFor(f.db, f.stmts, "mallory")
 

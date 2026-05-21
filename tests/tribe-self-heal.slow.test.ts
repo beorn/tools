@@ -9,10 +9,11 @@
  *      succeed on the next tool call against a fresh daemon bound to
  *      the same socket + DB.
  *
- *   2. There is always a chief.
- *      Disconnecting the current chief (whether derived or explicitly
- *      claimed) must yield a new chief from the remaining eligible
- *      clients — no empty throne, no interval.
+ *   2. The tribe-wire daemon is role-agnostic (F12 of
+ *      @km/tribe/15496-coordination-drift). There is no chief at L2 —
+ *      every message type (including `assign` / `verdict`) is delivered
+ *      to every session with no role gate. Nothing to thrash on
+ *      reconnect because there is no chief identity to derive.
  *
  *   3. No message loss.
  *      Messages written to SQLite before the daemon is killed must be
@@ -242,40 +243,21 @@ describe("tribe self-heal (kill-and-recover)", () => {
   })
 
   // =========================================================================
-  // Invariant 2 — There is always a chief
+  // Invariant 2 — Role-agnostic delivery (F12)
   // =========================================================================
 
-  describe("invariant 2 — chief always exists while sessions are connected", () => {
-    it("when the longest-connected member leaves, the next-longest becomes chief", async () => {
+  describe("invariant 2 — every message type is delivered to every session, no role gate", () => {
+    it("the chief / claim-chief / release-chief verbs no longer exist", async () => {
       daemon = await spawnDaemon(socketPath, dbPath)
-
-      // Alice connects first → derived chief.
       const alice = await connect()
       await alice.call("register", { name: "alice", role: "member" })
-      // Small gap so registeredAt ordering is stable (Date.now() resolution).
-      await new Promise((r) => setTimeout(r, 20))
 
-      // Bob connects second.
-      const bob = await connect()
-      await bob.call("register", { name: "bob", role: "member" })
-
-      const led1 = parseToolText(await bob.call("tribe.chief"))
-      expect(led1.holder_name).toBe("alice")
-      expect(led1.source).toBe("derived-from-connection-order")
-
-      // Alice disconnects. Bob should become chief by derivation alone.
-      alice.close()
-      const aliceIdx = clients.indexOf(alice)
-      if (aliceIdx !== -1) clients.splice(aliceIdx, 1)
-      // Give the daemon a moment to process the close event.
-      await new Promise((r) => setTimeout(r, 250))
-
-      const led2 = parseToolText(await bob.call("tribe.chief"))
-      expect(led2.holder_name).toBe("bob")
-      expect(led2.source).toBe("derived-from-connection-order")
+      for (const verb of ["tribe.chief", "tribe.claim-chief", "tribe.release-chief"]) {
+        await expect(alice.call(verb)).rejects.toThrow()
+      }
     }, 20_000)
 
-    it("explicit claim-chief promotes a later session; release falls back to derivation", async () => {
+    it("a plain member can send an `assign` message — no chief gate", async () => {
       daemon = await spawnDaemon(socketPath, dbPath)
 
       const alice = await connect()
@@ -284,23 +266,43 @@ describe("tribe self-heal (kill-and-recover)", () => {
       const bob = await connect()
       await bob.call("register", { name: "bob", role: "member" })
 
-      // Bob claims chief explicitly (overrides derivation).
-      parseToolText(await bob.call("tribe.claim-chief"))
-      const ledClaim = parseToolText(await alice.call("tribe.chief"))
-      expect(ledClaim.holder_name).toBe("bob")
-      expect(ledClaim.source).toBe("explicit-claim")
-      expect(ledClaim.claimed).toBe(true)
+      // Pre-F12 the daemon rejected `assign` unless the sender was the
+      // derived chief. Now any session can send any type.
+      const sent = parseToolText(await bob.call("tribe.send", { to: "alice", message: "do X", type: "assign" }))
+      expect(sent.sent).toBe(true)
+      expect(sent.error).toBeUndefined()
 
-      // Bob disconnects → claim auto-clears, derivation picks alice.
-      bob.close()
-      const bobIdx = clients.indexOf(bob)
-      if (bobIdx !== -1) clients.splice(bobIdx, 1)
-      await new Promise((r) => setTimeout(r, 250))
+      // Alice receives it — delivery is type-blind.
+      const inbox = parseToolText(await alice.call("tribe.fetch", { limit: 50 }))
+      const events = (inbox.events ?? []) as Array<{ type: string; content: string; from: string }>
+      const assignMsg = events.find((e) => e.content === "do X")
+      expect(assignMsg).toBeDefined()
+      expect(assignMsg?.type).toBe("assign")
+      expect(assignMsg?.from).toBe("bob")
+    }, 20_000)
 
-      const ledFallback = parseToolText(await alice.call("tribe.chief"))
-      expect(ledFallback.holder_name).toBe("alice")
-      expect(ledFallback.source).toBe("derived-from-connection-order")
-      expect(ledFallback.claimed).toBe(false)
+    it("`verdict` and every other type reach a recipient regardless of sender role", async () => {
+      daemon = await spawnDaemon(socketPath, dbPath)
+
+      const alice = await connect()
+      await alice.call("register", { name: "alice", role: "member" })
+      await new Promise((r) => setTimeout(r, 20))
+      const bob = await connect()
+      await bob.call("register", { name: "bob", role: "member" })
+
+      for (const type of ["assign", "verdict", "status", "query", "response", "notify", "request"]) {
+        const sent = parseToolText(await alice.call("tribe.send", { to: "bob", message: `msg-${type}`, type }))
+        expect(sent.sent, `type=${type} should send`).toBe(true)
+      }
+
+      const inbox = parseToolText(await bob.call("tribe.fetch", { limit: 50 }))
+      const events = (inbox.events ?? []) as Array<{ type: string; content: string }>
+      for (const type of ["assign", "verdict", "status", "query", "response", "notify", "request"]) {
+        expect(
+          events.some((e) => e.content === `msg-${type}` && e.type === type),
+          `type=${type} delivered`,
+        ).toBe(true)
+      }
     }, 20_000)
   })
 
@@ -419,7 +421,7 @@ describe("tribe self-heal (kill-and-recover)", () => {
   // =========================================================================
 
   describe("tribe.debug", () => {
-    it("returns a snapshot with clients, chief, and cursors", async () => {
+    it("returns a snapshot with clients and cursors — no chief fields (F12)", async () => {
       daemon = await spawnDaemon(socketPath, dbPath)
 
       const alice = await connect()
@@ -431,8 +433,6 @@ describe("tribe self-heal (kill-and-recover)", () => {
 
       const snap = parseToolText(await bob.call("tribe.debug")) as {
         clients: Array<{ id: string; name: string; role: string; pid: number; registeredAt: number }>
-        chief: { id: string; name: string; claimed: boolean } | null
-        chiefClaim: string | null
         cursors: Array<{
           id: string
           name: string
@@ -444,10 +444,9 @@ describe("tribe self-heal (kill-and-recover)", () => {
       const clientNames = snap.clients.map((c) => c.name).sort()
       expect(clientNames).toContain("debug-alice")
       expect(clientNames).toContain("debug-bob")
-      expect(snap.chief).not.toBeNull()
-      expect(snap.chief?.name).toBe("debug-alice")
-      expect(snap.chief?.claimed).toBe(false)
-      expect(snap.chiefClaim).toBeNull()
+      // The tribe-wire daemon is role-agnostic — no chief in the debug dump.
+      expect("chief" in snap).toBe(false)
+      expect("chiefClaim" in snap).toBe(false)
       expect(Array.isArray(snap.cursors)).toBe(true)
     }, 20_000)
   })
