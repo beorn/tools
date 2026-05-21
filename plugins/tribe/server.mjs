@@ -121,9 +121,106 @@ function makeNotification(method, params) {
   return JSON.stringify({ jsonrpc: "2.0", method, params }) + `
 `;
 }
-// ../loggily/src/colors.ts
-var _process = typeof process !== "undefined" ? process : undefined;
-var enabled = _process?.env?.["FORCE_COLOR"] !== undefined && _process?.env?.["FORCE_COLOR"] !== "0" ? true : _process?.env?.["NO_COLOR"] !== undefined ? false : _process?.stdout?.isTTY ?? false;
+// node_modules/.bun/loggily@0.8.0+e40b0dfdd726a224/node_modules/loggily/dist/metrics.mjs
+function percentile(sorted, p) {
+  if (sorted.length === 0)
+    return 0;
+  return sorted[Math.min(Math.floor(sorted.length * p), sorted.length - 1)];
+}
+function computeStats(durations) {
+  const sorted = [...durations].sort((a, b) => a - b);
+  const total = sorted.reduce((sum, d) => sum + d, 0);
+  return {
+    count: sorted.length,
+    min: sorted[0] ?? 0,
+    max: sorted[sorted.length - 1] ?? 0,
+    mean: sorted.length > 0 ? total / sorted.length : 0,
+    p50: percentile(sorted, 0.5),
+    p95: percentile(sorted, 0.95),
+    p99: percentile(sorted, 0.99),
+    total
+  };
+}
+function createMetricsCollector(maxEntries = 1000) {
+  const store = /* @__PURE__ */ new Map;
+  return {
+    recordSpan(data) {
+      let arr = store.get(data.name);
+      if (!arr) {
+        arr = [];
+        store.set(data.name, arr);
+      }
+      arr.push(data.durationMs);
+      if (arr.length > maxEntries)
+        arr.shift();
+    },
+    stats(name) {
+      const arr = store.get(name);
+      if (!arr || arr.length === 0)
+        return;
+      return computeStats(arr);
+    },
+    all() {
+      const result = /* @__PURE__ */ new Map;
+      for (const [name, durations] of store)
+        if (durations.length > 0)
+          result.set(name, computeStats(durations));
+      return result;
+    },
+    summary() {
+      const entries = [...this.all().entries()];
+      if (entries.length === 0)
+        return "(no span data)";
+      return entries.map(([name, s]) => `${name}: ${s.count} spans, mean=${s.mean.toFixed(1)}ms, p50=${s.p50.toFixed(1)}ms, p95=${s.p95.toFixed(1)}ms, p99=${s.p99.toFixed(1)}ms`).join(`
+`);
+    },
+    reset() {
+      store.clear();
+    }
+  };
+}
+function withMetrics(collector) {
+  return (logger) => {
+    return new Proxy(logger, { get(target, prop) {
+      if (prop === "metrics")
+        return collector;
+      if (prop === "span") {
+        const originalSpan = target.span;
+        if (!originalSpan)
+          return;
+        return (namespace, props) => {
+          const span = originalSpan.call(target, namespace, props);
+          const originalDispose = span[Symbol.dispose];
+          span[Symbol.dispose] = () => {
+            originalDispose.call(span);
+            if (span.spanData?.duration != null)
+              collector.recordSpan({
+                name: span.name,
+                durationMs: span.spanData.duration
+              });
+          };
+          return span;
+        };
+      }
+      if (prop === "child")
+        return (namespaceOrContext, childProps) => {
+          const child = target.child(namespaceOrContext, childProps);
+          return withMetrics(collector)(child);
+        };
+      if (prop === "logger")
+        return (namespace, childProps) => {
+          const child = target.logger(namespace, childProps);
+          return withMetrics(collector)(child);
+        };
+      return target[prop];
+    } });
+  };
+}
+
+// node_modules/.bun/loggily@0.8.0+e40b0dfdd726a224/node_modules/loggily/dist/core-B3pox577.mjs
+import { closeSync, openSync, writeSync } from "fs";
+var _process$1 = typeof process !== "undefined" ? process : undefined;
+var enabled = _process$1?.env?.["FORCE_COLOR"] !== undefined && _process$1?.env?.["FORCE_COLOR"] !== "0" ? true : _process$1?.env?.["NO_COLOR"] !== undefined ? false : _process$1?.stdout?.isTTY ?? false;
 function wrap(open, close) {
   if (!enabled)
     return (str) => str;
@@ -137,29 +234,23 @@ var colors = {
   magenta: wrap("\x1B[35m", "\x1B[39m"),
   cyan: wrap("\x1B[36m", "\x1B[39m")
 };
-
-// ../loggily/src/file-writer.ts
-import { openSync, writeSync, closeSync } from "fs";
 function createFileWriter(filePath, options = {}) {
   const bufferSize = options.bufferSize ?? 4096;
   const flushInterval = options.flushInterval ?? 100;
-  const fs = options.__fs ?? { openSync, writeSync, closeSync };
   let buffer = "";
   let fd = null;
   let timer = null;
   let closed = false;
-  fd = fs.openSync(filePath, "a");
+  fd = openSync(filePath, "a");
   function flush() {
     if (buffer.length === 0 || fd === null)
       return;
-    const data = buffer;
-    fs.writeSync(fd, data);
+    writeSync(fd, buffer);
     buffer = "";
   }
   timer = setInterval(flush, flushInterval);
-  if (timer && typeof timer === "object" && "unref" in timer) {
+  if (timer && typeof timer === "object" && "unref" in timer)
     timer.unref();
-  }
   const exitHandler = () => flush();
   process.on("exit", exitHandler);
   return {
@@ -168,9 +259,8 @@ function createFileWriter(filePath, options = {}) {
         return;
       buffer += line + `
 `;
-      if (buffer.length >= bufferSize) {
+      if (buffer.length >= bufferSize)
         flush();
-      }
     },
     flush,
     close() {
@@ -185,7 +275,7 @@ function createFileWriter(filePath, options = {}) {
         flush();
       } catch {} finally {
         if (fd !== null) {
-          fs.closeSync(fd);
+          closeSync(fd);
           fd = null;
         }
         process.removeListener("exit", exitHandler);
@@ -193,8 +283,6 @@ function createFileWriter(filePath, options = {}) {
     }
   };
 }
-
-// ../loggily/src/tracing.ts
 var currentIdFormat = "simple";
 function setIdFormat(format) {
   currentIdFormat = format;
@@ -202,26 +290,22 @@ function setIdFormat(format) {
 var simpleSpanCounter = 0;
 var simpleTraceCounter = 0;
 function randomHex(bytes) {
-  const uuid = crypto.randomUUID().replace(/-/g, "");
-  return uuid.slice(0, bytes * 2);
+  return crypto.randomUUID().replace(/-/g, "").slice(0, bytes * 2);
 }
 function generateSpanId() {
-  if (currentIdFormat === "w3c") {
+  if (currentIdFormat === "w3c")
     return randomHex(8);
-  }
   return `sp_${(++simpleSpanCounter).toString(36)}`;
 }
 function generateTraceId() {
-  if (currentIdFormat === "w3c") {
+  if (currentIdFormat === "w3c")
     return randomHex(16);
-  }
   return `tr_${(++simpleTraceCounter).toString(36)}`;
 }
 var sampleRate = 1;
 function setSampleRate(rate) {
-  if (rate < 0 || rate > 1) {
+  if (rate < 0 || rate > 1)
     throw new Error(`Sample rate must be between 0.0 and 1.0, got ${rate}`);
-  }
   sampleRate = rate;
 }
 function shouldSample() {
@@ -231,161 +315,6 @@ function shouldSample() {
     return false;
   return Math.random() < sampleRate;
 }
-
-// ../loggily/src/console-sinks.ts
-function isBrowserRuntime() {
-  return typeof globalThis?.window !== "undefined" && typeof globalThis.document !== "undefined";
-}
-function timeStr(time) {
-  return new Date(time).toISOString().split("T")[1]?.split(".")[0] ?? "";
-}
-function levelLabel(level) {
-  switch (level) {
-    case "trace":
-      return "TRACE";
-    case "debug":
-      return "DEBUG";
-    case "info":
-      return "INFO";
-    case "warn":
-      return "WARN";
-    case "error":
-      return "ERROR";
-  }
-}
-function userArgsOf(event) {
-  if ("userArgs" in event && Array.isArray(event.userArgs)) {
-    const ua = event.userArgs;
-    return ua.filter((v) => v !== undefined);
-  }
-  if (event.props && Object.keys(event.props).length > 0) {
-    return [event.props];
-  }
-  return [];
-}
-function createTerminalConsoleSink(format = "console") {
-  if (format === "json") {
-    return (event) => routeSingle(event, formatJSONEvent(event));
-  }
-  return (event) => {
-    if (event.kind === "span") {
-      writeStderrLine(formatConsoleEvent(event));
-      return;
-    }
-    const prefix = `${colors.dim(timeStr(event.time))} ${levelAnsi(event.level)} ${colors.cyan(event.namespace)}`;
-    const args = userArgsOf(event);
-    invokeForLevel(event.level, prefix, event.message, ...args);
-  };
-}
-function writeStderrLine(text) {
-  const p = typeof process !== "undefined" ? process : undefined;
-  if (p?.stderr && typeof p.stderr.write === "function") {
-    p.stderr.write(text + `
-`);
-    return;
-  }
-  console.info(text);
-}
-function levelAnsi(level) {
-  switch (level) {
-    case "trace":
-      return colors.dim("TRACE");
-    case "debug":
-      return colors.dim("DEBUG");
-    case "info":
-      return colors.blue("INFO");
-    case "warn":
-      return colors.yellow("WARN");
-    case "error":
-      return colors.red("ERROR");
-  }
-}
-function createBrowserConsoleSink(format = "console") {
-  if (format === "json") {
-    return (event) => routeSingle(event, formatJSONEvent(event));
-  }
-  return (event) => {
-    if (event.kind === "span") {
-      const spanTemplate = `%c%s %cSPAN %c%s %c(%sms)`;
-      const args2 = userArgsOf(event);
-      const spanPropsString = args2.length > 0 ? ` ${safeStringify(Object.assign({}, ...args2.filter(isPlainRecord)))}` : "";
-      const { durationLabel } = { durationLabel: String(event.duration) };
-      invokeForLevel("info", spanTemplate + (spanPropsString ? "%s" : ""), cssDim(), timeStr(event.time), cssSpan(), cssNamespace(), event.namespace, cssDim(), durationLabel, ...spanPropsString ? [cssDim(), spanPropsString] : []);
-      return;
-    }
-    const template = `%c%s %c%s %c%s`;
-    const args = userArgsOf(event);
-    invokeForLevel(event.level, template, cssDim(), timeStr(event.time), cssLevel(event.level), levelLabel(event.level), cssNamespace(), event.namespace, event.message, ...args);
-  };
-}
-function isPlainRecord(v) {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-function cssDim() {
-  return "color: #888";
-}
-function cssNamespace() {
-  return "color: #0aa; font-weight: bold";
-}
-function cssSpan() {
-  return "color: #a0a; font-weight: bold";
-}
-function cssLevel(level) {
-  switch (level) {
-    case "trace":
-    case "debug":
-      return "color: #888; font-weight: bold";
-    case "info":
-      return "color: #36f; font-weight: bold";
-    case "warn":
-      return "color: #b80; font-weight: bold";
-    case "error":
-      return "color: #c33; font-weight: bold";
-  }
-}
-function invokeForLevel(level, ...args) {
-  switch (level) {
-    case "trace":
-    case "debug":
-      console.debug(...args);
-      return;
-    case "info":
-      console.info(...args);
-      return;
-    case "warn":
-      console.warn(...args);
-      return;
-    case "error":
-      console.error(...args);
-      return;
-  }
-}
-function routeSingle(event, text) {
-  if (event.kind === "span") {
-    console.info(text);
-    return;
-  }
-  switch (event.level) {
-    case "trace":
-    case "debug":
-      console.debug(text);
-      return;
-    case "info":
-      console.info(text);
-      return;
-    case "warn":
-      console.warn(text);
-      return;
-    case "error":
-      console.error(text);
-      return;
-  }
-}
-function createConsoleSink(format = "console") {
-  return isBrowserRuntime() ? createBrowserConsoleSink(format) : createTerminalConsoleSink(format);
-}
-
-// ../loggily/src/pipeline.ts
 var LOG_LEVEL_PRIORITY = {
   trace: 0,
   debug: 1,
@@ -394,9 +323,16 @@ var LOG_LEVEL_PRIORITY = {
   error: 4,
   silent: 5
 };
-var _process2 = typeof process !== "undefined" ? process : undefined;
+var _process = typeof process !== "undefined" ? process : undefined;
 function getEnv(key) {
-  return _process2?.env?.[key];
+  return _process?.env?.[key];
+}
+function writeStderr(text) {
+  if (_process?.stderr?.write)
+    _process.stderr.write(text + `
+`);
+  else
+    console.error(text);
 }
 function serializeCause(cause, maxDepth = 3) {
   if (maxDepth <= 0 || cause === undefined || cause === null)
@@ -409,15 +345,14 @@ function serializeCause(cause, maxDepth = 3) {
     };
     if (cause.code)
       result.code = cause.code;
-    if (cause.cause !== undefined) {
+    if (cause.cause !== undefined)
       result.cause = serializeCause(cause.cause, maxDepth - 1);
-    }
     return result;
   }
   return cause;
 }
 function safeStringify(value) {
-  const seen = new WeakSet;
+  const seen = /* @__PURE__ */ new WeakSet;
   return JSON.stringify(value, (_key, val) => {
     if (typeof val === "bigint")
       return val.toString();
@@ -449,9 +384,8 @@ function formatConsoleEvent(event) {
   if (event.kind === "span") {
     const message = `(${event.duration}ms)`;
     let output2 = `${time} ${colors.magenta("SPAN")} ${ns} ${message}`;
-    if (event.props && Object.keys(event.props).length > 0) {
+    if (event.props && Object.keys(event.props).length > 0)
       output2 += ` ${colors.dim(safeStringify(event.props))}`;
-    }
     return output2;
   }
   let levelStr;
@@ -473,13 +407,12 @@ function formatConsoleEvent(event) {
       break;
   }
   let output = `${time} ${levelStr} ${ns} ${event.message}`;
-  if (event.props && Object.keys(event.props).length > 0) {
+  if (event.props && Object.keys(event.props).length > 0)
     output += ` ${colors.dim(safeStringify(event.props))}`;
-  }
   return output;
 }
 function formatJSONEvent(event) {
-  if (event.kind === "span") {
+  if (event.kind === "span")
     return safeStringify({
       time: new Date(event.time).toISOString(),
       level: "span",
@@ -491,7 +424,6 @@ function formatJSONEvent(event) {
       parent_id: event.parentId,
       ...event.props
     });
-  }
   return safeStringify({
     time: new Date(event.time).toISOString(),
     level: event.level,
@@ -513,30 +445,48 @@ function parseNsFilter(ns) {
   const patterns = typeof ns === "string" ? ns.split(",").map((s) => s.trim()) : ns;
   const includes = [];
   const excludes = [];
-  for (const p of patterns) {
-    if (p.startsWith("-")) {
+  for (const p of patterns)
+    if (p.startsWith("-"))
       excludes.push(p.slice(1));
-    } else {
+    else
       includes.push(p);
-    }
-  }
   return (namespace) => {
-    for (const exc of excludes) {
+    for (const exc of excludes)
       if (matchesPattern(namespace, exc))
         return false;
-    }
     if (includes.length > 0) {
-      for (const inc of includes) {
+      for (const inc of includes)
         if (matchesPattern(namespace, inc))
           return true;
-      }
       return false;
     }
     return true;
   };
 }
-function createConsoleSink2(format) {
-  return createConsoleSink(format);
+function writeToConsole(text, event) {
+  if (event.kind === "span") {
+    writeStderr(text);
+    return;
+  }
+  switch (event.level) {
+    case "trace":
+    case "debug":
+      Function.prototype.bind.call(console.debug, console, text)();
+      break;
+    case "info":
+      Function.prototype.bind.call(console.info, console, text)();
+      break;
+    case "warn":
+      Function.prototype.bind.call(console.warn, console, text)();
+      break;
+    case "error":
+      Function.prototype.bind.call(console.error, console, text)();
+      break;
+  }
+}
+function createConsoleSink(format) {
+  const formatter = format === "json" ? formatJSONEvent : formatConsoleEvent;
+  return (event) => writeToConsole(formatter(event), event);
 }
 function createFileSink(path, format) {
   const writer = createFileWriter(path);
@@ -550,8 +500,7 @@ function isNodeStream(obj) {
   return typeof obj === "object" && obj !== null && (("_write" in obj) || ("writable" in obj) || ("fd" in obj));
 }
 function createWritableSink(writable, format) {
-  const useObjectMode = writable.objectMode ?? !isNodeStream(writable);
-  if (!useObjectMode) {
+  if (!(writable.objectMode ?? !isNodeStream(writable))) {
     const formatter = format === "json" ? formatJSONEvent : formatConsoleEvent;
     return (event) => writable.write(formatter(event) + `
 `);
@@ -602,7 +551,7 @@ function buildPipeline(elements, parentConfig) {
       outputs.push({
         levelPriority: LOG_LEVEL_PRIORITY[config.level],
         nsFilter: config.ns,
-        write: createConsoleSink2(config.format)
+        write: createConsoleSink(config.format)
       });
       continue;
     }
@@ -622,8 +571,7 @@ function buildPipeline(elements, parentConfig) {
       const obj = element;
       const keys = Object.keys(obj);
       const hasSinkKey = keys.some((k) => SINK_KEYS.has(k));
-      const hasUnknownKey = keys.some((k) => !VALID_CONFIG_KEYS.has(k) && !SINK_KEYS.has(k));
-      if (hasUnknownKey) {
+      if (keys.some((k) => !VALID_CONFIG_KEYS.has(k) && !SINK_KEYS.has(k))) {
         const unknown = keys.find((k) => !VALID_CONFIG_KEYS.has(k) && !SINK_KEYS.has(k));
         throw new Error(`loggily: unknown config key "${unknown}" in config object. Valid keys: ${[...VALID_CONFIG_KEYS, ...SINK_KEYS].join(", ")}`);
       }
@@ -641,9 +589,8 @@ function buildPipeline(elements, parentConfig) {
             dispose: sink.dispose
           });
         }
-        if (obj.otel !== undefined) {
+        if (obj.otel !== undefined)
           throw new Error("loggily: OTEL sink is not yet implemented. See loggily/otel for the planned bridge.");
-        }
         continue;
       }
       if (isValidLogLevel(obj.level))
@@ -670,7 +617,7 @@ function buildPipeline(elements, parentConfig) {
       });
       continue;
     }
-    throw new Error(`loggily: unsupported config element of type "${typeof element}". ` + 'Config arrays accept: objects (config), arrays (branches), functions (stages), console, "console", or writables ({ write }).');
+    throw new Error(`loggily: unsupported config element of type "${typeof element}". Config arrays accept: objects (config), arrays (branches), functions (stages), console, "console", or writables ({ write }).`);
   }
   const dispatch = (event) => {
     if (event.kind === "span" && !spansEnabled)
@@ -690,22 +637,11 @@ function buildPipeline(elements, parentConfig) {
         continue;
       output.write(e);
     }
-    for (const branch of branches) {
+    for (const branch of branches)
       branch.dispatch(e);
-    }
-  };
-  const spanEnabledForNamespace = (namespace) => {
-    if (!spansEnabled)
-      return false;
-    if (outputs.some((output) => !output.nsFilter || output.nsFilter(namespace)))
-      return true;
-    if (branches.some((branch) => branch.spanEnabled(namespace)))
-      return true;
-    return stages.length > 0;
   };
   return {
     dispatch,
-    spanEnabled: spanEnabledForNamespace,
     level: config.level,
     dispose: () => {
       for (const d of disposables)
@@ -716,21 +652,17 @@ function buildPipeline(elements, parentConfig) {
 function readEnvLevel() {
   const env = getEnv("LOG_LEVEL")?.toLowerCase();
   let level = env === "trace" || env === "debug" || env === "info" || env === "warn" || env === "error" || env === "silent" ? env : "info";
-  const debugEnv = getEnv("DEBUG");
-  if (debugEnv && LOG_LEVEL_PRIORITY[level] > LOG_LEVEL_PRIORITY.debug) {
+  if (getEnv("DEBUG") && LOG_LEVEL_PRIORITY[level] > LOG_LEVEL_PRIORITY.debug)
     level = "debug";
-  }
   return level;
 }
 function readEnvLevelForNamespace(namespace) {
   const env = getEnv("LOG_LEVEL")?.toLowerCase();
   const baseLevel = env === "trace" || env === "debug" || env === "info" || env === "warn" || env === "error" || env === "silent" ? env : "info";
-  const debugEnv = getEnv("DEBUG");
-  if (debugEnv && LOG_LEVEL_PRIORITY[baseLevel] > LOG_LEVEL_PRIORITY.debug) {
+  if (getEnv("DEBUG") && LOG_LEVEL_PRIORITY[baseLevel] > LOG_LEVEL_PRIORITY.debug) {
     const nsFilter = readEnvNs();
-    if (nsFilter && nsFilter(namespace)) {
+    if (nsFilter && nsFilter(namespace))
       return "debug";
-    }
     return baseLevel;
   }
   return baseLevel;
@@ -739,8 +671,7 @@ function readEnvNs() {
   const debugEnv = getEnv("DEBUG");
   if (!debugEnv)
     return null;
-  const parts = debugEnv.split(",").map((s) => s.trim());
-  return parseNsFilter(parts);
+  return parseNsFilter(debugEnv.split(",").map((s) => s.trim()));
 }
 function readEnvFormat() {
   const envFormat = getEnv("LOG_FORMAT")?.toLowerCase();
@@ -757,134 +688,25 @@ function readEnvFormat() {
 function readEnvTrace() {
   const traceEnv = getEnv("TRACE");
   if (!traceEnv)
-    return { enabled: false, filter: null };
+    return {
+      enabled: false,
+      filter: null
+    };
   if (traceEnv === "1" || traceEnv === "true")
-    return { enabled: true, filter: null };
+    return {
+      enabled: true,
+      filter: null
+    };
   const prefixes = traceEnv.split(",").map((s) => s.trim());
   return {
     enabled: true,
     filter: (namespace) => {
-      for (const prefix of prefixes) {
+      for (const prefix of prefixes)
         if (matchesPattern(namespace, prefix))
           return true;
-      }
       return false;
     }
   };
-}
-
-// ../loggily/src/metrics.ts
-function percentile(sorted, p) {
-  if (sorted.length === 0)
-    return 0;
-  const idx = Math.min(Math.floor(sorted.length * p), sorted.length - 1);
-  return sorted[idx];
-}
-function computeStats(durations) {
-  const sorted = [...durations].sort((a, b) => a - b);
-  const total = sorted.reduce((sum, d) => sum + d, 0);
-  return {
-    count: sorted.length,
-    min: sorted[0] ?? 0,
-    max: sorted[sorted.length - 1] ?? 0,
-    mean: sorted.length > 0 ? total / sorted.length : 0,
-    p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    p99: percentile(sorted, 0.99),
-    total
-  };
-}
-function createMetricsCollector(maxEntries = 1000) {
-  const store = new Map;
-  return {
-    recordSpan(data) {
-      let arr = store.get(data.name);
-      if (!arr) {
-        arr = [];
-        store.set(data.name, arr);
-      }
-      arr.push(data.durationMs);
-      if (arr.length > maxEntries)
-        arr.shift();
-    },
-    stats(name) {
-      const arr = store.get(name);
-      if (!arr || arr.length === 0)
-        return;
-      return computeStats(arr);
-    },
-    all() {
-      const result = new Map;
-      for (const [name, durations] of store) {
-        if (durations.length > 0)
-          result.set(name, computeStats(durations));
-      }
-      return result;
-    },
-    summary() {
-      const entries = [...this.all().entries()];
-      if (entries.length === 0)
-        return "(no span data)";
-      const lines = entries.map(([name, s]) => `${name}: ${s.count} spans, mean=${s.mean.toFixed(1)}ms, p50=${s.p50.toFixed(1)}ms, p95=${s.p95.toFixed(1)}ms, p99=${s.p99.toFixed(1)}ms`);
-      return lines.join(`
-`);
-    },
-    reset() {
-      store.clear();
-    }
-  };
-}
-function withMetrics(collector) {
-  return (logger) => {
-    return new Proxy(logger, {
-      get(target, prop) {
-        if (prop === "metrics") {
-          return collector;
-        }
-        if (prop === "span") {
-          const originalSpan = target.span;
-          if (!originalSpan)
-            return;
-          return (namespace, props) => {
-            const span = originalSpan.call(target, namespace, props);
-            const originalDispose = span[Symbol.dispose];
-            span[Symbol.dispose] = () => {
-              originalDispose.call(span);
-              if (span.spanData?.duration != null) {
-                collector.recordSpan({
-                  name: span.name,
-                  durationMs: span.spanData.duration
-                });
-              }
-            };
-            return span;
-          };
-        }
-        if (prop === "child") {
-          return (namespaceOrContext, childProps) => {
-            const child = target.child(namespaceOrContext, childProps);
-            return withMetrics(collector)(child);
-          };
-        }
-        if (prop === "logger") {
-          return (namespace, childProps) => {
-            const child = target.logger(namespace, childProps);
-            return withMetrics(collector)(child);
-          };
-        }
-        return target[prop];
-      }
-    });
-  };
-}
-
-// ../loggily/src/core.ts
-var SPAN_ENABLED = Symbol("loggily.spanEnabled");
-function spanIsEnabled(logger, namespace) {
-  if (collectSpans)
-    return true;
-  const checker = logger[SPAN_ENABLED];
-  return checker ? checker(namespace) : true;
 }
 var _getContextTags = null;
 var _getContextParent = null;
@@ -901,15 +723,13 @@ function createSpanDataProxy(getFields, attrs) {
   ]);
   return new Proxy(attrs, {
     get(_target, prop) {
-      if (READONLY_KEYS.has(prop)) {
+      if (READONLY_KEYS.has(prop))
         return getFields()[prop];
-      }
       return attrs[prop];
     },
     set(_target, prop, value) {
-      if (READONLY_KEYS.has(prop)) {
+      if (READONLY_KEYS.has(prop))
         return false;
-      }
       attrs[prop] = value;
       return true;
     }
@@ -924,7 +744,6 @@ function createLoggerImpl(name, props, pipeline) {
   const emitLog = (level, msgOrError, dataOrMsg, extraData) => {
     let message;
     let data;
-    const userArgs = [];
     if (msgOrError instanceof Error) {
       const err = msgOrError;
       const contextTags = _getContextTags?.() ?? {};
@@ -952,9 +771,6 @@ function createLoggerImpl(name, props, pipeline) {
           error_cause: err.cause !== undefined ? serializeCause(err.cause) : undefined
         };
       }
-      userArgs.push(err);
-      if (data && Object.keys(data).length > 0)
-        userArgs.push(data);
     } else {
       message = resolveMessage(msgOrError);
       const contextTags = _getContextTags?.();
@@ -962,9 +778,10 @@ function createLoggerImpl(name, props, pipeline) {
         ...contextTags,
         ...props,
         ...dataOrMsg
-      } : Object.keys(props).length > 0 || dataOrMsg ? { ...props, ...dataOrMsg } : undefined;
-      if (data && Object.keys(data).length > 0)
-        userArgs.push(data);
+      } : Object.keys(props).length > 0 || dataOrMsg ? {
+        ...props,
+        ...dataOrMsg
+      } : undefined;
     }
     const event = {
       kind: "log",
@@ -972,19 +789,15 @@ function createLoggerImpl(name, props, pipeline) {
       namespace: name,
       level,
       message,
-      props: data,
-      userArgs
+      props: data
     };
     pipeline.dispatch(event);
   };
-  const logger = {
+  return {
     name,
     props: Object.freeze({ ...props }),
     get level() {
       return pipeline.level;
-    },
-    [SPAN_ENABLED](namespace) {
-      return pipeline.spanEnabled(namespace);
     },
     dispatch(event) {
       pipeline.dispatch(event);
@@ -1004,34 +817,33 @@ function createLoggerImpl(name, props, pipeline) {
       throw new Error("loggily: span() requires the withSpans() plugin. Use pipe(baseCreateLogger, withSpans()) or the default createLogger.");
     },
     child(namespaceOrContext, childProps) {
-      if (typeof namespaceOrContext === "string") {
-        const childName = namespaceOrContext ? `${name}:${namespaceOrContext}` : name;
-        const mergedProps = { ...props, ...childProps };
-        return wrapConditional(createLoggerImpl(childName, mergedProps, pipeline), () => pipeline.level);
-      }
-      return wrapConditional(createLoggerImpl(name, { ...props, ...namespaceOrContext }, pipeline), () => pipeline.level);
+      if (typeof namespaceOrContext === "string")
+        return wrapConditional(createLoggerImpl(namespaceOrContext ? `${name}:${namespaceOrContext}` : name, {
+          ...props,
+          ...childProps
+        }, pipeline), () => pipeline.level);
+      return wrapConditional(createLoggerImpl(name, {
+        ...props,
+        ...namespaceOrContext
+      }, pipeline), () => pipeline.level);
     },
     end() {}
   };
-  return logger;
 }
 function wrapConditional(logger, getLevel) {
-  return new Proxy(logger, {
-    get(target, prop) {
-      if (typeof prop === "string" && prop in LOG_LEVEL_PRIORITY && prop !== "silent") {
-        if (LOG_LEVEL_PRIORITY[prop] < LOG_LEVEL_PRIORITY[getLevel()]) {
-          return;
-        }
-      }
-      if (prop === "span") {
-        const val = target[prop];
-        if (val === baseSpanStub)
-          return;
-        return val;
-      }
-      return target[prop];
+  return new Proxy(logger, { get(target, prop) {
+    if (typeof prop === "string" && prop in LOG_LEVEL_PRIORITY && prop !== "silent") {
+      if (LOG_LEVEL_PRIORITY[prop] < LOG_LEVEL_PRIORITY[getLevel()])
+        return;
     }
-  });
+    if (prop === "span") {
+      const val = target[prop];
+      if (val === baseSpanStub)
+        return;
+      return val;
+    }
+    return target[prop];
+  } });
 }
 var baseSpanStub = function baseSpanStub2(_namespace, _childProps) {
   throw new Error("loggily: span() requires the withSpans() plugin. Use pipe(baseCreateLogger, withSpans()) or the default createLogger.");
@@ -1039,40 +851,38 @@ var baseSpanStub = function baseSpanStub2(_namespace, _childProps) {
 function withSpans() {
   return (factory, _ctx) => {
     return (name, configOrProps) => {
-      const logger = factory(name, configOrProps);
-      return augmentWithSpans(logger, null, null, true);
+      return augmentWithSpans(factory(name, configOrProps), null, null, true);
     };
   };
 }
 function augmentWithSpans(logger, parentSpanId, traceId, traceSampled) {
-  const spanState = { parentSpanId, traceId, traceSampled };
-  const spanMethod = spanIsEnabled(logger, logger.name) ? createSpanMethod(logger, spanState) : undefined;
-  return new Proxy(logger, {
-    get(target, prop) {
-      if (prop === "span") {
-        return spanMethod;
-      }
-      if (prop === "child") {
-        return function child(namespaceOrContext, childProps) {
-          const childLogger = target.child(namespaceOrContext, childProps);
-          return augmentWithSpans(childLogger, spanState.parentSpanId, spanState.traceId, spanState.traceSampled);
-        };
-      }
-      if (prop === "logger") {
-        return function logger2(namespace, childProps) {
-          const childLogger = target.logger(namespace, childProps);
-          return augmentWithSpans(childLogger, spanState.parentSpanId, spanState.traceId, spanState.traceSampled);
-        };
-      }
-      return target[prop];
-    }
-  });
+  const spanState = {
+    parentSpanId,
+    traceId,
+    traceSampled
+  };
+  return new Proxy(logger, { get(target, prop) {
+    if (prop === "span")
+      return createSpanMethod(target, spanState);
+    if (prop === "child")
+      return function child(namespaceOrContext, childProps) {
+        return augmentWithSpans(target.child(namespaceOrContext, childProps), spanState.parentSpanId, spanState.traceId, spanState.traceSampled);
+      };
+    if (prop === "logger")
+      return function logger2(namespace, childProps) {
+        return augmentWithSpans(target.logger(namespace, childProps), spanState.parentSpanId, spanState.traceId, spanState.traceSampled);
+      };
+    return target[prop];
+  } });
 }
 function createSpanMethod(logger, spanState) {
   return (namespace, childProps) => {
     const childName = namespace ? `${logger.name}:${namespace}` : logger.name;
     const resolvedChildProps = typeof childProps === "function" ? childProps() : childProps;
-    const mergedProps = { ...logger.props, ...resolvedChildProps };
+    const mergedProps = {
+      ...logger.props,
+      ...resolvedChildProps
+    };
     const newSpanId = generateSpanId();
     let resolvedParentId = spanState.parentSpanId;
     let resolvedTraceId = spanState.traceId;
@@ -1093,18 +903,16 @@ function createSpanMethod(logger, spanState) {
       startTime: Date.now(),
       endTime: null,
       duration: null,
-      attrs: {},
-      laps: []
+      attrs: {}
     };
-    const childLogger = logger.child(namespace ?? "", resolvedChildProps);
-    const spanAugmented = augmentWithSpans(childLogger, newSpanId, finalTraceId, sampled);
+    const spanAugmented = augmentWithSpans(logger.child(namespace ?? "", resolvedChildProps), newSpanId, finalTraceId, sampled);
     _enterContext?.(newSpanId, finalTraceId, resolvedParentId);
     const disposeSpan = () => {
       if (newSpanData.endTime !== null)
         return;
       newSpanData.endTime = Date.now();
       newSpanData.duration = newSpanData.endTime - newSpanData.startTime;
-      if (collectSpans) {
+      if (collectSpans)
         collectedSpans.push(createSpanDataProxy(() => ({
           id: newSpanData.id,
           traceId: newSpanData.traceId,
@@ -1113,10 +921,8 @@ function createSpanMethod(logger, spanState) {
           endTime: newSpanData.endTime,
           duration: newSpanData.duration
         }), { ...newSpanData.attrs }));
-      }
       _exitContext?.(newSpanId);
       if (sampled) {
-        const lapsProp = newSpanData.laps.length > 0 ? Object.fromEntries(newSpanData.laps.map((l) => [l.name, l.deltaMs])) : undefined;
         const spanEvent = {
           kind: "span",
           time: newSpanData.endTime,
@@ -1125,8 +931,7 @@ function createSpanMethod(logger, spanState) {
           duration: newSpanData.duration,
           props: {
             ...mergedProps,
-            ...newSpanData.attrs,
-            ...lapsProp ? { laps: lapsProp } : {}
+            ...newSpanData.attrs
           },
           spanId: newSpanData.id,
           traceId: newSpanData.traceId,
@@ -1134,13 +939,6 @@ function createSpanMethod(logger, spanState) {
         };
         logger.dispatch(spanEvent);
       }
-    };
-    const lapImpl = (name) => {
-      const now = Date.now();
-      const elapsedMs = now - newSpanData.startTime;
-      const lastLap = newSpanData.laps[newSpanData.laps.length - 1];
-      const deltaMs = lastLap ? elapsedMs - lastLap.elapsedMs : elapsedMs;
-      newSpanData.laps.push({ name, elapsedMs, deltaMs });
     };
     const spanDataProxy = createSpanDataProxy(() => ({
       id: newSpanData.id,
@@ -1151,21 +949,17 @@ function createSpanMethod(logger, spanState) {
       duration: newSpanData.endTime !== null ? newSpanData.endTime - newSpanData.startTime : Date.now() - newSpanData.startTime
     }), newSpanData.attrs);
     let currentDispose = disposeSpan;
-    const spanLogger = new Proxy(spanAugmented, {
+    return new Proxy(spanAugmented, {
       get(target, prop) {
         if (prop === "spanData")
           return spanDataProxy;
         if (prop === Symbol.dispose)
           return currentDispose;
-        if (prop === "end") {
+        if (prop === "end")
           return () => {
-            if (newSpanData.endTime === null) {
+            if (newSpanData.endTime === null)
               currentDispose();
-            }
           };
-        }
-        if (prop === "lap")
-          return lapImpl;
         if (prop === "name")
           return childName;
         if (prop === "props")
@@ -1180,20 +974,18 @@ function createSpanMethod(logger, spanState) {
         return false;
       }
     });
-    return spanLogger;
   };
 }
 function baseCreateLogger(name, configOrProps) {
   let pipeline;
   let props = {};
-  if (Array.isArray(configOrProps)) {
+  if (Array.isArray(configOrProps))
     pipeline = buildPipeline(configOrProps);
-  } else if (configOrProps && typeof configOrProps === "object") {
+  else if (configOrProps && typeof configOrProps === "object") {
     props = configOrProps;
     pipeline = buildPipeline(["console"]);
-  } else {
+  } else
     pipeline = buildPipeline(["console"]);
-  }
   const logger = createLoggerImpl(name, props, pipeline);
   logger.span = baseSpanStub;
   return wrapConditional(logger, () => pipeline.level);
@@ -1202,8 +994,7 @@ function pipe(base, ...plugins) {
   const ctx = {};
   return plugins.reduce((factory, plugin) => plugin(factory, ctx), base);
 }
-var _process3 = typeof process !== "undefined" ? process : undefined;
-var _env = _process3?.env ?? {};
+var _env = (typeof process !== "undefined" ? process : undefined)?.env ?? {};
 function currentLevel() {
   return readEnvLevel();
 }
@@ -1225,15 +1016,13 @@ function _setLogFileWriterFactory(factory) {
 function withEnvDefaults() {
   return (factory, _ctx) => (name, configOrProps) => {
     const envIdFormat = _env.TRACE_ID_FORMAT?.toLowerCase();
-    if (envIdFormat === "simple" || envIdFormat === "w3c") {
+    if (envIdFormat === "simple" || envIdFormat === "w3c")
       setIdFormat(envIdFormat);
-    }
     const envSampleRate = _env.TRACE_SAMPLE_RATE;
     if (envSampleRate !== undefined) {
       const rate = Number.parseFloat(envSampleRate);
-      if (!Number.isNaN(rate) && rate >= 0 && rate <= 1) {
+      if (!Number.isNaN(rate) && rate >= 0 && rate <= 1)
         setSampleRate(rate);
-      }
     }
     if (Array.isArray(configOrProps))
       return factory(name, configOrProps);
@@ -1242,40 +1031,20 @@ function withEnvDefaults() {
       envPipeline.dispatch(event);
       return null;
     };
-    if (configOrProps && typeof configOrProps === "object") {
-      const logger = factory(name, [{ level: "trace" }, envStage]);
-      return applyNamespaceGating(logger.child(configOrProps));
-    }
+    if (configOrProps && typeof configOrProps === "object")
+      return applyNamespaceGating(factory(name, [{ level: "trace" }, envStage]).child(configOrProps));
     return applyNamespaceGating(factory(name, [{ level: "trace" }, envStage]));
   };
 }
 function applyNamespaceGating(logger) {
-  return new Proxy(logger, {
-    get(target, prop) {
-      if (prop === SPAN_ENABLED) {
-        return (namespace) => {
-          if (collectSpans)
-            return true;
-          const trace = currentTrace();
-          if (!trace.enabled)
-            return false;
-          if (trace.filter && !trace.filter(namespace))
-            return false;
-          const ns = currentNs();
-          if (ns && !ns(namespace))
-            return false;
-          return true;
-        };
-      }
-      if (typeof prop === "string" && prop in LOG_LEVEL_PRIORITY && prop !== "silent") {
-        const nsLevel = readEnvLevelForNamespace(target.name);
-        if (LOG_LEVEL_PRIORITY[prop] < LOG_LEVEL_PRIORITY[nsLevel]) {
-          return;
-        }
-      }
-      return target[prop];
+  return new Proxy(logger, { get(target, prop) {
+    if (typeof prop === "string" && prop in LOG_LEVEL_PRIORITY && prop !== "silent") {
+      const nsLevel = readEnvLevelForNamespace(target.name);
+      if (LOG_LEVEL_PRIORITY[prop] < LOG_LEVEL_PRIORITY[nsLevel])
+        return;
     }
-  });
+    return target[prop];
+  } });
 }
 function createEnvPipeline() {
   const disposables = [];
@@ -1302,29 +1071,16 @@ function createEnvPipeline() {
     const ns = currentNs();
     if (ns && !ns(event.namespace))
       return;
-    const format = currentFormat();
-    const formatter = format === "json" ? formatJSONEvent : formatConsoleEvent;
-    const text = formatter(event);
+    const text = (currentFormat() === "json" ? formatJSONEvent : formatConsoleEvent)(event);
     const lvl = event.kind === "log" ? event.level : "span";
     for (const w of _writers)
-      w(text, lvl, event.namespace, event);
+      w(text, lvl);
     if (!_suppressConsole)
-      createConsoleSink(format)(event);
+      writeToConsole(text, event);
     fileSink?.(event);
   };
   return {
     dispatch,
-    spanEnabled(namespace) {
-      const trace = currentTrace();
-      if (!trace.enabled)
-        return false;
-      if (trace.filter && !trace.filter(namespace))
-        return false;
-      const ns = currentNs();
-      if (ns && !ns(namespace))
-        return false;
-      return true;
-    },
     get level() {
       return currentLevel();
     },
@@ -1340,11 +1096,9 @@ function withConfigMetrics() {
       const logger = factory(name, configOrProps);
       if (!Array.isArray(configOrProps))
         return logger;
-      const hasMetrics = configOrProps.some((el) => typeof el === "object" && el !== null && !Array.isArray(el) && ("metrics" in el) && el.metrics === true);
-      if (!hasMetrics)
+      if (!configOrProps.some((el) => typeof el === "object" && el !== null && !Array.isArray(el) && ("metrics" in el) && el.metrics === true))
         return logger;
-      const collector = createMetricsCollector();
-      return withMetrics(collector)(logger);
+      return withMetrics(createMetricsCollector())(logger);
     };
   };
 }
@@ -1352,7 +1106,8 @@ var createLogger = pipe(baseCreateLogger, withEnvDefaults(), withSpans(), withCo
 function setSuppressConsole(value) {
   _suppressConsole = value;
 }
-// ../loggily/src/index.ts
+
+// node_modules/.bun/loggily@0.8.0+e40b0dfdd726a224/node_modules/loggily/dist/index.mjs
 _setLogFileWriterFactory(createFileWriter);
 
 // packages/tribe-client/src/parser.ts
