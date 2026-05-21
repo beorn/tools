@@ -31,7 +31,11 @@ import { existsSync } from "node:fs"
 import { writeFileSync } from "node:fs"
 import { resolve, dirname, basename } from "node:path"
 
-async function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string } = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolveP) => {
     const proc = spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] })
     let stdout = ""
@@ -88,14 +92,18 @@ async function main() {
     else tracked.push(path)
   }
 
-  console.log(`[chief-cleanup-slot] tracked-modified=${tracked.length} submodule-pointer-drift=${submodules.length} untracked=${untracked.length}`)
+  console.log(
+    `[chief-cleanup-slot] tracked-modified=${tracked.length} submodule-pointer-drift=${submodules.length} untracked=${untracked.length}`,
+  )
 
   // 2. Restore tracked files via git show <ref>:<path> > <path>
   let restored = 0
   for (const path of tracked) {
     const show = await run("git", ["show", `${target}:${path}`], { cwd: slotPath })
     if (show.exitCode !== 0) {
-      console.warn(`[chief-cleanup-slot] could not restore ${path} (file may be deleted in target): ${show.stderr.trim()}`)
+      console.warn(
+        `[chief-cleanup-slot] could not restore ${path} (file may be deleted in target): ${show.stderr.trim()}`,
+      )
       continue
     }
     writeFileSync(`${slotPath}/${path}`, show.stdout)
@@ -121,7 +129,12 @@ async function main() {
   const finalStatus = (await run("git", ["status", "--short"], { cwd: slotPath })).stdout.trim()
   if (finalStatus) {
     console.log(`\n[chief-cleanup-slot] remaining state:`)
-    console.log(finalStatus.split("\n").map((l) => `  ${l}`).join("\n"))
+    console.log(
+      finalStatus
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n"),
+    )
   } else {
     console.log(`\n[chief-cleanup-slot] DONE. Slot is clean.`)
   }

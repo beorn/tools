@@ -17,7 +17,7 @@ Heap-only profilers (Node `process.memoryUsage`, Bun `--inspect`) cannot see
 bytes that have already left the process via stdout. When a TUI bun process
 runs under a pty parent — `cmux`, `tmux`, an iTerm/Ghostty pane, or
 `claude-code`'s integrated terminal — a leaky write loop or runaway
-error-handler inflates the *parent*'s scrollback buffer. The bun process's
+error-handler inflates the _parent_'s scrollback buffer. The bun process's
 own heap looks healthy throughout, and macOS OOM-kills the pty parent (with
 the largest resident set), not the script that caused the growth.
 
@@ -54,16 +54,16 @@ when the target process is gone.
 
 ### Options
 
-| Flag                          | Default                  | Meaning                                                  |
-| ----------------------------- | ------------------------ | -------------------------------------------------------- |
-| `--threshold-rss-mb N`        | 4096                     | Trip when target RSS exceeds N MB                        |
-| `--threshold-parent-rss-mb N` | 8192                     | Trip when parent RSS exceeds N MB                        |
-| `--snapshot-dir DIR`          | `/tmp`                   | Write snapshot summary files here                        |
-| `--allow-kill-parent`         | off                      | Also send SIGINT to parent on parent-threshold trip      |
-| `--interval-sec N`            | 10                       | Sample interval (seconds)                                |
-| `--log-path PATH`             | `/tmp/memwatch-<pid>.log` | Rotating log file                                        |
-| `--max-log-bytes N`           | 10 MB                    | Rotate when log exceeds N bytes (one `.1` backup kept)   |
-| `--panic-cooldown-sec N`      | 60                       | Suppress repeat panics for N seconds after a trip        |
+| Flag                          | Default                   | Meaning                                                |
+| ----------------------------- | ------------------------- | ------------------------------------------------------ |
+| `--threshold-rss-mb N`        | 4096                      | Trip when target RSS exceeds N MB                      |
+| `--threshold-parent-rss-mb N` | 8192                      | Trip when parent RSS exceeds N MB                      |
+| `--snapshot-dir DIR`          | `/tmp`                    | Write snapshot summary files here                      |
+| `--allow-kill-parent`         | off                       | Also send SIGINT to parent on parent-threshold trip    |
+| `--interval-sec N`            | 10                        | Sample interval (seconds)                              |
+| `--log-path PATH`             | `/tmp/memwatch-<pid>.log` | Rotating log file                                      |
+| `--max-log-bytes N`           | 10 MB                     | Rotate when log exceeds N bytes (one `.1` backup kept) |
+| `--panic-cooldown-sec N`      | 60                        | Suppress repeat panics for N seconds after a trip      |
 
 ### What happens on a trip
 
@@ -111,13 +111,13 @@ memwatch is independent of the other layers and can ship standalone.
 
 ## Other tools
 
-| Tool             | Description                                                 | Entry Point                |
-| ---------------- | ----------------------------------------------------------- | -------------------------- |
-| `memwatch`       | External RSS watchdog for a target pid + parent             | `bun tools/memwatch.ts`    |
-| `refactor`       | Batch rename, replace, API migration                        | `bun tools/refactor.ts`    |
-| `llm`            | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`         |
-| `recall`         | Session history search, LLM synthesis                       | `bun tools/recall.ts`      |
-| `worktree`       | Git worktree management with submodules                     | `bun tools/worktree.ts`    |
-| `qmd-watchdog`   | Supervise `qmd embed` runs — RSS ceiling, no-progress timer | `bun tools/qmd-watchdog.ts`|
+| Tool           | Description                                                 | Entry Point                 |
+| -------------- | ----------------------------------------------------------- | --------------------------- |
+| `memwatch`     | External RSS watchdog for a target pid + parent             | `bun tools/memwatch.ts`     |
+| `refactor`     | Batch rename, replace, API migration                        | `bun tools/refactor.ts`     |
+| `llm`          | Multi-LLM research, consensus, deep research                | `bun tools/llm.ts`          |
+| `recall`       | Session history search, LLM synthesis                       | `bun tools/recall.ts`       |
+| `worktree`     | Git worktree management with submodules                     | `bun tools/worktree.ts`     |
+| `qmd-watchdog` | Supervise `qmd embed` runs — RSS ceiling, no-progress timer | `bun tools/qmd-watchdog.ts` |
 
 See the parent README and `CLAUDE.md` for the tribe + plugin packages.

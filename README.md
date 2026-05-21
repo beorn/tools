@@ -49,10 +49,10 @@ Some directories under `plugins/` are **internal-only** — libraries or folded-
 installable Claude Code plugins. They have no `.claude-plugin/plugin.json` and are intentionally
 absent from `marketplace.json`:
 
-| Directory                    | Status                                                                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| `plugins/injection-envelope` | Internal library (`@bearly/injection-envelope`, `private`) — prompt-injection defense   |
-| `plugins/shared-mcp`         | Internal library (`@bearly/shared-mcp`, `private`) — shared MCP wire used by tribe etc. |
+| Directory                    | Status                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `plugins/injection-envelope` | Internal library (`@bearly/injection-envelope`, `private`) — prompt-injection defense             |
+| `plugins/shared-mcp`         | Internal library (`@bearly/shared-mcp`, `private`) — shared MCP wire used by tribe etc.           |
 | `plugins/tty`                | Retired — terminal-testing MCP folded into `termless mcp` (`@termless/cli`); no longer ships here |
 
 ## CLI Tools

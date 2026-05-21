@@ -2,7 +2,11 @@
 description: "5 Whys root cause analysis + /big reframing. Use when the same area keeps breaking, when a fix feels like it's treating symptoms, or when you want to understand WHY a problem exists — not just how to fix it."
 argument-hint: [problem or symptom]
 benefits-from: [recall, pm]
-escalate-to: {arch: "root cause is structural — missing invariant or wrong ownership", render: "root cause is in the rendering pipeline"}
+escalate-to:
+  {
+    arch: "root cause is structural — missing invariant or wrong ownership",
+    render: "root cause is in the rendering pipeline",
+  }
 ---
 
 # Why — 5 Whys Root Cause Analysis
@@ -95,13 +99,13 @@ Read it aloud. Does it make logical sense? Does each "because" follow from the p
 
 Each "why" suggests a fix at a different level. Map them:
 
-| Level | Fix | Type | Solves |
-|---|---|---|---|
-| Why 1 | [Narrow fix — patch the direct cause] | PATCH | This instance only |
-| Why 2 | [Guard — prevent the enabling condition] | GUARD | This class of bug |
-| Why 3 | [Redesign — change the abstraction] | REDESIGN | Related problems too |
-| Why 4 | [Spec — define the missing rules] | SPEC | Future problems |
-| Why 5 | [Architecture — structural change] | ARCHITECTURE | Entire category |
+| Level | Fix                                      | Type         | Solves               |
+| ----- | ---------------------------------------- | ------------ | -------------------- |
+| Why 1 | [Narrow fix — patch the direct cause]    | PATCH        | This instance only   |
+| Why 2 | [Guard — prevent the enabling condition] | GUARD        | This class of bug    |
+| Why 3 | [Redesign — change the abstraction]      | REDESIGN     | Related problems too |
+| Why 4 | [Spec — define the missing rules]        | SPEC         | Future problems      |
+| Why 5 | [Architecture — structural change]       | ARCHITECTURE | Entire category      |
 
 **The deeper you fix, the more problems you prevent — but the more effort it takes.**
 
@@ -110,16 +114,19 @@ Each "why" suggests a fix at a different level. Map them:
 Run `/big` Phase 8 (Action Plan) on the fix levels:
 
 ### Doing now:
+
 - Ship the **Why 1 fix** (PATCH) — the user needs this today
 - Create issues for Why 3+ fixes with a great first-paragraph description: 1-3 sentences (50-400 chars) saying WHAT this deeper-fix issue is + WHY it matters (the root cause it addresses, the class of bugs it prevents). That's what an issue tracker's quick-list view surfaces; the full causal chain goes in the body below.
 
 ### Need your call:
+
 - Present Why 3-5 fixes with effort estimates
 - Recommend which level to fix at based on: how often this area breaks, how much effort, how many related problems it solves
 
 ### Bring in Outside Perspective
 
 If the root cause is architectural (Why 4-5), consult an external LLM:
+
 ```bash
 bun llm --deep -y --no-recover --context-file /tmp/why-context.md "Given this causal chain, what's the right level to fix at?"
 ```
@@ -129,6 +136,7 @@ bun llm --deep -y --no-recover --context-file /tmp/why-context.md "Given this ca
 When the causal chain has **multiple contributing causes** at the same level (not a single chain but a convergence), draw an Ishikawa diagram. This is common for systemic issues where several factors combine.
 
 Categories (adapt to the problem):
+
 - **Code** — bugs, missing abstractions, wrong patterns
 - **Process** — missing tests, no review, no spec
 - **Tools** — inadequate tooling, wrong tool for the job
@@ -184,11 +192,11 @@ Why 5: Write outliner spec, derive all guards from it         → SPEC (2-3 days
 
 ## Anti-Patterns
 
-| Don't | Why |
-|---|---|
-| Guess at causes without reading code | Each "why" must have EVIDENCE |
-| Stop at Why 1 | That's just the narrow fix — the value is deeper |
-| Force exactly 5 levels | Stop when you hit bedrock, go past 5 if there's more |
-| Skip the causal chain paragraph | Writing it reveals logical gaps |
-| Only ship the deep fix | Ship the PATCH now, bead the deeper fixes |
-| Do /why without a specific symptom | It needs a concrete starting point |
+| Don't                                | Why                                                  |
+| ------------------------------------ | ---------------------------------------------------- |
+| Guess at causes without reading code | Each "why" must have EVIDENCE                        |
+| Stop at Why 1                        | That's just the narrow fix — the value is deeper     |
+| Force exactly 5 levels               | Stop when you hit bedrock, go past 5 if there's more |
+| Skip the causal chain paragraph      | Writing it reveals logical gaps                      |
+| Only ship the deep fix               | Ship the PATCH now, bead the deeper fixes            |
+| Do /why without a specific symptom   | It needs a concrete starting point                   |

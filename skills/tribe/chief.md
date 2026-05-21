@@ -5,13 +5,13 @@ Your job is routing work, tracking progress, detecting problems, and keeping the
 
 ## Tools
 
-| Tool              | Use                                                         |
-| ----------------- | ----------------------------------------------------------- |
-| `tribe.send`      | Message a specific member or all (`to: "*"`)                |
-| `tribe.fetch`     | Drain pending messages / view history                       |
-| `tribe.members`   | See who's online, their roles and domains                   |
-| `tribe.filter`    | Set subscription filter (topics, mute)                      |
-| `tribe.join`      | Re-announce name/role/domains                               |
+| Tool            | Use                                          |
+| --------------- | -------------------------------------------- |
+| `tribe.send`    | Message a specific member or all (`to: "*"`) |
+| `tribe.fetch`   | Drain pending messages / view history        |
+| `tribe.members` | See who's online, their roles and domains    |
+| `tribe.filter`  | Set subscription filter (topics, mute)       |
+| `tribe.join`    | Re-announce name/role/domains                |
 
 ## Routing & Delegation
 

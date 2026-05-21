@@ -2,7 +2,8 @@
 description: "META-PROTOCOL for reframing the problem (10-20 hypotheses, 2 rounds, find the design where the bug can't happen). Calls /pro or /deep internally — not itself an LLM tool. Use when the fix feels like a patch or the same area keeps breaking. Subsumes /fresh."
 argument-hint: [problem or area]
 benefits-from: [recall, pm, gbrain]
-escalate-to: {arch: "reframing reveals missing abstraction or layer", render: "root cause is in the rendering pipeline design"}
+escalate-to:
+  { arch: "reframing reveals missing abstraction or layer", render: "root cause is in the rendering pipeline design" }
 ---
 
 # Think Big — What If This Problem Didn't Need to Exist?
@@ -35,28 +36,29 @@ The counterfactual (#5) is the most important. It points toward the real fix.
 
 ## Phase 2: Generate Hypotheses (Round 1)
 
-Generate **10-20 hypotheses** — not solutions, but *framings*. Each hypothesis proposes a different root cause or a different way to eliminate the problem entirely.
+Generate **10-20 hypotheses** — not solutions, but _framings_. Each hypothesis proposes a different root cause or a different way to eliminate the problem entirely.
 
 Categories to force breadth:
 
-| Category | Question | Example hypothesis |
-|---|---|---|
-| **Missing abstraction** | What concept should exist but doesn't? | "There should be a CursorScope that guarantees valid cursor at all times" |
-| **Wrong ownership** | Who owns this state? Should someone else? | "The view owns cursor state but the model should — then undo gets it free" |
-| **Missing invariant** | What rule is enforced by convention but should be enforced by code? | "Node parent_id validity is checked at render time but should be checked at mutation time" |
-| **Unnecessary complexity** | What if this entire subsystem didn't exist? | "If cards auto-expanded during edit, the expand-on-edit bug can't exist" |
-| **Wrong layer** | Is this logic in the right place? | "This is a view concern solved in the model — move it to the view" |
-| **Prior art** | How do VS Code / Obsidian / Notion / Asana handle this? | "Notion doesn't have this problem because editing is always inline, never modal" |
-| **Inverse** | What if we did the opposite of what we're doing? | "Instead of detecting edit mode and special-casing, make edit mode the default" |
-| **Composition** | Can two simpler things replace one complex thing? | "Split the monolithic action handler into keyboard-layer + mutation-layer" |
-| **Deletion** | What if we deleted this code entirely? | "The [error] fallback exists because we handle missing nodes — what if we didn't allow missing nodes?" |
-| **Unification** | Are there 2-3 similar mechanisms that should be one? | "Card edit, sub-item edit, and title edit are 3 code paths — should be 1" |
+| Category                   | Question                                                            | Example hypothesis                                                                                     |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Missing abstraction**    | What concept should exist but doesn't?                              | "There should be a CursorScope that guarantees valid cursor at all times"                              |
+| **Wrong ownership**        | Who owns this state? Should someone else?                           | "The view owns cursor state but the model should — then undo gets it free"                             |
+| **Missing invariant**      | What rule is enforced by convention but should be enforced by code? | "Node parent_id validity is checked at render time but should be checked at mutation time"             |
+| **Unnecessary complexity** | What if this entire subsystem didn't exist?                         | "If cards auto-expanded during edit, the expand-on-edit bug can't exist"                               |
+| **Wrong layer**            | Is this logic in the right place?                                   | "This is a view concern solved in the model — move it to the view"                                     |
+| **Prior art**              | How do VS Code / Obsidian / Notion / Asana handle this?             | "Notion doesn't have this problem because editing is always inline, never modal"                       |
+| **Inverse**                | What if we did the opposite of what we're doing?                    | "Instead of detecting edit mode and special-casing, make edit mode the default"                        |
+| **Composition**            | Can two simpler things replace one complex thing?                   | "Split the monolithic action handler into keyboard-layer + mutation-layer"                             |
+| **Deletion**               | What if we deleted this code entirely?                              | "The [error] fallback exists because we handle missing nodes — what if we didn't allow missing nodes?" |
+| **Unification**            | Are there 2-3 similar mechanisms that should be one?                | "Card edit, sub-item edit, and title edit are 3 code paths — should be 1"                              |
 
 **Write all hypotheses as a numbered list before exploring any of them.** Breadth first, depth second.
 
 ## Phase 3: Explore (Round 1)
 
 For each hypothesis, spend 2-5 minutes:
+
 1. **Grep/read** the relevant code to check feasibility
 2. **Estimate blast radius** — how many files change? Is it additive or rewrite?
 3. **Score**: Does this solve just the immediate problem, or a whole class of problems?
@@ -67,21 +69,23 @@ Mark each: `NARROW` (fixes this bug only), `BROAD` (fixes a class), `REFRAME` (m
 
 Your own hypotheses have blind spots. **Always consult at least one external perspective** during exploration. Pick the right tool:
 
-| Tool | Best for | Cost |
-|---|---|---|
-| **`/pro "question"`** | "Is this design sound? What am I missing?" — 3-leg + judge with code context | ~$0.20 |
-| **`/ask "question"`** | Quick prior art — "how does VS Code handle X?" — single model | ~$0.02 |
-| **`/llm --deep`** | Research with web search + citations | ~$2-5 |
-| **`/csw`** | Compare 4+ approaches with decision matrix | Free (internal) |
-| **`bun recall "keywords"`** | Check if prior sessions already explored this | Free |
+| Tool                        | Best for                                                                     | Cost            |
+| --------------------------- | ---------------------------------------------------------------------------- | --------------- |
+| **`/pro "question"`**       | "Is this design sound? What am I missing?" — 3-leg + judge with code context | ~$0.20          |
+| **`/ask "question"`**       | Quick prior art — "how does VS Code handle X?" — single model                | ~$0.02          |
+| **`/llm --deep`**           | Research with web search + citations                                         | ~$2-5           |
+| **`/csw`**                  | Compare 4+ approaches with decision matrix                                   | Free (internal) |
+| **`bun recall "keywords"`** | Check if prior sessions already explored this                                | Free            |
 
 **How to ask well** (from `/fresh`):
+
 - Lead with **symptoms**, not diagnosis — let the LLM form its own model
 - Include **full source files**, not snippets — the LLM needs to see how functions interact
 - Ask **open discovery questions** ("What mechanism could cause X?"), not confirmation questions ("Is my fix correct?")
 - State **failed approaches last** — constrain the solution space without anchoring
 
 Build a context file with the relevant code, then:
+
 ```bash
 bun llm --deep -y --no-recover --context-file /tmp/big-context.md "What design would make [problem] impossible?"
 ```
@@ -89,6 +93,7 @@ bun llm --deep -y --no-recover --context-file /tmp/big-context.md "What design w
 ## Phase 4: Synthesize (Round 1)
 
 Write a 3-5 sentence synthesis:
+
 - Which hypotheses were `REFRAME` or `BROAD`?
 - What patterns do they share?
 - What new questions emerged?
@@ -145,12 +150,14 @@ Write the recommendation:
 Convert findings into concrete actions. Classify each by confidence:
 
 ### DO (obvious, low-risk — execute immediately)
+
 - Ship the narrow fix for the immediate bug
 - Create issues for reframes with a great first paragraph capturing the analysis: 1-3 sentences (50-400 chars) saying WHAT this issue is + WHY it matters — that's what an issue tracker's quick-list view surfaces. Make it scannable cold; full reframe detail (hypothesis exploration, alternatives considered) goes in body sections after the lead paragraph.
 - Delete dead code identified during exploration
 - Add missing invariants that are clearly correct
 
 ### ASK (significant, needs user approval — present and wait)
+
 - Architectural changes touching 3+ packages
 - Reframes that change public API or user-visible behavior
 - Changes that conflict with existing beads or in-progress work
@@ -164,11 +171,13 @@ Present each ASK item with: what, why, effort, and what you'd recommend.
 ## Actions
 
 ### Doing now:
+
 1. Fix [immediate bug] — [1 sentence]
 2. Create bead km-<scope>.<reframe> — [title] (P3, design captured)
 3. [any other obvious actions]
 
 ### Need your call:
+
 1. **[Change X]** — [why it's better]. Effort: [scope]. Recommend: [yes/no/defer].
 2. **[Change Y]** — [why]. Effort: [scope]. Recommend: [yes/no/defer].
 ```
@@ -179,13 +188,13 @@ Present each ASK item with: what, why, effort, and what you'd recommend.
 
 Both involve stepping back from implementation. The difference:
 
-| | `/big` | `/fresh` |
-|---|---|---|
-| **Trigger** | Proactive — before coding, when the fix feels wrong | Reactive — after 20+ min stuck, going in circles |
+|                   | `/big`                                                          | `/fresh`                                                          |
+| ----------------- | --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Trigger**       | Proactive — before coding, when the fix feels wrong             | Reactive — after 20+ min stuck, going in circles                  |
 | **Core activity** | Generate 10-20 hypotheses, 2 rounds, score NARROW/BROAD/REFRAME | Gather context (full files), structure question, ask external LLM |
-| **External LLM** | Required (Phase 3) | Required (Phase 4) |
-| **Output** | Action plan with DO/ASK items | LLM response + concrete plan |
-| **Best at** | Finding the design where the problem can't happen | Getting unstuck on a specific implementation problem |
+| **External LLM**  | Required (Phase 3)                                              | Required (Phase 4)                                                |
+| **Output**        | Action plan with DO/ASK items                                   | LLM response + concrete plan                                      |
+| **Best at**       | Finding the design where the problem can't happen               | Getting unstuck on a specific implementation problem              |
 
 **Use `/big` when the problem is the design. Use `/fresh` when the problem is you're stuck.** `/big` subsumes `/fresh` — if you're running `/big`, you don't also need `/fresh`.
 
@@ -199,14 +208,14 @@ Both involve stepping back from implementation. The difference:
 
 ## Anti-Patterns
 
-| Don't | Why |
-|---|---|
-| Jump to the first good hypothesis | You'll miss the reframe — explore all 10-20 |
-| Only generate "fix" hypotheses | Include deletion, inversion, and unification |
-| Skip the synthesis between rounds | Round 2 hypotheses should build on Round 1 learnings |
-| Propose a massive rewrite without a narrow fix | Ship the narrow fix, bead the reframe |
-| Think big without checking code | Hypotheses must be grounded — grep and read |
-| Stop at Round 1 | The best ideas come from Round 2, after you've learned what doesn't work |
+| Don't                                          | Why                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| Jump to the first good hypothesis              | You'll miss the reframe — explore all 10-20                              |
+| Only generate "fix" hypotheses                 | Include deletion, inversion, and unification                             |
+| Skip the synthesis between rounds              | Round 2 hypotheses should build on Round 1 learnings                     |
+| Propose a massive rewrite without a narrow fix | Ship the narrow fix, bead the reframe                                    |
+| Think big without checking code                | Hypotheses must be grounded — grep and read                              |
+| Stop at Round 1                                | The best ideas come from Round 2, after you've learned what doesn't work |
 
 ## Wave-loop fan-out (canonical: /bead-pickup JIT BCC)
 

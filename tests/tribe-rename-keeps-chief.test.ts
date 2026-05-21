@@ -21,7 +21,12 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest"
 
 import { createTribeContext, type TribeContext } from "../tools/lib/tribe/context.ts"
 import { createStatements, openDatabase } from "../tools/lib/tribe/database.ts"
-import { handleToolCall, TRIBE_COORD_METHODS, type ActiveSessionInfo, type HandlerOpts } from "../tools/lib/tribe/handlers.ts"
+import {
+  handleToolCall,
+  TRIBE_COORD_METHODS,
+  type ActiveSessionInfo,
+  type HandlerOpts,
+} from "../tools/lib/tribe/handlers.ts"
 import { deriveChiefId, deriveChiefInfo, type ChiefCandidate } from "../tools/lib/tribe/chief.ts"
 
 // ---------------------------------------------------------------------------

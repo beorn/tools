@@ -17,7 +17,12 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { createTribeContext } from "../tools/lib/tribe/context.ts"
 import { createStatements, openDatabase } from "../tools/lib/tribe/database.ts"
-import { handleToolCall, TRIBE_COORD_METHODS, type ActiveSessionInfo, type HandlerOpts } from "../tools/lib/tribe/handlers.ts"
+import {
+  handleToolCall,
+  TRIBE_COORD_METHODS,
+  type ActiveSessionInfo,
+  type HandlerOpts,
+} from "../tools/lib/tribe/handlers.ts"
 import { sendMessage } from "../tools/lib/tribe/messaging.ts"
 import { TOOLS_LIST } from "../tools/lib/tribe/tools-list.ts"
 
@@ -101,9 +106,7 @@ describe("tribe API minimal surface", () => {
     const f = fixture()
     const ctx = ctxFor(f.db, f.stmts, "alice")
     for (const method of ["tribe.broadcast", "tribe.history", "tribe.inbox", "tribe.ping", "tribe.read"]) {
-      expect(() => handleToolCall(ctx, method, {}, makeOpts())).toThrow(
-        `${method} removed; use send/fetch/filter`,
-      )
+      expect(() => handleToolCall(ctx, method, {}, makeOpts())).toThrow(`${method} removed; use send/fetch/filter`)
     }
     f.cleanup()
   })

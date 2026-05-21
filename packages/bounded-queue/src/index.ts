@@ -47,10 +47,7 @@
  */
 
 /** Drop policy applied when `enqueue` would exceed `maxDepth`. */
-export type DropPolicy =
-  | "drop-oldest"
-  | "drop-newest"
-  | "block-until-drained"
+export type DropPolicy = "drop-oldest" | "drop-newest" | "block-until-drained"
 
 export interface BoundedQueueOptions {
   /** Maximum number of items held before `dropPolicy` fires. Must be ≥ 1. */
@@ -106,11 +103,7 @@ export interface BoundedQueueGauge {
  *   is full. The item is NOT enqueued; the caller decides what to do next
  *   (await some external drain signal, retry, give up).
  */
-export type EnqueueResult =
-  | "accepted"
-  | "dropped-oldest"
-  | "dropped-newest"
-  | "blocked"
+export type EnqueueResult = "accepted" | "dropped-oldest" | "dropped-newest" | "blocked"
 
 export interface BoundedQueue<T> extends BoundedQueueGauge {
   /**
@@ -146,11 +139,7 @@ export function createBoundedQueue<T>(options: BoundedQueueOptions): BoundedQueu
   if (!Number.isInteger(maxDepth) || maxDepth < 1) {
     throw new TypeError(`createBoundedQueue: maxDepth must be a positive integer, got ${String(maxDepth)}`)
   }
-  if (
-    dropPolicy !== "drop-oldest" &&
-    dropPolicy !== "drop-newest" &&
-    dropPolicy !== "block-until-drained"
-  ) {
+  if (dropPolicy !== "drop-oldest" && dropPolicy !== "drop-newest" && dropPolicy !== "block-until-drained") {
     throw new TypeError(
       `createBoundedQueue: dropPolicy must be "drop-oldest" | "drop-newest" | "block-until-drained", got ${String(dropPolicy)}`,
     )
