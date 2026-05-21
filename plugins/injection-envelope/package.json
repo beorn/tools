@@ -26,6 +26,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "loggily": "^0.10.0"
+    "loggily": "^0.8.0"
   }
 }
